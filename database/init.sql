@@ -202,7 +202,7 @@ INSERT INTO departments (name, code) VALUES
 -- Usuario administrador por defecto (password: Admin1234!)
 INSERT INTO users (username, email, password_hash, full_name, role) VALUES
   ('admin', 'admin@empresa.com',
-   '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.', -- Admin1234!
+   '$2b$10$UdZP2jn7Zn.Tl/lJtxiDIe8CqSI/3GDMj33hLUATnCUX/ve4ZpTmy', -- Admin1234!
    'Administrador del Sistema', 'admin');
 
 -- Días festivos México/Guatemala 2026 (agregar según país)
