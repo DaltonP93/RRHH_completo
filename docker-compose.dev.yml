@@ -1,0 +1,40 @@
+# docker-compose.dev.yml
+# Para pruebas locales SIN Docker en todos los servicios.
+# Solo levanta MySQL y Redis (los servicios de infraestructura).
+# El API, Bridge y Web corren directamente en tu máquina.
+#
+# Uso:
+#   docker compose -f docker-compose.dev.yml up -d
+#   cd api && npm install && npm run dev
+#   cd analytics && pip install -r requirements.txt && python main.py
+
+version: '3.9'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: asistencia_db_dev
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: asistencia
+      MYSQL_USER: asistencia_user
+      MYSQL_PASSWORD: asistencia_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_dev_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: asistencia_redis_dev
+    ports:
+      - "6379:6379"
+
+volumes:
+  mysql_dev_data:

@@ -1,0 +1,154 @@
+const { sequelize } = require('../config/database');
+const logger = require('../config/logger');
+
+// GET /api/employees
+async function getAll(req, res) {
+  try {
+    const { dept, status = 'active', search, page = 1, limit = 50 } = req.query;
+    const offset = (page - 1) * limit;
+
+    let where = 'WHERE e.status = ?';
+    const params = [status];
+
+    if (dept) { where += ' AND e.department_id = ?'; params.push(dept); }
+    if (search) {
+      where += ' AND (e.first_name LIKE ? OR e.last_name LIKE ? OR e.code LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    const [employees] = await sequelize.query(`
+      SELECT
+        e.id, e.code, e.employee_number,
+        CONCAT(e.first_name, ' ', e.last_name) AS full_name,
+        e.first_name, e.last_name, e.email, e.phone,
+        e.position, e.hire_date, e.status, e.photo_url,
+        d.name AS department, d.id AS department_id,
+        s.name AS schedule, s.check_in, s.check_out
+      FROM employees e
+      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN schedules   s ON e.schedule_id   = s.id
+      ${where}
+      ORDER BY e.last_name, e.first_name
+      LIMIT ? OFFSET ?
+    `, { replacements: [...params, parseInt(limit), parseInt(offset)] });
+
+    const [[{ total }]] = await sequelize.query(
+      `SELECT COUNT(*) AS total FROM employees e ${where}`,
+      { replacements: params }
+    );
+
+    res.json({ data: employees, total, page: +page, limit: +limit, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    logger.error('Error getAll employees:', err);
+    res.status(500).json({ error: 'Error al obtener empleados' });
+  }
+}
+
+// GET /api/employees/:id
+async function getById(req, res) {
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT
+        e.*, d.name AS department_name, s.name AS schedule_name,
+        s.check_in, s.check_out, s.tolerance_in
+      FROM employees e
+      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN schedules   s ON e.schedule_id   = s.id
+      WHERE e.id = ?
+    `, { replacements: [req.params.id] });
+
+    if (!rows.length) return res.status(404).json({ error: 'Empleado no encontrado' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// POST /api/employees
+async function create(req, res) {
+  const { code, employee_number, first_name, last_name, email, phone,
+          department_id, schedule_id, position, hire_date } = req.body;
+
+  if (!code || !first_name || !last_name) {
+    return res.status(400).json({ error: 'Código, nombre y apellido son requeridos' });
+  }
+
+  try {
+    const [result] = await sequelize.query(`
+      INSERT INTO employees (code, employee_number, first_name, last_name, email,
+        phone, department_id, schedule_id, position, hire_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, { replacements: [code, employee_number, first_name, last_name, email,
+        phone, department_id, schedule_id, position, hire_date] });
+
+    logger.info(`Empleado creado: ${code} - ${first_name} ${last_name}`);
+    res.status(201).json({ id: result.insertId, message: 'Empleado creado correctamente' });
+  } catch (err) {
+    if (err.original?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'El código o email ya existe' });
+    }
+    res.status(500).json({ error: 'Error al crear empleado' });
+  }
+}
+
+// PUT /api/employees/:id
+async function update(req, res) {
+  const { first_name, last_name, email, phone, department_id,
+          schedule_id, position, hire_date, status } = req.body;
+  try {
+    await sequelize.query(`
+      UPDATE employees SET
+        first_name = COALESCE(?, first_name),
+        last_name  = COALESCE(?, last_name),
+        email      = COALESCE(?, email),
+        phone      = COALESCE(?, phone),
+        department_id = COALESCE(?, department_id),
+        schedule_id   = COALESCE(?, schedule_id),
+        position   = COALESCE(?, position),
+        hire_date  = COALESCE(?, hire_date),
+        status     = COALESCE(?, status)
+      WHERE id = ?
+    `, { replacements: [first_name, last_name, email, phone, department_id,
+        schedule_id, position, hire_date, status, req.params.id] });
+
+    res.json({ message: 'Empleado actualizado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al actualizar empleado' });
+  }
+}
+
+// DELETE /api/employees/:id (desactivar)
+async function deactivate(req, res) {
+  try {
+    await sequelize.query(
+      'UPDATE employees SET status = ? WHERE id = ?',
+      { replacements: ['inactive', req.params.id] }
+    );
+    res.json({ message: 'Empleado desactivado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al desactivar empleado' });
+  }
+}
+
+// GET /api/employees/:id/attendance?from=&to=
+async function getAttendanceHistory(req, res) {
+  const { from, to = new Date().toISOString().split('T')[0] } = req.query;
+  const dateFrom = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT
+        ds.date, ds.first_in, ds.last_out, ds.worked_minutes,
+        ds.late_minutes, ds.overtime_minutes, ds.status
+      FROM daily_summary ds
+      WHERE ds.employee_id = ? AND ds.date BETWEEN ? AND ?
+      ORDER BY ds.date DESC
+    `, { replacements: [req.params.id, dateFrom, to] });
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener historial' });
+  }
+}
+
+module.exports = { getAll, getById, create, update, deactivate, getAttendanceHistory };

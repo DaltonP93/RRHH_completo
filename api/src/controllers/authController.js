@@ -1,0 +1,132 @@
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const { sequelize } = require('../config/database');
+const logger = require('../config/logger');
+
+const SALT_ROUNDS = 10;
+
+function generateTokens(user) {
+  const payload = { id: user.id, username: user.username, role: user.role, email: user.email };
+
+  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
+  const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
+
+  return { accessToken, refreshToken };
+}
+
+// POST /api/auth/login
+async function login(req, res) {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
+  }
+
+  try {
+    const [users] = await sequelize.query(
+      'SELECT id, username, email, password_hash, full_name, role, active FROM users WHERE (username = ? OR email = ?) LIMIT 1',
+      { replacements: [username, username] }
+    );
+
+    const user = users[0];
+    if (!user || !user.active) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    const { accessToken, refreshToken } = generateTokens(user);
+
+    // Guardar refresh token hasheado
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await sequelize.query(
+      'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+      { replacements: [user.id, tokenHash, expiresAt] }
+    );
+
+    // Actualizar último login
+    await sequelize.query('UPDATE users SET last_login = NOW() WHERE id = ?', { replacements: [user.id] });
+
+    logger.info(`Login: ${user.username} (${user.role})`);
+
+    res.json({
+      accessToken,
+      refreshToken,
+      user: { id: user.id, username: user.username, fullName: user.full_name, role: user.role, email: user.email }
+    });
+  } catch (err) {
+    logger.error('Error en login:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+// POST /api/auth/refresh
+async function refresh(req, res) {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(400).json({ error: 'Refresh token requerido' });
+
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+
+    const [rows] = await sequelize.query(
+      'SELECT id FROM refresh_tokens WHERE token_hash = ? AND expires_at > NOW() AND user_id = ?',
+      { replacements: [tokenHash, decoded.id] }
+    );
+
+    if (!rows.length) return res.status(401).json({ error: 'Refresh token inválido o expirado' });
+
+    const [users] = await sequelize.query(
+      'SELECT id, username, email, full_name, role FROM users WHERE id = ? AND active = 1',
+      { replacements: [decoded.id] }
+    );
+
+    if (!users.length) return res.status(401).json({ error: 'Usuario no encontrado' });
+
+    const { accessToken, refreshToken: newRefreshToken } = generateTokens(users[0]);
+
+    // Rotar refresh token
+    await sequelize.query('DELETE FROM refresh_tokens WHERE token_hash = ?', { replacements: [tokenHash] });
+    const newHash = crypto.createHash('sha256').update(newRefreshToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await sequelize.query(
+      'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+      { replacements: [users[0].id, newHash, expiresAt] }
+    );
+
+    res.json({ accessToken, refreshToken: newRefreshToken });
+  } catch {
+    res.status(401).json({ error: 'Token inválido' });
+  }
+}
+
+// POST /api/auth/logout
+async function logout(req, res) {
+  const { refreshToken } = req.body;
+  if (refreshToken) {
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    await sequelize.query('DELETE FROM refresh_tokens WHERE token_hash = ?', { replacements: [tokenHash] });
+  }
+  res.json({ message: 'Sesión cerrada' });
+}
+
+// GET /api/auth/me
+async function me(req, res) {
+  try {
+    const [users] = await sequelize.query(
+      'SELECT id, username, email, full_name, role, last_login FROM users WHERE id = ?',
+      { replacements: [req.user.id] }
+    );
+    if (!users.length) return res.status(404).json({ error: 'Usuario no encontrado' });
+    res.json(users[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
+module.exports = { login, refresh, logout, me };

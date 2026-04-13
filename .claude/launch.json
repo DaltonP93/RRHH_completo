@@ -1,0 +1,34 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "API (Express)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "api",
+      "port": 4000
+    },
+    {
+      "name": "Web (Next.js)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "web",
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "Analytics (FastAPI)",
+      "runtimeExecutable": "C:/Users/Dell/AppData/Local/Programs/Python/Python312/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5000"],
+      "cwd": "analytics",
+      "port": 5000
+    },
+    {
+      "name": "Bridge (ZKTeco)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["src/index.js"],
+      "cwd": "bridge",
+      "port": 8080
+    }
+  ]
+}

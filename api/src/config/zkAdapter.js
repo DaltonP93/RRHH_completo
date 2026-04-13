@@ -1,0 +1,300 @@
+/**
+ * zkAdapter.js
+ * Adaptador para la base de datos att2000 del
+ * ZKTeco Fingerprint Attendance System V2011
+ *
+ * SCHEMA REAL att2000 (SQL Server):
+ * ┌─────────────────┬─────────────────────────────────────────┐
+ * │ Tabla           │ Descripción                             │
+ * ├─────────────────┼─────────────────────────────────────────┤
+ * │ CHECKINOUT      │ Marcajes: USERID, CHECKTIME, CHECKTYPE  │
+ * │ USERINFO        │ Empleados: USERID, Badgenumber, Name    │
+ * │ DEPARTMENTS     │ Deptos: DEPTID, DeptName                │
+ * │ SHIFT           │ Horarios: SHIFTID, ShiftName, CheckIn1  │
+ * │ Machines        │ Relojes: MachineID, IPAddress           │
+ * │ HOLIDAYS        │ Días festivos                           │
+ * └─────────────────┴─────────────────────────────────────────┘
+ */
+
+const { queryAtt2000 } = require('./att2000');
+const { sequelize }    = require('./database');
+const logger           = require('./logger');
+
+// ─── CHECKINOUT ──────────────────────────────────────────────────
+// Columnas reales:
+//   USERID      int          → código del empleado en el reloj
+//   CHECKTIME   datetime     → fecha y hora del marcaje
+//   CHECKTYPE   varchar(1)   → 'I'=entrada, 'O'=salida (o null)
+//   VERIFYCODE  int          → 0=huella, 1=pin, 4=tarjeta, 15=cara
+//   SENSORID    int          → ID del reloj
+//   WorkCode    varchar(10)
+
+async function fetchCheckInOut({ dateFrom, dateTo, limit = 5000 } = {}) {
+  let where = '1=1';
+  if (dateFrom) where += ` AND CHECKTIME >= '${dateFrom}'`;
+  if (dateTo)   where += ` AND CHECKTIME <= '${dateTo}'`;
+
+  const rows = await queryAtt2000(`
+    SELECT TOP ${limit}
+      c.USERID,
+      c.CHECKTIME,
+      c.CHECKTYPE,
+      c.VERIFYCODE,
+      c.SENSORID,
+      c.WorkCode,
+      u.Badgenumber,
+      u.Name        AS EmployeeName,
+      u.DefaultDeptID
+    FROM CHECKINOUT c
+    LEFT JOIN USERINFO u ON c.USERID = u.USERID
+    WHERE ${where}
+    ORDER BY c.CHECKTIME DESC
+  `);
+  return rows;
+}
+
+// ─── USERINFO ─────────────────────────────────────────────────────
+// Columnas reales:
+//   USERID          int
+//   Badgenumber     varchar(24)  → número de empleado
+//   Name            varchar(24)  → nombre completo
+//   DefaultDeptID   int
+//   HireDay         varchar(10)
+//   CardNo          varchar(20)
+//   VerifyMode      int
+
+async function fetchUserInfo() {
+  return queryAtt2000(`
+    SELECT
+      u.USERID,
+      u.Badgenumber,
+      u.Name,
+      u.DefaultDeptID,
+      u.HireDay,
+      u.CardNo,
+      d.DeptName
+    FROM USERINFO u
+    LEFT JOIN DEPARTMENTS d ON u.DefaultDeptID = d.DEPTID
+    ORDER BY u.USERID
+  `);
+}
+
+// ─── DEPARTMENTS ─────────────────────────────────────────────────
+async function fetchDepartments() {
+  return queryAtt2000(`
+    SELECT DEPTID, DeptName, ParentDeptID, DeptCode
+    FROM DEPARTMENTS
+    ORDER BY DeptName
+  `);
+}
+
+// ─── SHIFT (Horarios) ─────────────────────────────────────────────
+// Columnas típicas:
+//   SHIFTID, ShiftName, CheckIn1, CheckOut1, Late, EarlyLeave
+async function fetchShifts() {
+  return queryAtt2000(`
+    SELECT
+      SHIFTID, ShiftName,
+      CheckIn1, CheckOut1,
+      CheckIn2, CheckOut2,
+      Late, EarlyLeave, OT
+    FROM SHIFT
+    ORDER BY ShiftName
+  `);
+}
+
+// ─── Machines (Relojes) ───────────────────────────────────────────
+async function fetchMachines() {
+  return queryAtt2000(`
+    SELECT MachineID, MachineAlias, IPAddress, Port, Status
+    FROM Machines
+  `);
+}
+
+// ─── HOLIDAYS ────────────────────────────────────────────────────
+async function fetchHolidays() {
+  return queryAtt2000(`
+    SELECT HolidayID, HolidayName, HolidayDate
+    FROM HOLIDAYS
+    ORDER BY HolidayDate
+  `).catch(() => []); // no falla si no existe
+}
+
+// =================================================================
+// SINCRONIZACIÓN: att2000 → nuevo sistema MySQL
+// =================================================================
+
+// Importar departamentos
+async function syncDepartments() {
+  const depts = await fetchDepartments();
+  let synced = 0;
+  for (const d of depts) {
+    await sequelize.query(`
+      INSERT INTO departments (id, name, code)
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE name = VALUES(name), code = VALUES(code)
+    `, { replacements: [d.DEPTID, d.DeptName, d.DeptCode || null] });
+    synced++;
+  }
+  logger.info(`Sync departamentos: ${synced}`);
+  return { synced };
+}
+
+// Importar empleados (USERINFO → employees)
+async function syncEmployees() {
+  const users = await fetchUserInfo();
+  let synced = 0, errors = 0;
+
+  for (const u of users) {
+    // Name en att2000 es nombre completo; separamos en first/last
+    const parts = (u.Name || '').trim().split(' ');
+    const firstName = parts[0] || '';
+    const lastName  = parts.slice(1).join(' ') || '';
+
+    try {
+      await sequelize.query(`
+        INSERT INTO employees (code, employee_number, first_name, last_name, department_id, hire_date)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          first_name    = VALUES(first_name),
+          last_name     = VALUES(last_name),
+          employee_number = VALUES(employee_number),
+          department_id = VALUES(department_id)
+      `, { replacements: [
+        String(u.USERID),           // code = USERID del reloj
+        u.Badgenumber || null,       // número de empleado
+        firstName,
+        lastName,
+        u.DefaultDeptID || null,
+        u.HireDay ? new Date(u.HireDay) : null,
+      ]});
+      synced++;
+    } catch (err) {
+      logger.error(`Error sync empleado ${u.USERID}:`, err.message);
+      errors++;
+    }
+  }
+  logger.info(`Sync empleados: ${synced} OK, ${errors} errores`);
+  return { synced, errors, total: users.length };
+}
+
+// Importar marcajes históricos (CHECKINOUT → attendance_logs)
+async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
+  const records = await fetchCheckInOut({ dateFrom, dateTo, limit });
+  let imported = 0, skipped = 0, notFound = 0;
+
+  for (const r of records) {
+    try {
+      // Buscar empleado en el nuevo sistema por código USERID
+      const [[emp]] = await sequelize.query(
+        'SELECT id FROM employees WHERE code = ?',
+        { replacements: [String(r.USERID)] }
+      );
+
+      if (!emp) { notFound++; continue; }
+
+      // Mapear CHECKTYPE: 'I'=entrada, 'O'=salida, null=detectar por orden
+      let type = 'unknown';
+      if (r.CHECKTYPE === 'I' || r.CHECKTYPE === 'i') type = 'in';
+      else if (r.CHECKTYPE === 'O' || r.CHECKTYPE === 'o') type = 'out';
+
+      // Buscar dispositivo por SENSORID
+      const [[device]] = await sequelize.query(
+        'SELECT id FROM devices WHERE id = ?',
+        { replacements: [r.SENSORID || 0] }
+      ).catch(() => [[]]);
+
+      const [result] = await sequelize.query(`
+        INSERT IGNORE INTO attendance_logs
+          (employee_id, device_id, timestamp, type, source, raw_data)
+        VALUES (?, ?, ?, ?, 'device', ?)
+      `, { replacements: [
+        emp.id,
+        device?.id || null,
+        new Date(r.CHECKTIME),
+        type,
+        JSON.stringify({
+          userid: r.USERID,
+          checktype: r.CHECKTYPE,
+          verifycode: r.VERIFYCODE,
+          sensorid: r.SENSORID
+        })
+      ]});
+
+      if (result.affectedRows > 0) imported++;
+      else skipped++;
+
+    } catch (err) {
+      logger.error(`Error importando marcaje ${r.USERID} ${r.CHECKTIME}:`, err.message);
+      skipped++;
+    }
+  }
+
+  logger.info(`Sync asistencia: ${imported} importados, ${skipped} duplicados, ${notFound} sin empleado`);
+  return { imported, skipped, notFound, total: records.length };
+}
+
+// Importar relojes desde Machines
+async function syncMachines() {
+  const machines = await fetchMachines();
+  let synced = 0;
+  for (const m of machines) {
+    await sequelize.query(`
+      INSERT INTO devices (id, name, ip_address, port)
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE name = VALUES(name), ip_address = VALUES(ip_address)
+    `, { replacements: [
+      m.MachineID,
+      m.MachineAlias || `Reloj ${m.MachineID}`,
+      m.IPAddress || '',
+      m.Port || 4370,
+    ]});
+    synced++;
+  }
+  logger.info(`Sync relojes: ${synced}`);
+  return { synced };
+}
+
+// Importar días festivos
+async function syncHolidays() {
+  const holidays = await fetchHolidays();
+  let synced = 0;
+  for (const h of holidays) {
+    await sequelize.query(`
+      INSERT IGNORE INTO holidays (name, date, type)
+      VALUES (?, ?, 'company')
+    `, { replacements: [h.HolidayName, new Date(h.HolidayDate)] });
+    synced++;
+  }
+  logger.info(`Sync festivos: ${synced}`);
+  return { synced };
+}
+
+// Sincronización completa (en orden correcto)
+async function fullSync({ dateFrom, dateTo } = {}) {
+  logger.info('🔄 Iniciando sincronización completa att2000 → nuevo sistema...');
+  const result = {
+    departments: await syncDepartments(),
+    machines:    await syncMachines(),
+    employees:   await syncEmployees(),
+    holidays:    await syncHolidays(),
+    attendance:  await syncAttendance({ dateFrom, dateTo, limit: 50000 }),
+  };
+  logger.info('✅ Sincronización completa terminada');
+  return result;
+}
+
+module.exports = {
+  fetchCheckInOut,
+  fetchUserInfo,
+  fetchDepartments,
+  fetchShifts,
+  fetchMachines,
+  fetchHolidays,
+  syncDepartments,
+  syncEmployees,
+  syncAttendance,
+  syncMachines,
+  syncHolidays,
+  fullSync,
+};
