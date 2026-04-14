@@ -561,11 +561,28 @@ function RelojesTab() {
                                     ].map(([label, val]) => (
                                       <div key={String(label)} className="px-4 py-3 text-center">
                                         <p className="text-slate-500 mb-1">{label}</p>
-                                        <p className="text-base font-bold text-slate-800">{val !== undefined ? Number(val).toLocaleString() : '—'}</p>
+                                        <p className="text-base font-bold text-slate-800">{val !== undefined && Number(val) > 0 ? Number(val).toLocaleString() : '—'}</p>
                                       </div>
                                     ))}
                                   </div>
                                 </div>
+
+                                {/* Debug: buffer raw (quitar cuando se confirmen los offsets) */}
+                                {inf._rawOffsets && (
+                                  <details className="border border-slate-100 rounded-xl overflow-hidden">
+                                    <summary className="bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-500 cursor-pointer">
+                                      🔍 Buffer raw (debug — click para expandir)
+                                    </summary>
+                                    <div className="grid grid-cols-4 gap-1 p-3 font-mono text-xs max-h-48 overflow-y-auto bg-slate-50">
+                                      {(inf._rawOffsets as [number,number][]).filter(([,v]) => v > 0).map(([offset, val]) => (
+                                        <div key={offset} className="flex gap-1">
+                                          <span className="text-slate-400 w-7">[{offset}]</span>
+                                          <span className="text-slate-700 font-medium">{val.toLocaleString()}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </details>
+                                )}
                               </div>
                             )
                           })()}

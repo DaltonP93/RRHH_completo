@@ -22,6 +22,14 @@ function pingDevice(ip, port, timeout = 3000) {
   });
 }
 
+// Serializar cualquier tipo de error como string legible
+function fmtErr(err) {
+  if (!err) return 'Error desconocido';
+  if (err.message) return err.message;
+  if (typeof err === 'string') return err;
+  try { return JSON.stringify(err); } catch { return String(err); }
+}
+
 // Helper: conectar ZKLib, ejecutar fn, desconectar
 // inPort=0 → OS asigna puerto UDP libre (evita conflicto)
 async function withZK(device, fn) {
@@ -43,7 +51,7 @@ router.get('/', authorize('admin','gestor','hr'), async (req, res) => {
   try {
     const [rows] = await sequelize.query('SELECT * FROM devices ORDER BY name');
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fmtErr(err) }); }
 });
 
 // GET /api/devices/ping-all
@@ -73,7 +81,7 @@ router.get('/ping-all', authorize('admin','gestor','hr'), async (req, res) => {
       return { ...d, status, latency };
     }));
     res.json(results);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fmtErr(err) }); }
 });
 
 // POST /api/devices
@@ -86,7 +94,7 @@ router.post('/', authorize('admin','gestor'), async (req, res) => {
       { replacements: [name, ip_address, port, location || null, serial_no || null] }
     );
     res.status(201).json({ id: result.insertId, message: 'Reloj agregado' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fmtErr(err) }); }
 });
 
 // PUT /api/devices/:id
@@ -102,7 +110,7 @@ router.put('/:id', authorize('admin','gestor'), async (req, res) => {
       { replacements: [name, ip_address, port, location, serial_no, req.params.id] }
     );
     res.json({ message: 'Reloj actualizado' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fmtErr(err) }); }
 });
 
 // DELETE /api/devices/:id
@@ -110,7 +118,7 @@ router.delete('/:id', authorize('admin'), async (req, res) => {
   try {
     await sequelize.query('DELETE FROM devices WHERE id=?', { replacements: [req.params.id] });
     res.json({ message: 'Reloj eliminado' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fmtErr(err) }); }
 });
 
 // GET /api/devices/:id/info — info completa del reloj vía ZKLib
@@ -125,51 +133,71 @@ router.get('/:id/info', authorize('admin','gestor','hr'), async (req, res) => {
       // ── 1. Campos básicos via getInfo() ──────────────────────
       try {
         const basic = await zk.getInfo();
-        Object.assign(info, basic);
+        Object.assign(info, basic); // userCounts, logCounts, logCapacity
       } catch {}
 
       // ── 2. Parsear más campos del buffer CMD_GET_FREE_SIZES ───
-      // executeCmd está disponible en instancias JS aunque no documentado
+      // Offsets corregidos empíricamente con Gerencia (3000T-C, FW 6.60):
+      //   Confirmados: 24=userCounts, 40=logCounts, 72=logCapacity
+      //   Empíricos:   32=fpCount, 44=superLogCount, 52=faceCount, 56=adminCount
+      //   Capacidades: probamos antes de los conteos (8, 12, 16)
       try {
-        const buf = await zk.executeCmd(50, ''); // 50 = CMD_GET_FREE_SIZES
+        const buf = await zk.executeCmd(50, ''); // CMD_GET_FREE_SIZES = 50
         const safe = (offset) => {
           try { return buf.length > offset + 3 ? buf.readUIntLE(offset, 4) : undefined; } catch { return undefined; }
         };
-        // Offsets confirmados: 24=userCounts, 40=logCounts, 72=logCapacity
-        // Adicionales según protocolo ZKTeco:
-        const fpCount      = safe(28);
-        const pwdCount     = safe(32);
-        const superLogCount= safe(44);
-        const adminCount   = safe(48);
-        const faceCount    = safe(52);
-        const userCapacity = safe(56);
-        const fpCapacity   = safe(64);
 
-        if (fpCount      !== undefined) info.fpCount      = fpCount;
-        if (pwdCount     !== undefined) info.pwdCount     = pwdCount;
-        if (superLogCount!== undefined) info.superLogCount= superLogCount;
-        if (adminCount   !== undefined) info.adminCount   = adminCount;
-        if (faceCount    !== undefined) info.faceCount    = faceCount;
-        if (userCapacity !== undefined) info.userCapacity = userCapacity;
-        if (fpCapacity   !== undefined) info.fpCapacity   = fpCapacity;
+        const assign = (key, val) => { if (val !== undefined) info[key] = val; };
+
+        // Conteos (offsets corregidos)
+        assign('fpCount',       safe(32)); // ✓ empírico
+        assign('superLogCount', safe(44)); // ✓
+        assign('faceCount',     safe(52)); // ✓
+        assign('adminCount',    safe(56)); // ✓ empírico
+
+        // Capacidades: probamos offsets 8, 12, 16 (antes de conteos)
+        // y también 76, 80, 84 (después de logCapacity)
+        const uc1 = safe(8),  uc2 = safe(76);
+        const fc1 = safe(12), fc2 = safe(80);
+        const lc1 = safe(16), lc2 = safe(84);
+        assign('userCapacity', uc1 > 100 ? uc1 : (uc2 > 100 ? uc2 : uc1));
+        assign('fpCapacity',   fc1 > 100 ? fc1 : (fc2 > 100 ? fc2 : fc1));
+        assign('faceCapacity', lc1 > 0   ? lc1 : lc2);
+
+        // Dump de todos los valores del buffer (ayuda a encontrar offsets desconocidos)
+        const _buf = [];
+        for (let i = 0; i + 3 < Math.min(buf.length, 128); i += 4) {
+          _buf.push([i, buf.readUIntLE(i, 4)]);
+        }
+        info._rawOffsets = _buf; // solo para debug, quitar una vez confirmados
       } catch {}
 
       // ── 3. Metadata via CMD_OPTIONS_RRQ (11) ─────────────────
+      // ZKTeco devuelve "clave=valor\0", extraer solo el valor.
+      // Prefijo ~ requerido para opciones de sistema en esta familia de firmware.
+      const parseOptVal = (buf) => {
+        const raw = buf.slice(8).toString('ascii').replace(/\0/g, '').trim();
+        return raw.includes('=') ? raw.substring(raw.indexOf('=') + 1).trim() : raw;
+      };
+
+      // Intentar primero con ~ (opciones de sistema), luego sin ~
       const metaKeys = [
-        ['ProductName',      'productName'],
-        ['FirmVer',          'firmwareVersion'],
-        ['SerialNumber',     'serialNumber'],
-        ['Platform',         'platform'],
-        ['~ZKFPVersion',     'fpVersion'],
-        ['ManufactureTime',  'manufactureTime'],
+        [['~ProductName',  'ProductName'],  'productName'],
+        [['~FirmVer',      'FirmVer'],      'firmwareVersion'],
+        [['~SerialNumber', 'SerialNumber'], 'serialNumber'],
+        [['~Platform',     'Platform'],     'platform'],
+        [['~ZKFPVersion'],                  'fpVersion'],
+        [['~Produce_Time', 'ManufactureTime'], 'manufactureTime'],
       ];
-      for (const [key, field] of metaKeys) {
-        try {
-          const buf = await zk.executeCmd(11, key); // 11 = CMD_OPTIONS_RRQ
-          // Respuesta: 8 bytes header + string valor
-          const val = buf.slice(8).toString('ascii').replace(/\0/g, '').trim();
-          if (val) info[field] = val;
-        } catch {}
+      for (const [keys, field] of metaKeys) {
+        for (const key of keys) {
+          if (info[field]) break;
+          try {
+            const buf = await zk.executeCmd(11, key);
+            const val = parseOptVal(buf);
+            if (val) { info[field] = val; break; }
+          } catch {}
+        }
       }
 
       return info;
@@ -177,7 +205,7 @@ router.get('/:id/info', authorize('admin','gestor','hr'), async (req, res) => {
 
     res.json({ ok: true, device: device.name, ip: device.ip_address, ...result });
   } catch (err) {
-    res.status(500).json({ ok: false, error: String(err.message || err) });
+    res.status(500).json({ ok: false, error: fmtErr(err) });
   }
 });
 
@@ -192,7 +220,7 @@ router.get('/:id/users', authorize('admin','gestor'), async (req, res) => {
     });
     res.json({ device: device.name, users, total: users.length });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: fmtErr(err) });
   }
 });
 
@@ -229,7 +257,7 @@ router.post('/:id/backup', authorize('admin','gestor'), async (req, res) => {
     await sequelize.query('UPDATE devices SET last_sync=NOW() WHERE id=?', { replacements: [device.id] });
     res.json({ ok: true, total: logs.length, imported, skipped });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: fmtErr(err) });
   }
 });
 
@@ -241,7 +269,7 @@ router.post('/:id/clear', authorize('admin'), async (req, res) => {
     await withZK(device, zk => zk.clearAttendanceLog());
     res.json({ ok: true, message: `Registros eliminados del reloj ${device.name}` });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: fmtErr(err) });
   }
 });
 
@@ -253,7 +281,7 @@ router.post('/:id/disable', authorize('admin','gestor'), async (req, res) => {
     await withZK(device, zk => zk.disableDevice());
     res.json({ ok: true, message: `Reloj ${device.name} deshabilitado` });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: fmtErr(err) });
   }
 });
 
@@ -265,7 +293,7 @@ router.post('/:id/enable', authorize('admin','gestor'), async (req, res) => {
     await withZK(device, zk => zk.enableDevice());
     res.json({ ok: true, message: `Reloj ${device.name} habilitado` });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: fmtErr(err) });
   }
 });
 
