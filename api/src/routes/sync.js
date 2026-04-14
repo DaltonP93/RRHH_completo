@@ -49,9 +49,27 @@ router.post('/test-conn', async (req, res) => {
   };
   try {
     const pool = await sql.connect(cfg);
-    const r = await pool.request().query('SELECT COUNT(*) AS total FROM CHECKINOUT');
+
+    const [rCheckin, rUsers, rMachines, rRecent] = await Promise.all([
+      pool.request().query('SELECT COUNT(*) AS total FROM CHECKINOUT'),
+      pool.request().query('SELECT COUNT(*) AS total FROM USERINFO').catch(() => ({ recordset: [{ total: 0 }] })),
+      pool.request().query('SELECT MACHINE_ALIAS, IP_ADDRESS FROM MACHINES').catch(() => ({ recordset: [] })),
+      pool.request().query(`
+        SELECT TOP 8 c.USERID, ui.Name AS nombre, c.CHECKTIME, c.CHECKTYPE
+        FROM CHECKINOUT c
+        LEFT JOIN USERINFO ui ON ui.USERID = c.USERID
+        ORDER BY c.CHECKTIME DESC
+      `).catch(() => ({ recordset: [] })),
+    ]);
+
     await pool.close();
-    res.json({ ok: true, totalRecords: r.recordset[0].total });
+    res.json({
+      ok: true,
+      totalRecords:   rCheckin.recordset[0].total,
+      totalEmployees: rUsers.recordset[0].total,
+      machines:       rMachines.recordset,
+      recentRecords:  rRecent.recordset,
+    });
   } catch (err) {
     res.status(503).json({ ok: false, error: err.message });
   }
