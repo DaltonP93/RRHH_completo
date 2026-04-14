@@ -1,8 +1,47 @@
-const router = require('express').Router();
+const router  = require('express').Router();
+const net     = require('net');
 const { authenticate, authorize } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 
 router.use(authenticate, authorize('admin','hr'));
+
+// ─── Ping TCP a un reloj ──────────────────────────────────────
+function pingDevice(ip, port, timeout = 3000) {
+  return new Promise(resolve => {
+    const start  = Date.now();
+    const socket = new net.Socket();
+    socket.setTimeout(timeout);
+    socket.on('connect', () => {
+      const latency = Date.now() - start;
+      socket.destroy();
+      resolve({ status: 'online', latency });
+    });
+    socket.on('timeout', () => { socket.destroy(); resolve({ status: 'offline', latency: null }); });
+    socket.on('error',   () => { socket.destroy(); resolve({ status: 'offline', latency: null }); });
+    socket.connect(port, ip);
+  });
+}
+
+// GET /api/devices/ping-all — Verificar conectividad TCP de todos los relojes
+router.get('/ping-all', async (req, res) => {
+  const DEVICES = [
+    { id: 101, name: 'Reloj Comedor',  ip_address: '172.16.20.160', port: 4370 },
+    { id: 103, name: 'Reloj Lavadero', ip_address: '172.16.20.161', port: 4370 },
+    { id: 1,   name: 'Reloj Gerencia', ip_address: '172.16.20.162', port: 4370 },
+  ];
+  const results = await Promise.all(
+    DEVICES.map(async d => {
+      const { status, latency } = await pingDevice(d.ip_address, d.port);
+      // Actualizar estado en BD si existe el registro
+      await sequelize.query(
+        'UPDATE devices SET status=?, last_sync=NOW() WHERE id=? OR ip_address=?',
+        { replacements: [status, d.id, d.ip_address] }
+      ).catch(() => {});
+      return { ...d, status, latency };
+    })
+  );
+  res.json(results);
+});
 
 // GET /api/devices
 router.get('/', async (req, res) => {

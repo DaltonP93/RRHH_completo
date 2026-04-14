@@ -1,10 +1,10 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Wifi, WifiOff, RefreshCw, Plus, Trash2, Globe,
   Zap, CheckCircle, XCircle, AlertCircle, Database,
-  Server, Eye, EyeOff
+  Server, Eye, EyeOff, Save, Activity
 } from 'lucide-react'
 import { api } from '@/lib/api'
 
@@ -12,6 +12,21 @@ import { api } from '@/lib/api'
 interface Device   { id: number; name: string; ip_address: string; port: number; status: string; last_sync: string }
 interface Webhook  { id: number; name: string; url: string; events: string[]; active: number; last_called: string; last_status: number }
 interface DbConn   { host: string; port: string; database: string; user: string; password: string; label: string }
+
+const CONN_KEY = 'sishoras_db_conn'
+
+function loadConn(): DbConn {
+  if (typeof window === 'undefined') return defaultConn()
+  try {
+    const saved = localStorage.getItem(CONN_KEY)
+    if (saved) return JSON.parse(saved)
+  } catch {}
+  return defaultConn()
+}
+
+function defaultConn(): DbConn {
+  return { host: '10.81.28.8', port: '1433', database: 'att2000', user: 'sa', password: '', label: 'ZKTeco Attendance Management' }
+}
 
 // ─── Componente principal ─────────────────────────────────────
 export default function ConfiguracionPage() {
@@ -53,76 +68,92 @@ export default function ConfiguracionPage() {
 }
 
 // ─── Tab: Relojes ZKTeco ─────────────────────────────────────
+const STATIC_DEVICES = [
+  { id: 101, name: 'Reloj Comedor',  ip_address: '172.16.20.160', port: 4370 },
+  { id: 103, name: 'Reloj Lavadero', ip_address: '172.16.20.161', port: 4370 },
+  { id: 1,   name: 'Reloj Gerencia', ip_address: '172.16.20.162', port: 4370 },
+]
+
 function RelojesTab() {
-  // Carga devices solo cuando el usuario hace clic en Actualizar
-  const [devices, setDevices] = useState<Device[]>([])
-  const [loading, setLoading] = useState(false)
+  const [statuses, setStatuses] = useState<Record<number,string>>({})
+  const [pinging, setPinging]   = useState(false)
+  const [lastCheck, setLastCheck] = useState<string>('')
 
-  const defaultDevices: Device[] = [
-    { id: 101, name: 'Reloj Comedor',  ip_address: '172.16.20.160', port: 4370, status: 'unknown', last_sync: '' },
-    { id: 103, name: 'Reloj Lavadero', ip_address: '172.16.20.161', port: 4370, status: 'unknown', last_sync: '' },
-    { id: 1,   name: 'Reloj Gerencia', ip_address: '172.16.20.162', port: 4370, status: 'unknown', last_sync: '' },
-  ]
-
-  async function refresh() {
-    setLoading(true)
+  async function pingAll() {
+    setPinging(true)
+    setStatuses({})
     try {
-      const r = await api.get('/api/devices')
-      setDevices(r.data)
-    } catch { /* usa defaults */ }
-    setLoading(false)
+      const r = await api.get('/api/devices/ping-all')
+      // r.data = [{ id, status: 'online'|'offline', latency }]
+      const map: Record<number,string> = {}
+      for (const d of r.data) map[d.id] = d.status
+      setStatuses(map)
+    } catch {
+      // Si falla el endpoint, marcar todos offline
+      const map: Record<number,string> = {}
+      STATIC_DEVICES.forEach(d => { map[d.id] = 'offline' })
+      setStatuses(map)
+    }
+    setLastCheck(new Date().toLocaleTimeString())
+    setPinging(false)
   }
-
-  const list = devices.length ? devices : defaultDevices
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-semibold text-slate-800">Relojes Biométricos ZKTeco</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Conexión directa a los relojes — sin depender del ZK Attendance Management</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Conexión directa vía ZKLib (puerto 4370)
+            {lastCheck && <span className="ml-2 text-slate-400">— verificado a las {lastCheck}</span>}
+          </p>
         </div>
-        <button onClick={refresh} disabled={loading}
-          className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          Actualizar estado
+        <button onClick={pingAll} disabled={pinging}
+          className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition-colors">
+          <Activity size={14} className={pinging ? 'animate-pulse text-blue-500' : ''} />
+          {pinging ? 'Verificando...' : 'Verificar estado'}
         </button>
       </div>
 
       <div className="grid gap-3">
-        {list.map((d: Device) => (
-          <div key={d.id} className="flex items-center gap-4 p-4 rounded-xl border border-slate-100 bg-slate-50">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-              d.status === 'online'  ? 'bg-green-50 text-green-600' :
-              d.status === 'offline' ? 'bg-red-50 text-red-600' :
+        {STATIC_DEVICES.map(d => {
+          const status = statuses[d.id] || 'unknown'
+          return (
+            <div key={d.id} className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${
+              status === 'online'  ? 'border-green-100 bg-green-50' :
+              status === 'offline' ? 'border-red-100 bg-red-50' :
+                                    'border-slate-100 bg-slate-50'
+            }`}>
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                status === 'online'  ? 'bg-green-100 text-green-600' :
+                status === 'offline' ? 'bg-red-100 text-red-500' :
                                       'bg-slate-100 text-slate-400'
-            }`}>
-              {d.status === 'online' ? <Wifi size={20} /> : <WifiOff size={20} />}
-            </div>
-            <div className="flex-1">
-              <p className="font-semibold text-slate-800">{d.name}</p>
-              <p className="text-sm text-slate-500 font-mono">{d.ip_address}:{d.port}</p>
-              {d.last_sync && (
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Último sync: {new Date(d.last_sync).toLocaleString()}
-                </p>
-              )}
-            </div>
-            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-              d.status === 'online'  ? 'bg-green-100 text-green-700' :
-              d.status === 'offline' ? 'bg-red-100 text-red-700' :
+              }`}>
+                {status === 'online' ? <Wifi size={20} /> : <WifiOff size={20} />}
+              </div>
+              <div className="flex-1">
+                <p className="font-semibold text-slate-800">{d.name}</p>
+                <p className="text-sm font-mono text-slate-500">{d.ip_address}:{d.port}</p>
+                <p className="text-xs text-slate-400 mt-0.5">SensorID: {d.id}</p>
+              </div>
+              <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
+                status === 'online'  ? 'bg-green-100 text-green-700' :
+                status === 'offline' ? 'bg-red-100 text-red-600' :
                                       'bg-slate-100 text-slate-500'
-            }`}>
-              {d.status === 'online' ? '● En línea' :
-               d.status === 'offline' ? '● Sin conexión' : '● Sin estado'}
-            </span>
-          </div>
-        ))}
+              }`}>
+                {pinging ? '● Verificando...' :
+                 status === 'online'  ? '● En línea' :
+                 status === 'offline' ? '● Sin conexión' : '● Sin estado'}
+              </span>
+            </div>
+          )
+        })}
       </div>
 
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-700">
-        <p className="font-medium mb-1">¿Cómo funciona la conexión directa?</p>
-        <p>El Bridge Service se conecta a cada reloj vía ZKLib (puerto 4370) y recibe marcajes en tiempo real.</p>
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-700 space-y-1">
+        <p className="font-medium">Red requerida</p>
+        <p>El servidor debe tener acceso a la red <strong>172.16.20.x</strong> en el puerto 4370 para conectar con los relojes.</p>
+        <p>Si los relojes están en otra red (NAT/VPN), verifica la conectividad de red del servidor.</p>
       </div>
     </div>
   )
@@ -130,29 +161,30 @@ function RelojesTab() {
 
 // ─── Tab: Sincronización con BD externa ───────────────────────
 function SyncTab() {
-  const [log, setLog]         = useState<string[]>([])
-  const [testing, setTesting] = useState(false)
-  const [syncing, setSyncing] = useState(false)
+  const [log, setLog]           = useState<string[]>([])
+  const [testing, setTesting]   = useState(false)
+  const [syncing, setSyncing]   = useState(false)
   const [showPass, setShowPass] = useState(false)
+  const [saved, setSaved]       = useState(false)
 
-  const today     = new Date().toISOString().split('T')[0]
-  const firstDay  = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
+  const today    = new Date().toISOString().split('T')[0]
+  const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
   const [dateFrom, setDateFrom] = useState(firstDay)
   const [dateTo,   setDateTo]   = useState(today)
 
-  // Conexión configurable — valores de att2000 por defecto
-  const [conn, setConn] = useState<DbConn>({
-    host:     '10.81.28.8',
-    port:     '1433',
-    database: 'att2000',
-    user:     'sa',
-    password: '',
-    label:    'ZKTeco Attendance Management'
-  })
+  // Cargar conexión guardada en localStorage
+  const [conn, setConn] = useState<DbConn>(defaultConn)
+  useEffect(() => { setConn(loadConn()) }, [])
 
-  const addLog = (msg: string) => setLog(prev => [new Date().toLocaleTimeString() + ' — ' + msg, ...prev])
+  const addLog  = (msg: string) => setLog(prev => [new Date().toLocaleTimeString() + ' — ' + msg, ...prev])
   const setField = (k: keyof DbConn) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setConn(c => ({ ...c, [k]: e.target.value }))
+
+  function saveConn() {
+    localStorage.setItem(CONN_KEY, JSON.stringify(conn))
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
 
   async function testConnection() {
     setTesting(true)
@@ -268,13 +300,22 @@ function SyncTab() {
       </div>
 
       {/* Acciones */}
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap">
+        <button onClick={saveConn}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+            saved
+              ? 'bg-green-100 text-green-700 border border-green-200'
+              : 'bg-slate-800 text-white hover:bg-slate-700'
+          }`}>
+          <Save size={16} />
+          {saved ? '✓ Guardado' : 'Guardar configuración'}
+        </button>
         <button onClick={testConnection} disabled={testing || !conn.host}
           className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm hover:bg-slate-50 disabled:opacity-50 transition-colors">
           <Zap size={16} className="text-yellow-500" />
           {testing ? 'Probando...' : 'Probar conexión'}
         </button>
-        <button onClick={runSync} disabled={syncing || !conn.host || !conn.password}
+        <button onClick={runSync} disabled={syncing || !conn.host}
           className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors">
           <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
           {syncing ? 'Sincronizando...' : 'Sincronizar ahora'}
