@@ -25,16 +25,50 @@ const {
 
 router.use(authenticate, authorize('admin'));
 
-// ─── GET /api/sync/test — Probar conexión a att2000 ──────────────
+// ─── GET /api/sync/test — Probar conexión con config del .env ────
 router.get('/test', async (req, res) => {
   const result = await testAtt2000Connection();
   res.status(result.ok ? 200 : 503).json(result);
 });
 
+// ─── POST /api/sync/test-conn — Probar conexión dinámica ─────────
+// Body: { host, port, database, user, password }
+router.post('/test-conn', async (req, res) => {
+  const { host, port, database, user, password } = req.body;
+  if (!host || !database || !user) {
+    return res.status(400).json({ ok: false, error: 'host, database y user son requeridos' });
+  }
+  const sql = require('mssql');
+  const cfg = {
+    server: host,
+    port: parseInt(port || '1433'),
+    user,
+    password: password || '',
+    database,
+    options: { encrypt: false, trustServerCertificate: true, connectTimeout: 10000 }
+  };
+  try {
+    const pool = await sql.connect(cfg);
+    const r = await pool.request().query('SELECT COUNT(*) AS total FROM CHECKINOUT');
+    await pool.close();
+    res.json({ ok: true, totalRecords: r.recordset[0].total });
+  } catch (err) {
+    res.status(503).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── POST /api/sync/full — Sincronización completa ───────────────
-// Body: { dateFrom: "2026-01-01", dateTo: "2026-04-11" }
+// Body: { dateFrom, dateTo, conn?: { host, port, database, user, password } }
 router.post('/full', async (req, res) => {
-  const { dateFrom, dateTo } = req.body;
+  const { dateFrom, dateTo, conn } = req.body;
+  // Si viene conn dinámico, inyectarlo al env temporalmente
+  if (conn) {
+    process.env.ATT_HOST     = conn.host     || process.env.ATT_HOST;
+    process.env.ATT_PORT     = conn.port     || process.env.ATT_PORT;
+    process.env.ATT_DATABASE = conn.database || process.env.ATT_DATABASE;
+    process.env.ATT_USER     = conn.user     || process.env.ATT_USER;
+    process.env.ATT_PASSWORD = conn.password !== undefined ? conn.password : process.env.ATT_PASSWORD;
+  }
   try {
     const result = await fullSync({ dateFrom, dateTo });
     res.json({ ok: true, result });
