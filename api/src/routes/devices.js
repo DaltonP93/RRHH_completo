@@ -117,11 +117,67 @@ router.delete('/:id', authorize('admin'), async (req, res) => {
 router.get('/:id/info', authorize('admin','gestor','hr'), async (req, res) => {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
+
   try {
-    const info = await withZK(device, zk => zk.getInfo());
-    res.json({ ok: true, device: device.name, ip: device.ip_address, ...info });
+    const result = await withZK(device, async zk => {
+      const info = {};
+
+      // ── 1. Campos básicos via getInfo() ──────────────────────
+      try {
+        const basic = await zk.getInfo();
+        Object.assign(info, basic);
+      } catch {}
+
+      // ── 2. Parsear más campos del buffer CMD_GET_FREE_SIZES ───
+      // executeCmd está disponible en instancias JS aunque no documentado
+      try {
+        const buf = await zk.executeCmd(50, ''); // 50 = CMD_GET_FREE_SIZES
+        const safe = (offset) => {
+          try { return buf.length > offset + 3 ? buf.readUIntLE(offset, 4) : undefined; } catch { return undefined; }
+        };
+        // Offsets confirmados: 24=userCounts, 40=logCounts, 72=logCapacity
+        // Adicionales según protocolo ZKTeco:
+        const fpCount      = safe(28);
+        const pwdCount     = safe(32);
+        const superLogCount= safe(44);
+        const adminCount   = safe(48);
+        const faceCount    = safe(52);
+        const userCapacity = safe(56);
+        const fpCapacity   = safe(64);
+
+        if (fpCount      !== undefined) info.fpCount      = fpCount;
+        if (pwdCount     !== undefined) info.pwdCount     = pwdCount;
+        if (superLogCount!== undefined) info.superLogCount= superLogCount;
+        if (adminCount   !== undefined) info.adminCount   = adminCount;
+        if (faceCount    !== undefined) info.faceCount    = faceCount;
+        if (userCapacity !== undefined) info.userCapacity = userCapacity;
+        if (fpCapacity   !== undefined) info.fpCapacity   = fpCapacity;
+      } catch {}
+
+      // ── 3. Metadata via CMD_OPTIONS_RRQ (11) ─────────────────
+      const metaKeys = [
+        ['ProductName',      'productName'],
+        ['FirmVer',          'firmwareVersion'],
+        ['SerialNumber',     'serialNumber'],
+        ['Platform',         'platform'],
+        ['~ZKFPVersion',     'fpVersion'],
+        ['ManufactureTime',  'manufactureTime'],
+      ];
+      for (const [key, field] of metaKeys) {
+        try {
+          const buf = await zk.executeCmd(11, key); // 11 = CMD_OPTIONS_RRQ
+          // Respuesta: 8 bytes header + string valor
+          const val = buf.slice(8).toString('ascii').replace(/\0/g, '').trim();
+          if (val) info[field] = val;
+        } catch {}
+      }
+
+      return info;
+    });
+
+    res.json({ ok: true, device: device.name, ip: device.ip_address, ...result });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
 

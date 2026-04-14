@@ -279,7 +279,8 @@ function RelojesTab() {
       const r = await api.get(`/api/devices/${d.id}/info`)
       setDeviceData(p => ({ ...p, [d.id]: { ...p[d.id], info: r.data } }))
     } catch (e: any) {
-      setDeviceData(p => ({ ...p, [d.id]: { ...p[d.id], info: { error: e.response?.data?.error || e.message } } }))
+      const msg = e.response?.data?.error || e.response?.data?.message || e.message
+      setDeviceData(p => ({ ...p, [d.id]: { ...p[d.id], info: { error: msg } } }))
     }
     setBusy(d.id, '')
   }
@@ -289,17 +290,20 @@ function RelojesTab() {
       const r = await api.get(`/api/devices/${d.id}/users`)
       setDeviceData(p => ({ ...p, [d.id]: { ...p[d.id], users: r.data } }))
     } catch (e: any) {
-      setDeviceData(p => ({ ...p, [d.id]: { ...p[d.id], users: { error: e.response?.data?.error || e.message } } }))
+      const msg = e.response?.data?.error || e.response?.data?.message || e.message
+      setDeviceData(p => ({ ...p, [d.id]: { ...p[d.id], users: { error: msg } } }))
     }
     setBusy(d.id, '')
   }
+
+  const errMsg = (e: any) => e.response?.data?.error || e.response?.data?.message || e.message
 
   async function doBackup(d: Device) {
     setBusy(d.id, 'backup'); addLog(d.id, `⬇️ Iniciando backup de "${d.name}"...`)
     try {
       const r = await api.post(`/api/devices/${d.id}/backup`)
       addLog(d.id, `✅ Backup: ${r.data.imported} importados, ${r.data.skipped} omitidos (${r.data.total} total)`)
-    } catch (e: any) { addLog(d.id, `❌ Error: ${e.response?.data?.error || e.message}`) }
+    } catch (e: any) { addLog(d.id, `❌ Error: ${errMsg(e)}`) }
     setBusy(d.id, '')
   }
   async function doClear(d: Device) {
@@ -308,20 +312,20 @@ function RelojesTab() {
     try {
       const r = await api.post(`/api/devices/${d.id}/clear`)
       addLog(d.id, `✅ ${r.data.message}`)
-    } catch (e: any) { addLog(d.id, `❌ Error: ${e.response?.data?.error || e.message}`) }
+    } catch (e: any) { addLog(d.id, `❌ Error: ${errMsg(e)}`) }
     setBusy(d.id, '')
   }
   async function doEnable(d: Device) {
     setBusy(d.id, 'enable'); addLog(d.id, `▶️ Habilitando "${d.name}"...`)
     try { const r = await api.post(`/api/devices/${d.id}/enable`); addLog(d.id, `✅ ${r.data.message}`) }
-    catch (e: any) { addLog(d.id, `❌ Error: ${e.response?.data?.error || e.message}`) }
+    catch (e: any) { addLog(d.id, `❌ Error: ${errMsg(e)}`) }
     setBusy(d.id, '')
   }
   async function doDisable(d: Device) {
     if (!confirm(`¿Deshabilitar el reloj "${d.name}"? Los empleados no podrán marcar.`)) return
     setBusy(d.id, 'disable'); addLog(d.id, `⏸️ Deshabilitando "${d.name}"...`)
     try { const r = await api.post(`/api/devices/${d.id}/disable`); addLog(d.id, `✅ ${r.data.message}`) }
-    catch (e: any) { addLog(d.id, `❌ Error: ${e.response?.data?.error || e.message}`) }
+    catch (e: any) { addLog(d.id, `❌ Error: ${errMsg(e)}`) }
     setBusy(d.id, '')
   }
 
@@ -466,49 +470,109 @@ function RelojesTab() {
                     <div className="p-4 bg-white">
                       {/* TAB: INFORMACIÓN */}
                       {tab === 'info' && (
-                        <div>
-                          {deviceLoading[d.id] === 'info' && (
+                        <div className="space-y-4">
+                          {/* Header con botón recargar */}
+                          {(data.info || deviceLoading[d.id] === 'info') && (
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Información del dispositivo</p>
+                              <button onClick={() => loadInfo(d)} disabled={deviceLoading[d.id] === 'info'}
+                                className="flex items-center gap-1 text-xs text-blue-600 hover:underline disabled:opacity-50">
+                                <RefreshCw size={11} className={deviceLoading[d.id] === 'info' ? 'animate-spin' : ''}/> Recargar
+                              </button>
+                            </div>
+                          )}
+
+                          {deviceLoading[d.id] === 'info' && !data.info && (
                             <div className="py-6 text-center text-slate-400 text-sm">Leyendo información del reloj...</div>
                           )}
+
                           {data.info?.error && (
                             <div className="flex items-start gap-2 p-3 bg-red-50 rounded-xl text-red-600 text-sm">
                               <XCircle size={16} className="flex-shrink-0 mt-0.5"/>
                               <div>
                                 <p className="font-medium">No se pudo leer la información</p>
-                                <p className="text-xs mt-0.5">{data.info.error}</p>
+                                <p className="text-xs mt-1 font-mono">{data.info.error}</p>
                               </div>
                             </div>
                           )}
-                          {data.info && !data.info.error && (
-                            <div className="space-y-4">
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                {[
-                                  { label: 'Usuarios',         value: data.info.userCounts,    icon: <Users size={16}/>,        color: 'blue' },
-                                  { label: 'Huellas (FP)',     value: data.info.fpCount,        icon: <Fingerprint size={16}/>,   color: 'purple' },
-                                  { label: 'Registros (Log)',  value: data.info.logCounts,      icon: <Database size={16}/>,      color: 'amber' },
-                                  { label: 'Capacidad Log',    value: data.info.logCapacity,    icon: <HardDrive size={16}/>,     color: 'slate' },
-                                  { label: 'Admin Count',      value: data.info.adminCount,     icon: <Users size={16}/>,         color: 'green' },
-                                  { label: 'Caras (Face)',     value: data.info.faceCount ?? 0, icon: <Cpu size={16}/>,           color: 'rose' },
-                                ].map((item, i) => item.value !== undefined && (
-                                  <div key={i} className="bg-slate-50 rounded-xl p-3 flex flex-col gap-1">
-                                    <div className="text-slate-500 text-xs flex items-center gap-1.5">{item.icon}{item.label}</div>
-                                    <p className="text-xl font-bold text-slate-800">{item.value?.toLocaleString?.() ?? item.value}</p>
-                                  </div>
-                                ))}
-                              </div>
 
-                              {/* Info adicional */}
-                              {Object.keys(data.info).filter(k => !['ok','device','ip','userCounts','fpCount','logCounts','logCapacity','adminCount','faceCount','error'].includes(k)).map(k => (
-                                <div key={k} className="flex items-center gap-2 text-sm text-slate-600">
-                                  <span className="text-slate-400 text-xs w-32 flex-shrink-0">{k}:</span>
-                                  <span className="font-mono">{String(data.info[k])}</span>
+                          {data.info && !data.info.error && (() => {
+                            const inf = data.info
+                            const fmt = (v: any) => v !== undefined && v !== null ? Number(v).toLocaleString() : '—'
+                            const str = (v: any) => v || '—'
+                            return (
+                              <div className="space-y-4">
+                                {/* Sección Información — layout 2 columnas como ZKTeco */}
+                                <div className="border border-slate-100 rounded-xl overflow-hidden">
+                                  <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
+                                    <p className="text-xs font-semibold text-slate-600">Información</p>
+                                  </div>
+                                  <div className="grid grid-cols-2 divide-x divide-slate-100">
+                                    <table className="text-xs w-full">
+                                      <tbody className="divide-y divide-slate-50">
+                                        {[
+                                          ['User Count',         fmt(inf.userCounts)],
+                                          ['Fingerprint Count',  fmt(inf.fpCount)],
+                                          ['Fingerprint Version',str(inf.fpVersion)],
+                                          ['Face Count',         fmt(inf.faceCount)],
+                                          ['Face Version',       str(inf.faceVersion)],
+                                          ['Manufacture time',   str(inf.manufactureTime)],
+                                          ['Serial Number',      str(inf.serialNumber)],
+                                        ].map(([label, val]) => (
+                                          <tr key={label}>
+                                            <td className="px-3 py-1.5 text-slate-500 w-36">{label}</td>
+                                            <td className="px-3 py-1.5 text-slate-800 font-medium">{val}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                    <table className="text-xs w-full">
+                                      <tbody className="divide-y divide-slate-50">
+                                        {[
+                                          ['Password count',     fmt(inf.pwdCount)],
+                                          ['Log Count',          fmt(inf.logCounts)],
+                                          ['Super log count',    fmt(inf.superLogCount)],
+                                          ['Administrator Count',fmt(inf.adminCount)],
+                                          ['Product Name',       str(inf.productName)],
+                                          ['Firmware version',   str(inf.firmwareVersion)],
+                                          ['Platform',           str(inf.platform)],
+                                        ].map(([label, val]) => (
+                                          <tr key={label}>
+                                            <td className="px-3 py-1.5 text-slate-500 w-36">{label}</td>
+                                            <td className="px-3 py-1.5 text-slate-800 font-medium">{val}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
                                 </div>
-                              ))}
-                            </div>
-                          )}
+
+                                {/* Sección Capacity */}
+                                <div className="border border-slate-100 rounded-xl overflow-hidden">
+                                  <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
+                                    <p className="text-xs font-semibold text-slate-600">Capacity</p>
+                                  </div>
+                                  <div className="grid grid-cols-4 text-xs divide-x divide-slate-100">
+                                    {[
+                                      ['User',        inf.userCapacity],
+                                      ['Fingerprint', inf.fpCapacity],
+                                      ['Log',         inf.logCapacity],
+                                      ['Face',        inf.faceCapacity ?? 0],
+                                    ].map(([label, val]) => (
+                                      <div key={String(label)} className="px-4 py-3 text-center">
+                                        <p className="text-slate-500 mb-1">{label}</p>
+                                        <p className="text-base font-bold text-slate-800">{val !== undefined ? Number(val).toLocaleString() : '—'}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })()}
+
                           {!deviceLoading[d.id] && !data.info && (
                             <button onClick={() => loadInfo(d)} className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
-                              <RefreshCw size={14}/> Cargar información
+                              <RefreshCw size={14}/> Cargar información del reloj
                             </button>
                           )}
                         </div>
