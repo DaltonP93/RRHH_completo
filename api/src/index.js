@@ -24,6 +24,7 @@ const { router: webhookRoutes } = require('./routes/webhooks');
 const integrationRoutes     = require('./routes/integration');
 const userRoutes            = require('./routes/users');
 const notificationRoutes    = require('./routes/notifications');
+const settingsRoutes        = require('./routes/settings');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -77,6 +78,7 @@ app.use('/api/webhooks',       webhookRoutes);
 app.use('/api/integration',    integrationRoutes);
 app.use('/api/users',          userRoutes);
 app.use('/api/notifications',  notificationRoutes);
+app.use('/api/settings',       settingsRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

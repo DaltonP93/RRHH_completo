@@ -1,13 +1,40 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { authApi } from '@/lib/api'
+
+interface SiteSettings {
+  system_name: string
+  system_logo_url: string
+  system_login_bg: string
+  system_primary_color: string
+  system_login_title: string
+  system_login_subtitle: string
+}
+
+const DEFAULT: SiteSettings = {
+  system_name: 'Sistema de Asistencia',
+  system_logo_url: '',
+  system_login_bg: 'from-slate-900 to-blue-900',
+  system_primary_color: '#2563eb',
+  system_login_title: 'Sistema de Asistencia',
+  system_login_subtitle: 'Recursos Humanos',
+}
 
 export default function LoginPage() {
   const router = useRouter()
   const [form, setForm] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [settings, setSettings] = useState<SiteSettings>(DEFAULT)
+
+  useEffect(() => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+    fetch(`${apiUrl}/api/settings`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setSettings(s => ({ ...s, ...data })) })
+      .catch(() => {})
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -27,14 +54,26 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-blue-900 flex items-center justify-center p-4">
+    <div className={`min-h-screen bg-gradient-to-br ${settings.system_login_bg} flex items-center justify-center p-4`}>
       <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-3xl">🕐</span>
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900">Sistema de Asistencia</h1>
-          <p className="text-slate-500 text-sm mt-1">Recursos Humanos</p>
+          {settings.system_logo_url ? (
+            <img
+              src={settings.system_logo_url}
+              alt={settings.system_name}
+              className="h-16 mx-auto mb-4 object-contain"
+              onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+            />
+          ) : (
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+              style={{ backgroundColor: settings.system_primary_color }}
+            >
+              <span className="text-3xl">🕐</span>
+            </div>
+          )}
+          <h1 className="text-2xl font-bold text-slate-900">{settings.system_login_title}</h1>
+          <p className="text-slate-500 text-sm mt-1">{settings.system_login_subtitle}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -70,7 +109,8 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-60"
+            className="w-full text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-60"
+            style={{ backgroundColor: settings.system_primary_color }}
           >
             {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
           </button>

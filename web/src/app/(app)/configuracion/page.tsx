@@ -4,14 +4,35 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Wifi, WifiOff, RefreshCw, Plus, Trash2, Globe,
   Zap, CheckCircle, XCircle, AlertCircle, Database,
-  Server, Eye, EyeOff, Save, Activity
+  Server, Eye, EyeOff, Save, Activity, Edit2, X,
+  Monitor, Settings, Users, Download, Eraser, List,
+  Clock, MapPin, Hash, ChevronDown, ChevronUp, Image
 } from 'lucide-react'
 import { api } from '@/lib/api'
 
 // ─── Tipos ──────────────────────────────────────────────────────
-interface Device   { id: number; name: string; ip_address: string; port: number; status: string; last_sync: string }
+interface Device {
+  id: number
+  name: string
+  ip_address: string
+  port: number
+  location?: string
+  serial_no?: string
+  status?: string
+  last_sync?: string
+}
 interface Webhook  { id: number; name: string; url: string; events: string[]; active: number; last_called: string; last_status: number }
 interface DbConn   { host: string; port: string; database: string; user: string; password: string; label: string }
+interface SystemSettings {
+  system_name: string
+  system_logo_url: string
+  system_favicon_url: string
+  system_login_bg: string
+  system_primary_color: string
+  system_login_title: string
+  system_login_subtitle: string
+  system_company: string
+}
 
 const CONN_KEY = 'sishoras_db_conn'
 
@@ -28,11 +49,15 @@ function defaultConn(): DbConn {
   return { host: '10.81.28.8', port: '1433', database: 'att2000', user: 'sa', password: '', label: 'ZKTeco Attendance Management' }
 }
 
+const inputCls = "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+const labelCls = "text-xs font-medium text-slate-600 block mb-1"
+
 // ─── Componente principal ─────────────────────────────────────
 export default function ConfiguracionPage() {
-  const [tab, setTab] = useState<'relojes'|'sync'|'webhooks'|'api'>('relojes')
+  const [tab, setTab] = useState<'sistema'|'relojes'|'sync'|'webhooks'|'api'>('relojes')
 
   const tabs = [
+    { id: 'sistema',  label: '🖥️ Sistema' },
     { id: 'relojes',  label: '⌚ Relojes ZKTeco' },
     { id: 'sync',     label: '🔄 Sincronización BD' },
     { id: 'webhooks', label: '🔗 Webhooks' },
@@ -44,7 +69,7 @@ export default function ConfiguracionPage() {
       <h1 className="text-2xl font-bold text-slate-900">Configuración</h1>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-slate-200">
+      <div className="flex gap-1 border-b border-slate-200 flex-wrap">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
@@ -58,6 +83,7 @@ export default function ConfiguracionPage() {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+        {tab === 'sistema'  && <SistemaTab />}
         {tab === 'relojes'  && <RelojesTab />}
         {tab === 'sync'     && <SyncTab />}
         {tab === 'webhooks' && <WebhooksTab />}
@@ -67,93 +93,495 @@ export default function ConfiguracionPage() {
   )
 }
 
-// ─── Tab: Relojes ZKTeco ─────────────────────────────────────
-const STATIC_DEVICES = [
-  { id: 101, name: 'Reloj Comedor',  ip_address: '172.16.20.160', port: 4370 },
-  { id: 103, name: 'Reloj Lavadero', ip_address: '172.16.20.161', port: 4370 },
-  { id: 1,   name: 'Reloj Gerencia', ip_address: '172.16.20.162', port: 4370 },
-]
+// ─── Tab: Sistema (Branding) ──────────────────────────────────
+function SistemaTab() {
+  const [settings, setSettings] = useState<SystemSettings>({
+    system_name: 'Sistema de Asistencia',
+    system_logo_url: '',
+    system_favicon_url: '',
+    system_login_bg: 'from-slate-900 to-blue-900',
+    system_primary_color: '#2563eb',
+    system_login_title: 'Sistema de Asistencia',
+    system_login_subtitle: 'Recursos Humanos',
+    system_company: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved]   = useState(false)
+  const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    api.get('/api/settings').then(r => {
+      setSettings(s => ({ ...s, ...r.data }))
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }, [])
+
+  const setField = (k: keyof SystemSettings) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setSettings(s => ({ ...s, [k]: e.target.value }))
+
+  async function save() {
+    setSaving(true)
+    try {
+      await api.put('/api/settings', settings)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e: any) {
+      alert('Error al guardar: ' + (e.response?.data?.error || e.message))
+    }
+    setSaving(false)
+  }
+
+  if (loading) return <div className="py-8 text-center text-slate-400">Cargando configuración...</div>
+
+  const gradients = [
+    { value: 'from-slate-900 to-blue-900',   label: 'Slate → Azul (default)' },
+    { value: 'from-blue-900 to-indigo-900',  label: 'Azul → Índigo' },
+    { value: 'from-slate-900 to-slate-700',  label: 'Gris oscuro' },
+    { value: 'from-emerald-900 to-teal-800', label: 'Verde esmeralda' },
+    { value: 'from-purple-900 to-indigo-800',label: 'Púrpura' },
+    { value: 'from-rose-900 to-pink-800',    label: 'Rosa' },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-semibold text-slate-800">Personalización del Sistema</h2>
+        <p className="text-sm text-slate-500 mt-0.5">Logo, nombre, colores y pantalla de login</p>
+      </div>
+
+      {/* Datos generales */}
+      <div className="border border-slate-200 rounded-2xl p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Monitor size={16} className="text-blue-600" />
+          <h3 className="font-medium text-slate-800">Identidad del Sistema</h3>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>Nombre del sistema</label>
+            <input value={settings.system_name} onChange={setField('system_name')} placeholder="Sistema de Asistencia" className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Empresa / Organización</label>
+            <input value={settings.system_company} onChange={setField('system_company')} placeholder="Mi Empresa S.A." className={inputCls} />
+          </div>
+        </div>
+
+        <div>
+          <label className={labelCls}>URL del logo (imagen PNG/SVG)</label>
+          <input value={settings.system_logo_url} onChange={setField('system_logo_url')} placeholder="https://miempresa.com/logo.png" className={inputCls} />
+          {settings.system_logo_url && (
+            <img src={settings.system_logo_url} alt="Logo preview" className="mt-2 h-10 object-contain rounded border border-slate-100 p-1" onError={e => { (e.target as HTMLImageElement).style.display='none' }} />
+          )}
+        </div>
+
+        <div>
+          <label className={labelCls}>URL del favicon (.ico o .png pequeño)</label>
+          <input value={settings.system_favicon_url} onChange={setField('system_favicon_url')} placeholder="https://miempresa.com/favicon.ico" className={inputCls} />
+        </div>
+
+        <div>
+          <label className={labelCls}>Color principal</label>
+          <div className="flex items-center gap-3">
+            <input type="color" value={settings.system_primary_color} onChange={setField('system_primary_color')}
+              className="h-10 w-20 rounded-lg border border-slate-200 cursor-pointer p-0.5" />
+            <input value={settings.system_primary_color} onChange={setField('system_primary_color')}
+              placeholder="#2563eb" className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+          </div>
+        </div>
+      </div>
+
+      {/* Login screen */}
+      <div className="border border-slate-200 rounded-2xl p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Image size={16} className="text-blue-600" />
+          <h3 className="font-medium text-slate-800">Pantalla de Login</h3>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>Título del login</label>
+            <input value={settings.system_login_title} onChange={setField('system_login_title')} placeholder="Sistema de Asistencia" className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Subtítulo</label>
+            <input value={settings.system_login_subtitle} onChange={setField('system_login_subtitle')} placeholder="Recursos Humanos" className={inputCls} />
+          </div>
+        </div>
+
+        <div>
+          <label className={labelCls}>Fondo del login (gradiente)</label>
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            {gradients.map(g => (
+              <button key={g.value} onClick={() => setSettings(s => ({ ...s, system_login_bg: g.value }))}
+                className={`flex items-center gap-2 p-2.5 rounded-xl border text-left text-sm transition-all ${
+                  settings.system_login_bg === g.value
+                    ? 'border-blue-500 ring-2 ring-blue-200'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}>
+                <div className={`w-8 h-6 rounded-lg bg-gradient-to-br ${g.value} flex-shrink-0`} />
+                <span className="text-slate-600 text-xs">{g.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Preview */}
+        <div className={`rounded-xl bg-gradient-to-br ${settings.system_login_bg} p-4 flex items-center justify-center`} style={{ minHeight: 120 }}>
+          <div className="bg-white rounded-2xl p-4 text-center shadow-xl w-48">
+            {settings.system_logo_url
+              ? <img src={settings.system_logo_url} alt="logo" className="h-8 mx-auto mb-2 object-contain" onError={e => { (e.target as HTMLImageElement).style.display='none' }} />
+              : <div className="w-8 h-8 rounded-lg mx-auto mb-2 flex items-center justify-center text-white text-sm" style={{ backgroundColor: settings.system_primary_color }}>🕐</div>
+            }
+            <p className="text-xs font-bold text-slate-900 leading-tight">{settings.system_login_title || 'Sistema'}</p>
+            <p className="text-xs text-slate-400">{settings.system_login_subtitle}</p>
+          </div>
+        </div>
+      </div>
+
+      <button onClick={save} disabled={saving}
+        className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+          saved
+            ? 'bg-green-100 text-green-700 border border-green-200'
+            : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50'
+        }`}>
+        <Save size={16} />
+        {saving ? 'Guardando...' : saved ? '✓ Guardado correctamente' : 'Guardar cambios'}
+      </button>
+    </div>
+  )
+}
+
+// ─── Tab: Relojes ZKTeco ─────────────────────────────────────
 function RelojesTab() {
-  const [statuses, setStatuses] = useState<Record<number,string>>({})
-  const [pinging, setPinging]   = useState(false)
-  const [lastCheck, setLastCheck] = useState<string>('')
+  const [devices, setDevices]         = useState<Device[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [pinging, setPinging]         = useState(false)
+  const [lastCheck, setLastCheck]     = useState('')
+  const [showForm, setShowForm]       = useState(false)
+  const [editDevice, setEditDevice]   = useState<Device | null>(null)
+  const [form, setForm]               = useState({ name: '', ip_address: '', port: '4370', location: '', serial_no: '' })
+  const [saving, setSaving]           = useState(false)
+  const [expanded, setExpanded]       = useState<number | null>(null)
+  const [opLog, setOpLog]             = useState<Record<number, string[]>>({})
+  const [opLoading, setOpLoading]     = useState<Record<number, string>>({})
+
+  async function loadDevices() {
+    setLoading(true)
+    try {
+      const r = await api.get('/api/devices')
+      setDevices(r.data)
+    } catch {
+      setDevices([])
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { loadDevices() }, [])
 
   async function pingAll() {
     setPinging(true)
-    setStatuses({})
     try {
       const r = await api.get('/api/devices/ping-all')
-      // r.data = [{ id, status: 'online'|'offline', latency }]
-      const map: Record<number,string> = {}
-      for (const d of r.data) map[d.id] = d.status
-      setStatuses(map)
-    } catch {
-      // Si falla el endpoint, marcar todos offline
-      const map: Record<number,string> = {}
-      STATIC_DEVICES.forEach(d => { map[d.id] = 'offline' })
-      setStatuses(map)
-    }
-    setLastCheck(new Date().toLocaleTimeString())
+      setDevices(r.data)
+      setLastCheck(new Date().toLocaleTimeString())
+    } catch {}
     setPinging(false)
+  }
+
+  function openAddForm() {
+    setEditDevice(null)
+    setForm({ name: '', ip_address: '', port: '4370', location: '', serial_no: '' })
+    setShowForm(true)
+  }
+
+  function openEditForm(d: Device) {
+    setEditDevice(d)
+    setForm({ name: d.name, ip_address: d.ip_address, port: String(d.port), location: d.location || '', serial_no: d.serial_no || '' })
+    setShowForm(true)
+  }
+
+  async function saveDevice() {
+    setSaving(true)
+    try {
+      if (editDevice) {
+        await api.put(`/api/devices/${editDevice.id}`, { ...form, port: Number(form.port) })
+      } else {
+        await api.post('/api/devices', { ...form, port: Number(form.port) })
+      }
+      setShowForm(false)
+      await loadDevices()
+    } catch (e: any) {
+      alert('Error: ' + (e.response?.data?.error || e.message))
+    }
+    setSaving(false)
+  }
+
+  async function deleteDevice(id: number, name: string) {
+    if (!confirm(`¿Eliminar el reloj "${name}"? Esta acción no se puede deshacer.`)) return
+    try {
+      await api.delete(`/api/devices/${id}`)
+      await loadDevices()
+    } catch (e: any) {
+      alert('Error al eliminar: ' + (e.response?.data?.error || e.message))
+    }
+  }
+
+  function addLog(id: number, msg: string) {
+    setOpLog(prev => ({ ...prev, [id]: [new Date().toLocaleTimeString() + ' — ' + msg, ...(prev[id] || [])] }))
+  }
+
+  async function doBackup(d: Device) {
+    setOpLoading(p => ({ ...p, [d.id]: 'backup' }))
+    addLog(d.id, `⬇️ Iniciando backup de "${d.name}"...`)
+    try {
+      const r = await api.post(`/api/devices/${d.id}/backup`)
+      addLog(d.id, `✅ Backup completo: ${r.data.imported} importados, ${r.data.skipped} omitidos (${r.data.total} total)`)
+    } catch (e: any) {
+      addLog(d.id, `❌ Error: ${e.response?.data?.error || e.message}`)
+    }
+    setOpLoading(p => ({ ...p, [d.id]: '' }))
+  }
+
+  async function doClear(d: Device) {
+    if (!confirm(`⚠️ ¿Eliminar TODOS los registros del reloj "${d.name}"? Esta acción borra los datos del reloj (no de la BD).`)) return
+    setOpLoading(p => ({ ...p, [d.id]: 'clear' }))
+    addLog(d.id, `🗑️ Eliminando registros de "${d.name}"...`)
+    try {
+      const r = await api.post(`/api/devices/${d.id}/clear`)
+      addLog(d.id, `✅ ${r.data.message}`)
+    } catch (e: any) {
+      addLog(d.id, `❌ Error: ${e.response?.data?.error || e.message}`)
+    }
+    setOpLoading(p => ({ ...p, [d.id]: '' }))
+  }
+
+  async function doUsers(d: Device) {
+    setOpLoading(p => ({ ...p, [d.id]: 'users' }))
+    addLog(d.id, `👤 Leyendo usuarios de "${d.name}"...`)
+    try {
+      const r = await api.get(`/api/devices/${d.id}/users`)
+      addLog(d.id, `✅ ${r.data.total} usuarios registrados en el reloj`)
+      r.data.users.slice(0, 10).forEach((u: any) =>
+        addLog(d.id, `   · [${u.userId}] ${u.name || '(sin nombre)'} — ${u.privilege === 14 ? 'Admin' : 'Usuario'}`)
+      )
+      if (r.data.total > 10) addLog(d.id, `   ... y ${r.data.total - 10} más`)
+    } catch (e: any) {
+      addLog(d.id, `❌ Error: ${e.response?.data?.error || e.message}`)
+    }
+    setOpLoading(p => ({ ...p, [d.id]: '' }))
+  }
+
+  async function doLogsCount(d: Device) {
+    setOpLoading(p => ({ ...p, [d.id]: 'count' }))
+    addLog(d.id, `📊 Consultando memoria de "${d.name}"...`)
+    try {
+      const r = await api.get(`/api/devices/${d.id}/logs-count`)
+      addLog(d.id, `✅ Info del reloj: ${JSON.stringify(r.data)}`)
+    } catch (e: any) {
+      addLog(d.id, `❌ Error: ${e.response?.data?.error || e.message}`)
+    }
+    setOpLoading(p => ({ ...p, [d.id]: '' }))
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="font-semibold text-slate-800">Relojes Biométricos ZKTeco</h2>
           <p className="text-sm text-slate-500 mt-0.5">
-            Conexión directa vía ZKLib (puerto 4370)
+            Gestión y operaciones directas (puerto 4370)
             {lastCheck && <span className="ml-2 text-slate-400">— verificado a las {lastCheck}</span>}
           </p>
         </div>
-        <button onClick={pingAll} disabled={pinging}
-          className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition-colors">
-          <Activity size={14} className={pinging ? 'animate-pulse text-blue-500' : ''} />
-          {pinging ? 'Verificando...' : 'Verificar estado'}
-        </button>
+        <div className="flex gap-2">
+          <button onClick={pingAll} disabled={pinging}
+            className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition-colors">
+            <Activity size={14} className={pinging ? 'animate-pulse text-blue-500' : ''} />
+            {pinging ? 'Verificando...' : 'Verificar estado'}
+          </button>
+          <button onClick={openAddForm}
+            className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors">
+            <Plus size={14} /> Agregar reloj
+          </button>
+        </div>
       </div>
 
-      <div className="grid gap-3">
-        {STATIC_DEVICES.map(d => {
-          const status = statuses[d.id] || 'unknown'
-          return (
-            <div key={d.id} className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${
-              status === 'online'  ? 'border-green-100 bg-green-50' :
-              status === 'offline' ? 'border-red-100 bg-red-50' :
-                                    'border-slate-100 bg-slate-50'
-            }`}>
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                status === 'online'  ? 'bg-green-100 text-green-600' :
-                status === 'offline' ? 'bg-red-100 text-red-500' :
-                                      'bg-slate-100 text-slate-400'
-              }`}>
-                {status === 'online' ? <Wifi size={20} /> : <WifiOff size={20} />}
-              </div>
-              <div className="flex-1">
-                <p className="font-semibold text-slate-800">{d.name}</p>
-                <p className="text-sm font-mono text-slate-500">{d.ip_address}:{d.port}</p>
-                <p className="text-xs text-slate-400 mt-0.5">SensorID: {d.id}</p>
-              </div>
-              <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
-                status === 'online'  ? 'bg-green-100 text-green-700' :
-                status === 'offline' ? 'bg-red-100 text-red-600' :
-                                      'bg-slate-100 text-slate-500'
-              }`}>
-                {pinging ? '● Verificando...' :
-                 status === 'online'  ? '● En línea' :
-                 status === 'offline' ? '● Sin conexión' : '● Sin estado'}
-              </span>
+      {/* Formulario agregar / editar */}
+      {showForm && (
+        <div className="border border-blue-100 bg-blue-50 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium text-slate-800">{editDevice ? 'Editar reloj' : 'Agregar nuevo reloj'}</h3>
+            <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Nombre del reloj *</label>
+              <input value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))}
+                placeholder="ej: Reloj Comedor" className={inputCls} />
             </div>
-          )
-        })}
-      </div>
+            <div>
+              <label className={labelCls}>Ubicación</label>
+              <input value={form.location} onChange={e => setForm(f => ({...f, location: e.target.value}))}
+                placeholder="ej: Planta Baja" className={inputCls} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <label className={labelCls}>Dirección IP *</label>
+              <input value={form.ip_address} onChange={e => setForm(f => ({...f, ip_address: e.target.value}))}
+                placeholder="ej: 172.16.20.160" className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Puerto</label>
+              <input value={form.port} onChange={e => setForm(f => ({...f, port: e.target.value}))}
+                placeholder="4370" className={inputCls} />
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Número de serie (opcional)</label>
+            <input value={form.serial_no} onChange={e => setForm(f => ({...f, serial_no: e.target.value}))}
+              placeholder="ej: ABCD123456" className={inputCls} />
+          </div>
+
+          <div className="flex gap-3">
+            <button onClick={saveDevice} disabled={saving || !form.name || !form.ip_address}
+              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors">
+              <Save size={14} /> {saving ? 'Guardando...' : editDevice ? 'Actualizar' : 'Agregar'}
+            </button>
+            <button onClick={() => setShowForm(false)}
+              className="px-4 py-2.5 border border-slate-200 rounded-xl text-sm hover:bg-slate-50 transition-colors">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lista de relojes */}
+      {loading ? (
+        <div className="py-8 text-center text-slate-400">Cargando relojes...</div>
+      ) : devices.length === 0 ? (
+        <div className="py-8 text-center text-slate-400">
+          <Clock size={32} className="mx-auto mb-2 opacity-30" />
+          <p>No hay relojes registrados.</p>
+          <button onClick={openAddForm} className="mt-3 text-blue-600 text-sm hover:underline">+ Agregar el primer reloj</button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {devices.map(d => {
+            const status = d.status || 'unknown'
+            const isExpanded = expanded === d.id
+            const log = opLog[d.id] || []
+            const busy = opLoading[d.id] || ''
+
+            return (
+              <div key={d.id} className={`rounded-xl border transition-colors ${
+                status === 'online'  ? 'border-green-100' :
+                status === 'offline' ? 'border-red-100' : 'border-slate-100'
+              }`}>
+                {/* Fila principal */}
+                <div className={`flex items-center gap-4 p-4 ${
+                  status === 'online'  ? 'bg-green-50' :
+                  status === 'offline' ? 'bg-red-50' : 'bg-slate-50'
+                } rounded-xl`}>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                    status === 'online'  ? 'bg-green-100 text-green-600' :
+                    status === 'offline' ? 'bg-red-100 text-red-500' :
+                                          'bg-slate-100 text-slate-400'
+                  }`}>
+                    {status === 'online' ? <Wifi size={20} /> : <WifiOff size={20} />}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-slate-800">{d.name}</p>
+                    <p className="text-sm font-mono text-slate-500">{d.ip_address}:{d.port}</p>
+                    {(d.location || d.serial_no) && (
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {d.location && <span><MapPin size={10} className="inline mr-1" />{d.location}</span>}
+                        {d.serial_no && <span className="ml-2"><Hash size={10} className="inline mr-1" />{d.serial_no}</span>}
+                      </p>
+                    )}
+                    {d.last_sync && (
+                      <p className="text-xs text-slate-400">Sync: {new Date(d.last_sync).toLocaleString()}</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className={`text-xs font-semibold px-3 py-1 rounded-full hidden sm:block ${
+                      status === 'online'  ? 'bg-green-100 text-green-700' :
+                      status === 'offline' ? 'bg-red-100 text-red-600' :
+                                            'bg-slate-100 text-slate-500'
+                    }`}>
+                      {status === 'online' ? '● En línea' : status === 'offline' ? '● Sin conexión' : '● Sin estado'}
+                    </span>
+                    <button onClick={() => openEditForm(d)}
+                      title="Editar" className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                      <Edit2 size={15} />
+                    </button>
+                    <button onClick={() => deleteDevice(d.id, d.name)}
+                      title="Eliminar" className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                      <Trash2 size={15} />
+                    </button>
+                    <button onClick={() => setExpanded(isExpanded ? null : d.id)}
+                      title="Operaciones" className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+                      {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Panel de operaciones expandible */}
+                {isExpanded && (
+                  <div className="border-t border-slate-100 p-4 space-y-3">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Operaciones del reloj</p>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => doBackup(d)} disabled={!!busy}
+                        className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                        <Download size={14} className={busy === 'backup' ? 'animate-bounce' : ''} />
+                        {busy === 'backup' ? 'Haciendo backup...' : 'Backup → BD'}
+                      </button>
+
+                      <button onClick={() => doUsers(d)} disabled={!!busy}
+                        className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition-colors">
+                        <Users size={14} className={busy === 'users' ? 'animate-pulse' : ''} />
+                        {busy === 'users' ? 'Leyendo...' : 'Ver usuarios'}
+                      </button>
+
+                      <button onClick={() => doLogsCount(d)} disabled={!!busy}
+                        className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition-colors">
+                        <List size={14} className={busy === 'count' ? 'animate-pulse' : ''} />
+                        {busy === 'count' ? 'Consultando...' : 'Info memoria'}
+                      </button>
+
+                      <button onClick={() => doClear(d)} disabled={!!busy}
+                        className="flex items-center gap-2 px-3 py-2 text-sm border border-red-200 text-red-600 rounded-xl hover:bg-red-50 disabled:opacity-50 transition-colors">
+                        <Eraser size={14} className={busy === 'clear' ? 'animate-bounce' : ''} />
+                        {busy === 'clear' ? 'Eliminando...' : 'Liberar memoria'}
+                      </button>
+                    </div>
+
+                    {log.length > 0 && (
+                      <div className="bg-slate-900 rounded-xl p-3 font-mono text-xs text-green-400 space-y-0.5 max-h-44 overflow-y-auto">
+                        {log.map((line, i) => <div key={i}>{line}</div>)}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-700 space-y-1">
-        <p className="font-medium">Red requerida</p>
-        <p>El servidor debe tener acceso a la red <strong>172.16.20.x</strong> en el puerto 4370 para conectar con los relojes.</p>
-        <p>Si los relojes están en otra red (NAT/VPN), verifica la conectividad de red del servidor.</p>
+        <p className="font-medium">Operaciones directas</p>
+        <p><strong>Backup → BD:</strong> lee todos los marcajes del reloj e importa los nuevos a la base de datos.</p>
+        <p><strong>Liberar memoria:</strong> borra registros del reloj (no de la BD) para liberar espacio en la memoria del dispositivo.</p>
+        <p><strong>Ver usuarios:</strong> lista los empleados enrollados en el reloj.</p>
       </div>
     </div>
   )
@@ -172,7 +600,6 @@ function SyncTab() {
   const [dateFrom, setDateFrom] = useState(firstDay)
   const [dateTo,   setDateTo]   = useState(today)
 
-  // Cargar conexión guardada en localStorage
   const [conn, setConn] = useState<DbConn>(defaultConn)
   useEffect(() => { setConn(loadConn()) }, [])
 
@@ -217,15 +644,12 @@ function SyncTab() {
     setSyncing(false)
   }
 
-  const inputCls = "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-  const labelCls = "text-xs font-medium text-slate-600 block mb-1"
-
   return (
     <div className="space-y-6">
       <div>
         <h2 className="font-semibold text-slate-800">Sincronización con Base de Datos Externa</h2>
         <p className="text-sm text-slate-500 mt-0.5">
-          Importa empleados y marcajes desde SQL Server (ZKTeco, u otro sistema)
+          Importa empleados y marcajes desde SQL Server (ZKTeco u otro sistema)
         </p>
       </div>
 
@@ -322,7 +746,6 @@ function SyncTab() {
         </button>
       </div>
 
-      {/* Log de resultados */}
       {log.length > 0 && (
         <div className="bg-slate-900 rounded-xl p-4 font-mono text-xs text-green-400 space-y-1 max-h-60 overflow-y-auto">
           {log.map((line, i) => <div key={i}>{line}</div>)}
