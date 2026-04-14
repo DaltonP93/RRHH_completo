@@ -34,19 +34,25 @@ router.get('/', authorize('admin','gestor','hr'), async (req, res) => {
 
 // GET /api/devices/ping-all — verificar conectividad de todos
 router.get('/ping-all', authorize('admin','gestor','hr'), async (req, res) => {
-  const [devices] = await sequelize.query('SELECT * FROM devices');
+  let [devices] = await sequelize.query('SELECT * FROM devices');
+
+  // Si la tabla está vacía, sembrar los relojes por defecto y releerlos
   if (!devices.length) {
-    // Fallback a relojes estáticos
-    const STATIC = [
-      { id: 101, name: 'Reloj Comedor',  ip_address: '172.16.20.160', port: 4370 },
-      { id: 103, name: 'Reloj Lavadero', ip_address: '172.16.20.161', port: 4370 },
-      { id: 1,   name: 'Reloj Gerencia', ip_address: '172.16.20.162', port: 4370 },
+    const DEFAULTS = [
+      { name: 'Reloj Comedor',  ip_address: '172.16.20.160', port: 4370, location: 'Comedor' },
+      { name: 'Reloj Lavadero', ip_address: '172.16.20.161', port: 4370, location: 'Lavadero' },
+      { name: 'Reloj Gerencia', ip_address: '172.16.20.162', port: 4370, location: 'Gerencia' },
     ];
-    const results = await Promise.all(STATIC.map(async d => ({
-      ...d, ...(await pingDevice(d.ip_address, d.port))
-    })));
-    return res.json(results);
+    for (const d of DEFAULTS) {
+      await sequelize.query(
+        'INSERT IGNORE INTO devices (name, ip_address, port, location) VALUES (?, ?, ?, ?)',
+        { replacements: [d.name, d.ip_address, d.port, d.location] }
+      ).catch(() => {});
+    }
+    // Releer desde BD con los IDs reales asignados
+    [devices] = await sequelize.query('SELECT * FROM devices');
   }
+
   const results = await Promise.all(devices.map(async d => {
     const { status, latency } = await pingDevice(d.ip_address, d.port);
     await sequelize.query(
