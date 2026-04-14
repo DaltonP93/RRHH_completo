@@ -33,7 +33,17 @@ const server = http.createServer(app);
 // ─── Middleware ─────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    const allowed = [
+      process.env.FRONTEND_URL,
+      'http://localhost:3000',
+      'http://sishoras.saa.com.py',
+      'https://sishoras.saa.com.py'
+    ].filter(Boolean);
+    // Permitir requests sin origin (curl, Postman, SSR)
+    if (!origin || allowed.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS bloqueado: ${origin}`));
+  },
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
