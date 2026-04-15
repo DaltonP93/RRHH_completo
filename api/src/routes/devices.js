@@ -23,15 +23,24 @@ function pingDevice(ip, port, timeout = 3000) {
 }
 
 // Serializar cualquier tipo de error como string legible
+// ZKLib lanza objetos {err: ErrorObject, ip, command} — manejamos ese patrón
 function fmtErr(err) {
   if (!err) return 'Error desconocido';
+  // Objeto ZKLib: { err: Error, ip: string, command: string }
+  if (err && typeof err === 'object' && 'command' in err) {
+    const inner = err.err?.message || err.err?.code || '';
+    if (err.command === 'TCP CONNECT') {
+      return `No se pudo establecer conexión TCP${inner ? ': ' + inner : '.'}`;
+    }
+    return `Error protocolo ZKTeco [${err.command}]${inner ? ': ' + inner : ': sin respuesta.'}`;
+  }
   if (err.message) return err.message;
   if (typeof err === 'string') return err;
   try { return JSON.stringify(err); } catch { return String(err); }
 }
 
 // Helper: conectar ZKLib, ejecutar fn, desconectar
-// inPort=0 → OS asigna puerto UDP libre (evita conflicto)
+// inPort=0 → OS asigna puerto UDP libre (evita conflicto con puerto 4000 de la API)
 async function withZK(device, fn) {
   const ZKLib = require('node-zklib');
   const zk = new ZKLib(device.ip_address, device.port, 10000, 0);
@@ -42,6 +51,10 @@ async function withZK(device, fn) {
     return result;
   } catch (err) {
     await zk.disconnect().catch(() => {});
+    // Convertir objeto ZKLib a Error legible antes de relanzar
+    if (err && typeof err === 'object' && 'command' in err) {
+      throw new Error(fmtErr(err));
+    }
     throw err;
   }
 }
@@ -155,21 +168,12 @@ router.get('/:id/info', authorize('admin','gestor','hr'), async (req, res) => {
         assign('faceCount',     safe(52)); // ✓
         assign('adminCount',    safe(56)); // ✓ empírico
 
-        // Capacidades: probamos offsets 8, 12, 16 (antes de conteos)
-        // y también 76, 80, 84 (después de logCapacity)
-        const uc1 = safe(8),  uc2 = safe(76);
-        const fc1 = safe(12), fc2 = safe(80);
-        const lc1 = safe(16), lc2 = safe(84);
-        assign('userCapacity', uc1 > 100 ? uc1 : (uc2 > 100 ? uc2 : uc1));
-        assign('fpCapacity',   fc1 > 100 ? fc1 : (fc2 > 100 ? fc2 : fc1));
-        assign('faceCapacity', lc1 > 0   ? lc1 : lc2);
-
-        // Dump de todos los valores del buffer (ayuda a encontrar offsets desconocidos)
-        const _buf = [];
-        for (let i = 0; i + 3 < Math.min(buf.length, 128); i += 4) {
-          _buf.push([i, buf.readUIntLE(i, 4)]);
-        }
-        info._rawOffsets = _buf; // solo para debug, quitar una vez confirmados
+        // Capacidades: offset 8 = slots libres de huella, offset 12 = slots libres de usuario
+        // Total = libres + usados (confirmado: 28889 + 1111 = 30000 usuarios, 1834 + 2366 = 4200 huellas)
+        const freeFpCount   = safe(8);
+        const freeUserCount = safe(12);
+        if (freeUserCount !== undefined) assign('userCapacity', freeUserCount + (info.userCounts || 0));
+        if (freeFpCount   !== undefined) assign('fpCapacity',   freeFpCount   + (info.fpCount   || 0));
       } catch {}
 
       // ── 3. Metadata via CMD_OPTIONS_RRQ (11) ─────────────────

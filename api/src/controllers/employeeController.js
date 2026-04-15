@@ -4,16 +4,24 @@ const logger = require('../config/logger');
 // GET /api/employees
 async function getAll(req, res) {
   try {
-    const { dept, status = 'active', search, page = 1, limit = 50 } = req.query;
+    const { dept, department_id, status, search, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
 
-    let where = 'WHERE e.status = ?';
-    const params = [status];
+    // status vacío = mostrar activos por defecto; 'all' o '' sin especificar = todos
+    const effectiveStatus = status === undefined ? 'active' : status;
 
-    if (dept) { where += ' AND e.department_id = ?'; params.push(dept); }
+    let where = 'WHERE 1=1';
+    const params = [];
+
+    if (effectiveStatus && effectiveStatus !== 'all') {
+      where += ' AND e.status = ?'; params.push(effectiveStatus);
+    }
+
+    const deptVal = dept || department_id;
+    if (deptVal) { where += ' AND e.department_id = ?'; params.push(deptVal); }
     if (search) {
-      where += ' AND (e.first_name LIKE ? OR e.last_name LIKE ? OR e.code LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      where += ' AND (e.first_name LIKE ? OR e.last_name LIKE ? OR e.code LIKE ? OR CONCAT(e.first_name," ",e.last_name) LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     const [employees] = await sequelize.query(`

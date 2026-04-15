@@ -5,19 +5,24 @@ const { sequelize } = require('../config/database');
 router.use(authenticate);
 
 router.get('/', async (req, res) => {
-  const { status, employeeId } = req.query;
+  const { status, employeeId, department_id } = req.query;
   let where = 'WHERE 1=1';
   const params = [];
-  if (status)     { where += ' AND p.status = ?';      params.push(status); }
-  if (employeeId) { where += ' AND p.employee_id = ?'; params.push(employeeId); }
+  if (status)        { where += ' AND p.status = ?';           params.push(status); }
+  if (employeeId)    { where += ' AND p.employee_id = ?';      params.push(employeeId); }
+  if (department_id) { where += ' AND e.department_id = ?';    params.push(department_id); }
 
   const [rows] = await sequelize.query(`
-    SELECT p.*, CONCAT(e.first_name,' ',e.last_name) AS employee_name
+    SELECT p.*,
+      CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+      d.name AS department,
+      e.department_id
     FROM permissions p
     JOIN employees e ON p.employee_id = e.id
+    LEFT JOIN departments d ON e.department_id = d.id
     ${where}
     ORDER BY p.created_at DESC
-    LIMIT 100
+    LIMIT 200
   `, { replacements: params });
 
   res.json(rows);
