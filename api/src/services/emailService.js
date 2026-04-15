@@ -44,12 +44,21 @@ async function getTransporter() {
   }
 
   _config = config;
+  const port   = +config.port;
+  // puerto 465 → SSL directo (secure:true)
+  // puerto 587 / 25 / 2525 → STARTTLS (secure:false, requireTLS para 587)
+  const secure = config.secure ?? (port === 465);
+
   _transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: { user: config.auth.user, pass: config.auth.pass },
-    tls: { rejectUnauthorized: false },
+    host:       config.host,
+    port,
+    secure,
+    auth:       { user: config.auth.user, pass: config.auth.pass },
+    requireTLS: port === 587,   // forzar STARTTLS en puerto 587
+    tls: {
+      rejectUnauthorized: false,   // aceptar certs autofirmados (webmail interno)
+      minVersion: 'TLSv1',         // compatibilidad con servidores legacy
+    },
   });
 
   return _transporter;

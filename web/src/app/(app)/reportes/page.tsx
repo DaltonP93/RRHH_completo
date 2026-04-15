@@ -636,6 +636,11 @@ function TabSMTP() {
     },
   } as any)
 
+  // Al cambiar puerto, auto-sugerir el modo SSL
+  function handlePortChange(port: string) {
+    setForm(p => ({ ...p, port, secure: port === '465' }))
+  }
+
   async function save(e: React.FormEvent) {
     e.preventDefault(); setSaving(true)
     try { await api.put('/api/notifications/smtp', form); alert('Configuración SMTP guardada ✅') }
@@ -650,32 +655,64 @@ function TabSMTP() {
     finally { setTesting(false) }
   }
 
+  // Presets de proveedores comunes
+  const PRESETS = [
+    { label: 'Gmail',       host: 'smtp.gmail.com',        port: '587', secure: false },
+    { label: 'Outlook',     host: 'smtp.office365.com',    port: '587', secure: false },
+    { label: 'Yahoo',       host: 'smtp.mail.yahoo.com',   port: '587', secure: false },
+    { label: 'Webmail cPanel', host: '', port: '587',      secure: false },
+  ]
+
   return (
-    <div className="max-w-lg space-y-5">
-      <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-4 text-sm text-amber-700">
-        La configuración SMTP se usa para enviar reportes automáticos y alertas.
-        Para Gmail use una <strong>App Password</strong> (no la contraseña normal).
-        Vaya a <strong>Cuenta Google → Seguridad → Contraseñas de aplicaciones</strong>.
+    <div className="max-w-2xl space-y-5">
+      {/* Info boxes */}
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-blue-700">
+          <p className="font-semibold mb-1">Puerto 587 — STARTTLS (recomendado)</p>
+          <p>Para webmail corporativo, Gmail, Outlook. Conexión cifrada con negociación TLS. <strong>No</strong> marque SSL/TLS.</p>
+        </div>
+        <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-600">
+          <p className="font-semibold mb-1">Puerto 465 — SSL/TLS directo</p>
+          <p>Conexión cifrada desde el inicio. Marque "Usar SSL/TLS". Para Gmail use una <strong>App Password</strong>, no la contraseña normal.</p>
+        </div>
       </div>
+
+      {/* Presets rápidos */}
+      <div className="flex flex-wrap gap-2">
+        {PRESETS.map(p => (
+          <button key={p.label} type="button"
+            onClick={() => setForm(f => ({ ...f, host: p.host || f.host, port: p.port, secure: p.secure }))}
+            className="text-xs px-3 py-1.5 border border-slate-200 rounded-xl bg-white hover:bg-slate-50 text-slate-600 transition-colors">
+            {p.label}
+          </button>
+        ))}
+      </div>
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
         <form onSubmit={save} className="space-y-4">
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
               <label className="block text-sm font-medium text-slate-700 mb-1">Servidor SMTP</label>
               <input value={form.host} onChange={e => setForm(p => ({ ...p, host: e.target.value }))}
-                placeholder="smtp.gmail.com"
+                placeholder="smtp.gmail.com  /  webmail.miempresa.com"
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Puerto</label>
-              <input value={form.port} onChange={e => setForm(p => ({ ...p, port: e.target.value }))}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <select value={form.port} onChange={e => handlePortChange(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="587">587 — STARTTLS</option>
+                <option value="465">465 — SSL/TLS</option>
+                <option value="25">25 — Sin cifrado</option>
+                <option value="2525">2525 — Alternativo</option>
+              </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Usuario / Email</label>
               <input value={form.user} onChange={e => setForm(p => ({ ...p, user: e.target.value }))}
+                placeholder="usuario@miempresa.com"
                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
@@ -691,8 +728,13 @@ function TabSMTP() {
               className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" checked={form.secure} onChange={e => setForm(p => ({ ...p, secure: e.target.checked }))} className="accent-blue-600 w-4 h-4" />
-            <span className="text-sm text-slate-700">Usar SSL/TLS (puerto 465)</span>
+            <input type="checkbox" checked={form.secure}
+              onChange={e => { setForm(p => ({ ...p, secure: e.target.checked, port: e.target.checked ? '465' : '587' })) }}
+              className="accent-blue-600 w-4 h-4" />
+            <span className="text-sm text-slate-700">
+              Usar SSL/TLS directo (puerto 465)
+              <span className="text-slate-400 text-xs ml-1">— solo si el servidor lo requiere explícitamente</span>
+            </span>
           </label>
           <button type="submit" disabled={saving}
             className="w-full bg-blue-600 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-60 transition-colors">

@@ -18,7 +18,8 @@
     "axios": "^1.6.7",
     "clsx": "^2.1.0",
     "lucide-react": "^0.323.0",
-    "zustand": "^4.5.0"
+    "zustand": "^4.5.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "typescript": "^5.3.3",
