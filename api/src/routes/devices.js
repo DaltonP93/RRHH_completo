@@ -22,41 +22,73 @@ function pingDevice(ip, port, timeout = 3000) {
   });
 }
 
+// Pausa util para reintentos
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 // Serializar cualquier tipo de error como string legible
-// ZKLib lanza objetos {err: ErrorObject, ip, command} — manejamos ese patrón
 function fmtErr(err) {
   if (!err) return 'Error desconocido';
   // Objeto ZKLib: { err: Error, ip: string, command: string }
   if (err && typeof err === 'object' && 'command' in err) {
     const inner = err.err?.message || err.err?.code || '';
     if (err.command === 'TCP CONNECT') {
-      return `No se pudo establecer conexión TCP${inner ? ': ' + inner : '.'}`;
+      return `No se pudo conectar al reloj${inner ? ': ' + inner : '. Verifique la red.'}`;
     }
-    return `Error protocolo ZKTeco [${err.command}]${inner ? ': ' + inner : ': sin respuesta.'}`;
+    if (inner && inner.includes('TIMEOUT_ON_WRITING_MESSAGE') || err.message?.includes('TIMEOUT_ON_WRITING')) {
+      return 'El reloj está siendo usado por otro sistema (att2000). Inténtelo en unos segundos.';
+    }
+    return `Error protocolo ZKTeco [${err.command}]${inner ? ': ' + inner : ': sin respuesta del dispositivo.'}`;
   }
-  if (err.message) return err.message;
+  if (err.message) {
+    if (err.message.includes('TIMEOUT_ON_WRITING_MESSAGE')) {
+      return 'El reloj está ocupado (att2000 tiene sesión activa). Inténtelo en unos segundos.';
+    }
+    return err.message;
+  }
   if (typeof err === 'string') return err;
   try { return JSON.stringify(err); } catch { return String(err); }
 }
 
-// Helper: conectar ZKLib, ejecutar fn, desconectar
-// inPort=0 → OS asigna puerto UDP libre (evita conflicto con puerto 4000 de la API)
-async function withZK(device, fn) {
+/**
+ * Helper: conectar ZKLib, ejecutar fn, desconectar.
+ * Reintenta hasta maxAttempts veces si el dispositivo está ocupado.
+ * inPort=0 → OS asigna puerto local libre.
+ */
+async function withZK(device, fn, { maxAttempts = 3, delayMs = 3000 } = {}) {
   const ZKLib = require('node-zklib');
-  const zk = new ZKLib(device.ip_address, device.port, 10000, 0);
-  try {
-    await zk.createSocket();
-    const result = await fn(zk);
-    await zk.disconnect().catch(() => {});
-    return result;
-  } catch (err) {
-    await zk.disconnect().catch(() => {});
-    // Convertir objeto ZKLib a Error legible antes de relanzar
-    if (err && typeof err === 'object' && 'command' in err) {
-      throw new Error(fmtErr(err));
+  let lastErr;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const zk = new ZKLib(device.ip_address, device.port, 12000, 0);
+    try {
+      await zk.createSocket();
+      const result = await fn(zk);
+      await zk.disconnect().catch(() => {});
+      return result;
+    } catch (err) {
+      await zk.disconnect().catch(() => {});
+      lastErr = err;
+
+      // Decidir si reintentar
+      const msg = err?.message || err?.err?.message || '';
+      const isBusy = msg.includes('TIMEOUT_ON_WRITING') || msg.includes('TIMEOUT_ON_WRITING_MESSAGE');
+      const isConnRefused = msg.includes('ECONNREFUSED') || (err && 'command' in err && err.command === 'TCP CONNECT');
+
+      if (isConnRefused) break; // no reintentar si el puerto está cerrado
+
+      if (isBusy && attempt < maxAttempts) {
+        await sleep(delayMs);
+        continue;
+      }
+      break;
     }
-    throw err;
   }
+
+  // Convertir error ZKLib a Error legible
+  if (lastErr && typeof lastErr === 'object' && 'command' in lastErr) {
+    throw new Error(fmtErr(lastErr));
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(fmtErr(lastErr));
 }
 
 // GET /api/devices
@@ -135,63 +167,70 @@ router.delete('/:id', authorize('admin'), async (req, res) => {
 });
 
 // GET /api/devices/:id/info — info completa del reloj vía ZKLib
+// Si el reloj está ocupado, devuelve datos parciales de la BD (no 500).
 router.get('/:id/info', authorize('admin','gestor','hr'), async (req, res) => {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
+
+  // ── Datos base que siempre devolvemos (desde la BD) ──────────
+  const baseInfo = {
+    ok: true,
+    device: device.name,
+    ip: device.ip_address,
+    port: device.port,
+    location: device.location,
+    serialNumber: device.serial_no || null,
+    _source: 'db',      // indica que son datos de la BD, no en vivo
+  };
 
   try {
     const result = await withZK(device, async zk => {
       const info = {};
 
-      // ── 1. Campos básicos via getInfo() ──────────────────────
+      // ── 1. getInfo() — campos básicos (userCounts, logCounts, logCapacity) ──
       try {
         const basic = await zk.getInfo();
-        Object.assign(info, basic); // userCounts, logCounts, logCapacity
+        Object.assign(info, basic);
       } catch {}
 
-      // ── 2. Parsear más campos del buffer CMD_GET_FREE_SIZES ───
-      // Offsets corregidos empíricamente con Gerencia (3000T-C, FW 6.60):
-      //   Confirmados: 24=userCounts, 40=logCounts, 72=logCapacity
-      //   Empíricos:   32=fpCount, 44=superLogCount, 52=faceCount, 56=adminCount
-      //   Capacidades: probamos antes de los conteos (8, 12, 16)
+      // ── 2. CMD_GET_FREE_SIZES (50) — conteos y capacidades extendidas ──────
+      // Offsets confirmados en Gerencia (3000T-C FW 6.60):
+      //   24=userCounts, 32=fpCount, 40=logCounts, 44=superLogCount
+      //   52=faceCount, 56=adminCount, 72=logCapacity
+      //   8=freeFpSlots, 12=freeUserSlots
       try {
-        const buf = await zk.executeCmd(50, ''); // CMD_GET_FREE_SIZES = 50
-        const safe = (offset) => {
-          try { return buf.length > offset + 3 ? buf.readUIntLE(offset, 4) : undefined; } catch { return undefined; }
+        const buf = await zk.executeCmd(50, '');
+        const safe = (off) => {
+          try { return buf.length > off + 3 ? buf.readUIntLE(off, 4) : undefined; } catch { return undefined; }
         };
+        const set = (k, v) => { if (v !== undefined) info[k] = v; };
 
-        const assign = (key, val) => { if (val !== undefined) info[key] = val; };
+        set('fpCount',       safe(32));
+        set('superLogCount', safe(44));
+        set('faceCount',     safe(52));
+        set('adminCount',    safe(56));
 
-        // Conteos (offsets corregidos)
-        assign('fpCount',       safe(32)); // ✓ empírico
-        assign('superLogCount', safe(44)); // ✓
-        assign('faceCount',     safe(52)); // ✓
-        assign('adminCount',    safe(56)); // ✓ empírico
-
-        // Capacidades: offset 8 = slots libres de huella, offset 12 = slots libres de usuario
-        // Total = libres + usados (confirmado: 28889 + 1111 = 30000 usuarios, 1834 + 2366 = 4200 huellas)
+        // Capacidades = slots libres + usados
         const freeFpCount   = safe(8);
         const freeUserCount = safe(12);
-        if (freeUserCount !== undefined) assign('userCapacity', freeUserCount + (info.userCounts || 0));
-        if (freeFpCount   !== undefined) assign('fpCapacity',   freeFpCount   + (info.fpCount   || 0));
+        if (freeUserCount !== undefined) set('userCapacity', freeUserCount + (info.userCounts || 0));
+        if (freeFpCount   !== undefined) set('fpCapacity',   freeFpCount   + (info.fpCount   || 0));
       } catch {}
 
-      // ── 3. Metadata via CMD_OPTIONS_RRQ (11) ─────────────────
-      // ZKTeco devuelve "clave=valor\0", extraer solo el valor.
-      // Prefijo ~ requerido para opciones de sistema en esta familia de firmware.
+      // ── 3. CMD_OPTIONS_RRQ (11) — metadata del dispositivo ───────────────
+      // ZKTeco devuelve "clave=valor\0"; necesita prefijo ~ para opciones de sistema.
       const parseOptVal = (buf) => {
         const raw = buf.slice(8).toString('ascii').replace(/\0/g, '').trim();
         return raw.includes('=') ? raw.substring(raw.indexOf('=') + 1).trim() : raw;
       };
 
-      // Intentar primero con ~ (opciones de sistema), luego sin ~
       const metaKeys = [
-        [['~ProductName',  'ProductName'],  'productName'],
-        [['~FirmVer',      'FirmVer'],      'firmwareVersion'],
-        [['~SerialNumber', 'SerialNumber'], 'serialNumber'],
-        [['~Platform',     'Platform'],     'platform'],
-        [['~ZKFPVersion'],                  'fpVersion'],
-        [['~Produce_Time', 'ManufactureTime'], 'manufactureTime'],
+        [['~ProductName',  'ProductName'],       'productName'],
+        [['~FirmVer',      'FirmVer'],           'firmwareVersion'],
+        [['~SerialNumber', 'SerialNumber'],       'serialNumber'],
+        [['~Platform',     'Platform'],           'platform'],
+        [['~ZKFPVersion'],                        'fpVersion'],
+        [['~Produce_Time', 'ManufactureTime'],    'manufactureTime'],
       ];
       for (const [keys, field] of metaKeys) {
         for (const key of keys) {
@@ -205,11 +244,31 @@ router.get('/:id/info', authorize('admin','gestor','hr'), async (req, res) => {
       }
 
       return info;
-    });
+    }, { maxAttempts: 3, delayMs: 3000 });
 
-    res.json({ ok: true, device: device.name, ip: device.ip_address, ...result });
+    // Guardar serial en BD si lo obtuvimos
+    if (result.serialNumber && !device.serial_no) {
+      sequelize.query('UPDATE devices SET serial_no=? WHERE id=?',
+        { replacements: [result.serialNumber, device.id] }).catch(() => {});
+    }
+
+    res.json({ ...baseInfo, ...result, _source: 'live' });
+
   } catch (err) {
-    res.status(500).json({ ok: false, error: fmtErr(err) });
+    const msg = fmtErr(err);
+    const isBusy = msg.includes('ocupado') || msg.includes('att2000') || msg.includes('TIMEOUT');
+
+    // Si el reloj está ocupado, devolver 200 con datos parciales de la BD
+    // para que el frontend pueda mostrar algo útil
+    if (isBusy) {
+      return res.json({
+        ...baseInfo,
+        _source: 'db',
+        _warning: msg,
+      });
+    }
+
+    res.status(503).json({ ok: false, error: msg });
   }
 });
 
@@ -221,10 +280,10 @@ router.get('/:id/users', authorize('admin','gestor'), async (req, res) => {
     const users = await withZK(device, async zk => {
       const { data } = await zk.getUsers();
       return data;
-    });
+    }, { maxAttempts: 3, delayMs: 3000 });
     res.json({ device: device.name, users, total: users.length });
   } catch (err) {
-    res.status(500).json({ ok: false, error: fmtErr(err) });
+    res.status(503).json({ ok: false, error: fmtErr(err) });
   }
 });
 
@@ -236,7 +295,7 @@ router.post('/:id/backup', authorize('admin','gestor'), async (req, res) => {
     const logs = await withZK(device, async zk => {
       const { data } = await zk.getAttendances();
       return data;
-    });
+    }, { maxAttempts: 4, delayMs: 4000 });
 
     let imported = 0, skipped = 0;
     for (const log of logs) {
@@ -261,7 +320,7 @@ router.post('/:id/backup', authorize('admin','gestor'), async (req, res) => {
     await sequelize.query('UPDATE devices SET last_sync=NOW() WHERE id=?', { replacements: [device.id] });
     res.json({ ok: true, total: logs.length, imported, skipped });
   } catch (err) {
-    res.status(500).json({ ok: false, error: fmtErr(err) });
+    res.status(503).json({ ok: false, error: fmtErr(err) });
   }
 });
 
@@ -270,10 +329,10 @@ router.post('/:id/clear', authorize('admin'), async (req, res) => {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
   try {
-    await withZK(device, zk => zk.clearAttendanceLog());
+    await withZK(device, zk => zk.clearAttendanceLog(), { maxAttempts: 3, delayMs: 3000 });
     res.json({ ok: true, message: `Registros eliminados del reloj ${device.name}` });
   } catch (err) {
-    res.status(500).json({ ok: false, error: fmtErr(err) });
+    res.status(503).json({ ok: false, error: fmtErr(err) });
   }
 });
 
@@ -282,10 +341,10 @@ router.post('/:id/disable', authorize('admin','gestor'), async (req, res) => {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
   try {
-    await withZK(device, zk => zk.disableDevice());
+    await withZK(device, zk => zk.disableDevice(), { maxAttempts: 3, delayMs: 3000 });
     res.json({ ok: true, message: `Reloj ${device.name} deshabilitado` });
   } catch (err) {
-    res.status(500).json({ ok: false, error: fmtErr(err) });
+    res.status(503).json({ ok: false, error: fmtErr(err) });
   }
 });
 
@@ -294,10 +353,10 @@ router.post('/:id/enable', authorize('admin','gestor'), async (req, res) => {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
   try {
-    await withZK(device, zk => zk.enableDevice());
+    await withZK(device, zk => zk.enableDevice(), { maxAttempts: 3, delayMs: 3000 });
     res.json({ ok: true, message: `Reloj ${device.name} habilitado` });
   } catch (err) {
-    res.status(500).json({ ok: false, error: fmtErr(err) });
+    res.status(503).json({ ok: false, error: fmtErr(err) });
   }
 });
 

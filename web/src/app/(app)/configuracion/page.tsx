@@ -486,26 +486,46 @@ function RelojesTab() {
                             <div className="py-6 text-center text-slate-400 text-sm">Leyendo información del reloj...</div>
                           )}
 
+                          {/* Error total — reloj no accesible */}
                           {data.info?.error && (
                             <div className="flex items-start gap-2 p-3 bg-red-50 rounded-xl text-red-600 text-sm">
                               <XCircle size={16} className="flex-shrink-0 mt-0.5"/>
                               <div>
                                 <p className="font-medium">No se pudo leer la información</p>
                                 <p className="text-xs mt-1 font-mono">{data.info.error}</p>
+                                <button onClick={() => loadInfo(d)} className="mt-2 text-xs text-red-700 underline">Reintentar</button>
                               </div>
+                            </div>
+                          )}
+
+                          {/* Advertencia — reloj ocupado, datos parciales de BD */}
+                          {data.info?._warning && (
+                            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
+                              <AlertCircle size={16} className="flex-shrink-0 mt-0.5"/>
+                              <div className="flex-1">
+                                <p className="font-medium">Reloj ocupado — mostrando datos en caché</p>
+                                <p className="text-xs mt-0.5 text-amber-600">{data.info._warning}</p>
+                              </div>
+                              <button onClick={() => loadInfo(d)} className="text-xs text-amber-700 underline whitespace-nowrap">Reintentar</button>
                             </div>
                           )}
 
                           {data.info && !data.info.error && (() => {
                             const inf = data.info
+                            const isLive = inf._source === 'live'
                             const fmt = (v: any) => v !== undefined && v !== null ? Number(v).toLocaleString() : '—'
                             const str = (v: any) => v || '—'
                             return (
                               <div className="space-y-4">
-                                {/* Sección Información — layout 2 columnas como ZKTeco */}
+                                {/* Sección Información — layout 2 columnas estilo ZKTeco */}
                                 <div className="border border-slate-100 rounded-xl overflow-hidden">
-                                  <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
+                                  <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 flex items-center justify-between">
                                     <p className="text-xs font-semibold text-slate-600">Información</p>
+                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                      isLive ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                    }`}>
+                                      {isLive ? '● En vivo' : '● Caché BD'}
+                                    </span>
                                   </div>
                                   <div className="grid grid-cols-2 divide-x divide-slate-100">
                                     <table className="text-xs w-full">
@@ -547,41 +567,28 @@ function RelojesTab() {
                                   </div>
                                 </div>
 
-                                {/* Sección Capacity */}
-                                <div className="border border-slate-100 rounded-xl overflow-hidden">
-                                  <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
-                                    <p className="text-xs font-semibold text-slate-600">Capacity</p>
-                                  </div>
-                                  <div className="grid grid-cols-4 text-xs divide-x divide-slate-100">
-                                    {[
-                                      ['User',        inf.userCapacity],
-                                      ['Fingerprint', inf.fpCapacity],
-                                      ['Log',         inf.logCapacity],
-                                      ['Face',        inf.faceCapacity ?? 0],
-                                    ].map(([label, val]) => (
-                                      <div key={String(label)} className="px-4 py-3 text-center">
-                                        <p className="text-slate-500 mb-1">{label}</p>
-                                        <p className="text-base font-bold text-slate-800">{val !== undefined && Number(val) > 0 ? Number(val).toLocaleString() : '—'}</p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-
-                                {/* Debug: buffer raw (quitar cuando se confirmen los offsets) */}
-                                {inf._rawOffsets && (
-                                  <details className="border border-slate-100 rounded-xl overflow-hidden">
-                                    <summary className="bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-500 cursor-pointer">
-                                      🔍 Buffer raw (debug — click para expandir)
-                                    </summary>
-                                    <div className="grid grid-cols-4 gap-1 p-3 font-mono text-xs max-h-48 overflow-y-auto bg-slate-50">
-                                      {(inf._rawOffsets as [number,number][]).filter(([,v]) => v > 0).map(([offset, val]) => (
-                                        <div key={offset} className="flex gap-1">
-                                          <span className="text-slate-400 w-7">[{offset}]</span>
-                                          <span className="text-slate-700 font-medium">{val.toLocaleString()}</span>
+                                {/* Sección Capacity — solo si tenemos datos en vivo */}
+                                {isLive && (
+                                  <div className="border border-slate-100 rounded-xl overflow-hidden">
+                                    <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
+                                      <p className="text-xs font-semibold text-slate-600">Capacidad</p>
+                                    </div>
+                                    <div className="grid grid-cols-4 text-xs divide-x divide-slate-100">
+                                      {[
+                                        ['Usuario',   inf.userCapacity],
+                                        ['Huella',    inf.fpCapacity],
+                                        ['Registros', inf.logCapacity],
+                                        ['Facial',    inf.faceCapacity ?? 0],
+                                      ].map(([label, val]) => (
+                                        <div key={String(label)} className="px-4 py-3 text-center">
+                                          <p className="text-slate-500 mb-1">{label}</p>
+                                          <p className="text-base font-bold text-slate-800">
+                                            {val !== undefined && Number(val) > 0 ? Number(val).toLocaleString() : '—'}
+                                          </p>
                                         </div>
                                       ))}
                                     </div>
-                                  </details>
+                                  </div>
                                 )}
                               </div>
                             )
