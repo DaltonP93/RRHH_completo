@@ -17,7 +17,7 @@ const ZKLib = require('node-zklib');
  * @returns {Array}        - Array de { userId, timestamp, ... }
  */
 async function syncDevice(device, afterTs) {
-  const zk = new ZKLib(device.ip, device.port, 10000, 4000);
+  const zk = new ZKLib(device.ip, device.port, 10000, 0); // inPort=0: OS asigna puerto libre
   let socket;
 
   try {
@@ -51,7 +51,7 @@ async function syncDevice(device, afterTs) {
  * Conectar a un reloj y obtener info básica (para verificar conectividad)
  */
 async function connectToDevice(device) {
-  const zk = new ZKLib(device.ip, device.port, 5000, 2000);
+  const zk = new ZKLib(device.ip, device.port, 5000, 0);
   try {
     await zk.createSocket();
     const info = await zk.getInfo();
@@ -66,7 +66,7 @@ async function connectToDevice(device) {
  * Obtener todos los usuarios registrados en el reloj
  */
 async function getDeviceUsers(device) {
-  const zk = new ZKLib(device.ip, device.port, 10000, 4000);
+  const zk = new ZKLib(device.ip, device.port, 10000, 0);
   try {
     await zk.createSocket();
     const result = await zk.getUsers();

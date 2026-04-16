@@ -201,20 +201,25 @@ async function main() {
   startPushServer(publishAttendance, logger);
 
   // Modo 2: Polling periódico por ZKLib
-  const intervalMs = parseInt(process.env.ZKTECO_POLL_INTERVAL || '30000');
-  logger.info(`🔁 Polling cada ${intervalMs / 1000}s vía ZKLib`);
-
-  // Poll inicial (escalonado para no saturar)
-  for (let i = 0; i < devices.length; i++) {
-    setTimeout(() => pollDevice(devices[i]), i * 3000);
-  }
-
-  // Intervalo de polling
-  setInterval(async () => {
-    for (const device of devices) {
-      await pollDevice(device).catch(() => {});
+  // DESACTIVADO por defecto — requiere ZKTECO_AUTO_POLL=true en .env
+  // El protocolo ZKTeco solo admite UNA conexión TCP simultánea.
+  // Con polling activo, la API no puede conectar a los relojes bajo demanda.
+  const autoPoll = process.env.ZKTECO_AUTO_POLL === 'true';
+  if (autoPoll) {
+    const intervalMs = parseInt(process.env.ZKTECO_POLL_INTERVAL || '60000');
+    logger.info(`🔁 Auto-polling activo cada ${intervalMs / 1000}s vía ZKLib`);
+    for (let i = 0; i < devices.length; i++) {
+      setTimeout(() => pollDevice(devices[i]), i * 5000);
     }
-  }, intervalMs);
+    setInterval(async () => {
+      for (const device of devices) {
+        await pollDevice(device).catch(() => {});
+      }
+    }, intervalMs);
+  } else {
+    logger.info('⏸️  Auto-polling desactivado (ZKTECO_AUTO_POLL=true para activar)');
+    logger.info('   Los relojes se conectan bajo demanda desde la UI.');
+  }
 
   // API del Bridge
   startBridgeApi(devices);

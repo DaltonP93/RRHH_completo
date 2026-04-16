@@ -340,10 +340,7 @@ function RelojesTab() {
   function toggleExpand(id: number) {
     const opening = expanded !== id
     setExpanded(opening ? id : null)
-    if (opening) {
-      const d = devices.find(x => x.id === id)
-      if (d && !deviceData[id]?.info) loadInfo(d)
-    }
+    // NO auto-carga info al expandir — el usuario hace clic en "Conectar"
   }
 
   return (
@@ -454,102 +451,131 @@ function RelojesTab() {
 
                 {/* Panel expandido */}
                 {isOpen && (
-                  <div className="border-t border-slate-100">
-                    {/* Sub-tabs */}
-                    <div className="flex border-b border-slate-100 bg-white">
-                      {[
-                        { id: 'info',     label: '📊 Información',       icon: <Info size={13}/> },
-                        { id: 'usuarios', label: '👥 Usuarios',           icon: <Users size={13}/> },
-                        { id: 'funciones',label: '⚙️ Funciones avanzadas', icon: <Settings2 size={13}/> },
-                      ].map(st => (
-                        <button key={st.id} onClick={() => {
-                          setTab(d.id, st.id as any)
-                          if (st.id === 'info' && !data.info) loadInfo(d)
-                          if (st.id === 'usuarios' && !data.users) loadUsers(d)
-                        }}
-                          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-                            tab === st.id ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-transparent text-slate-500 hover:text-slate-700'
-                          }`}>
-                          {st.label}
+                  <div className="border-t border-slate-100 bg-white">
+
+                    {/* ── Estado de conexión + botón Conectar ── */}
+                    {!data.info && !deviceLoading[d.id] && (
+                      <div className="p-5 flex flex-col items-center gap-4 text-center">
+                        <div className="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center">
+                          <Server size={24} className="text-blue-500"/>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-800">Conectar al reloj</p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Establecerá una conexión directa vía protocolo ZKTeco (puerto 4370).<br/>
+                            Asegúrese de que ningún otro software esté usando el reloj.
+                          </p>
+                        </div>
+                        <button onClick={() => loadInfo(d)}
+                          className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">
+                          <Wifi size={15}/> Conectar al reloj
                         </button>
-                      ))}
-                    </div>
+                      </div>
+                    )}
 
-                    <div className="p-4 bg-white">
-                      {/* TAB: INFORMACIÓN */}
-                      {tab === 'info' && (
-                        <div className="space-y-4">
-                          {/* Header con botón recargar */}
-                          {(data.info || deviceLoading[d.id] === 'info') && (
-                            <div className="flex items-center justify-between">
-                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Información del dispositivo</p>
-                              <button onClick={() => loadInfo(d)} disabled={deviceLoading[d.id] === 'info'}
-                                className="flex items-center gap-1 text-xs text-blue-600 hover:underline disabled:opacity-50">
-                                <RefreshCw size={11} className={deviceLoading[d.id] === 'info' ? 'animate-spin' : ''}/> Recargar
-                              </button>
-                            </div>
-                          )}
+                    {/* Conectando... */}
+                    {deviceLoading[d.id] === 'info' && !data.info && (
+                      <div className="p-8 flex flex-col items-center gap-3 text-slate-500">
+                        <RefreshCw size={24} className="animate-spin text-blue-500"/>
+                        <p className="text-sm font-medium">Conectando a {d.ip_address}:{d.port}...</p>
+                        <p className="text-xs text-slate-400">Protocolo ZKTeco — puede tardar hasta 15 segundos</p>
+                      </div>
+                    )}
 
-                          {deviceLoading[d.id] === 'info' && !data.info && (
-                            <div className="py-6 text-center text-slate-400 text-sm">Leyendo información del reloj...</div>
-                          )}
+                    {/* Error de conexión */}
+                    {data.info?.error && (
+                      <div className="p-4 space-y-3">
+                        <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
+                          <XCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5"/>
+                          <div className="flex-1">
+                            <p className="font-semibold text-red-700 text-sm">No se pudo conectar al reloj</p>
+                            <p className="text-xs text-red-600 mt-1 font-mono">{data.info.error}</p>
+                            <p className="text-xs text-red-500 mt-2">
+                              Verifique que el Attendance Management (Windows) esté cerrado y que el reloj esté encendido.
+                            </p>
+                          </div>
+                        </div>
+                        <button onClick={() => { setDeviceData(p => ({...p, [d.id]: {}})); loadInfo(d) }}
+                          className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
+                          <RefreshCw size={13}/> Reintentar conexión
+                        </button>
+                      </div>
+                    )}
 
-                          {/* Error total — reloj no accesible */}
-                          {data.info?.error && (
-                            <div className="flex items-start gap-2 p-3 bg-red-50 rounded-xl text-red-600 text-sm">
-                              <XCircle size={16} className="flex-shrink-0 mt-0.5"/>
-                              <div>
-                                <p className="font-medium">No se pudo leer la información</p>
-                                <p className="text-xs mt-1 font-mono">{data.info.error}</p>
-                                <button onClick={() => loadInfo(d)} className="mt-2 text-xs text-red-700 underline">Reintentar</button>
-                              </div>
-                            </div>
-                          )}
+                    {/* Reloj ocupado (datos en caché) */}
+                    {data.info?._warning && !data.info?.error && (
+                      <div className="px-4 pt-4">
+                        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs">
+                          <AlertCircle size={14} className="flex-shrink-0 mt-0.5"/>
+                          <div className="flex-1">
+                            <p className="font-semibold">Reloj ocupado — datos en caché</p>
+                            <p className="mt-0.5 text-amber-600">{data.info._warning}</p>
+                          </div>
+                          <button onClick={() => loadInfo(d)} className="underline whitespace-nowrap">Reintentar</button>
+                        </div>
+                      </div>
+                    )}
 
-                          {/* Advertencia — reloj ocupado, datos parciales de BD */}
-                          {data.info?._warning && (
-                            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
-                              <AlertCircle size={16} className="flex-shrink-0 mt-0.5"/>
-                              <div className="flex-1">
-                                <p className="font-medium">Reloj ocupado — mostrando datos en caché</p>
-                                <p className="text-xs mt-0.5 text-amber-600">{data.info._warning}</p>
-                              </div>
-                              <button onClick={() => loadInfo(d)} className="text-xs text-amber-700 underline whitespace-nowrap">Reintentar</button>
-                            </div>
-                          )}
+                    {/* ── Conectado: mostrar tabs ── */}
+                    {data.info && !data.info.error && (
+                      <>
+                        {/* Header: conectado + botón reconectar */}
+                        <div className="flex items-center justify-between px-4 pt-3 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-green-500 inline-block"/>
+                            <span className="text-xs font-semibold text-green-700">
+                              {data.info._source === 'live' ? 'Conectado — datos en vivo' : 'Datos en caché'}
+                            </span>
+                          </div>
+                          <button onClick={() => loadInfo(d)} disabled={deviceLoading[d.id] === 'info'}
+                            className="flex items-center gap-1 text-xs text-slate-500 hover:text-blue-600 disabled:opacity-50">
+                            <RefreshCw size={11} className={deviceLoading[d.id] === 'info' ? 'animate-spin' : ''}/> Recargar
+                          </button>
+                        </div>
 
-                          {data.info && !data.info.error && (() => {
+                        {/* Sub-tabs */}
+                        <div className="flex border-b border-slate-100">
+                          {[
+                            { id: 'info',      label: '📊 Información' },
+                            { id: 'usuarios',  label: '👥 Usuarios' },
+                            { id: 'funciones', label: '⬇️ Descargar' },
+                          ].map(st => (
+                            <button key={st.id} onClick={() => {
+                              setTab(d.id, st.id as any)
+                              if (st.id === 'usuarios' && !data.users) loadUsers(d)
+                            }}
+                              className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                                tab === st.id ? 'border-blue-500 text-blue-600 bg-blue-50' : 'border-transparent text-slate-500 hover:text-slate-700'
+                              }`}>
+                              {st.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="p-4">
+                          {/* TAB: INFORMACIÓN */}
+                          {tab === 'info' && (() => {
                             const inf = data.info
                             const isLive = inf._source === 'live'
                             const fmt = (v: any) => v !== undefined && v !== null ? Number(v).toLocaleString() : '—'
                             const str = (v: any) => v || '—'
                             return (
                               <div className="space-y-4">
-                                {/* Sección Información — layout 2 columnas estilo ZKTeco */}
                                 <div className="border border-slate-100 rounded-xl overflow-hidden">
-                                  <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 flex items-center justify-between">
-                                    <p className="text-xs font-semibold text-slate-600">Información</p>
-                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                                      isLive ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                                    }`}>
-                                      {isLive ? '● En vivo' : '● Caché BD'}
-                                    </span>
-                                  </div>
                                   <div className="grid grid-cols-2 divide-x divide-slate-100">
                                     <table className="text-xs w-full">
                                       <tbody className="divide-y divide-slate-50">
                                         {[
-                                          ['User Count',         fmt(inf.userCounts)],
-                                          ['Fingerprint Count',  fmt(inf.fpCount)],
-                                          ['Fingerprint Version',str(inf.fpVersion)],
-                                          ['Face Count',         fmt(inf.faceCount)],
-                                          ['Face Version',       str(inf.faceVersion)],
-                                          ['Manufacture time',   str(inf.manufactureTime)],
-                                          ['Serial Number',      str(inf.serialNumber)],
+                                          ['Usuarios registrados', fmt(inf.userCounts)],
+                                          ['Huellas digitales',    fmt(inf.fpCount)],
+                                          ['Versión huella',       str(inf.fpVersion)],
+                                          ['Registros faciales',   fmt(inf.faceCount)],
+                                          ['Fecha fabricación',    str(inf.manufactureTime)],
+                                          ['Número de serie',      str(inf.serialNumber)],
                                         ].map(([label, val]) => (
                                           <tr key={label}>
-                                            <td className="px-3 py-1.5 text-slate-500 w-36">{label}</td>
-                                            <td className="px-3 py-1.5 text-slate-800 font-medium">{val}</td>
+                                            <td className="px-3 py-1.5 text-slate-500 w-40">{label}</td>
+                                            <td className="px-3 py-1.5 text-slate-800 font-semibold">{val}</td>
                                           </tr>
                                         ))}
                                       </tbody>
@@ -557,165 +583,155 @@ function RelojesTab() {
                                     <table className="text-xs w-full">
                                       <tbody className="divide-y divide-slate-50">
                                         {[
-                                          ['Password count',     fmt(inf.pwdCount)],
-                                          ['Log Count',          fmt(inf.logCounts)],
-                                          ['Super log count',    fmt(inf.superLogCount)],
-                                          ['Administrator Count',fmt(inf.adminCount)],
-                                          ['Product Name',       str(inf.productName)],
-                                          ['Firmware version',   str(inf.firmwareVersion)],
-                                          ['Platform',           str(inf.platform)],
+                                          ['Marcaciones totales', fmt(inf.logCounts)],
+                                          ['Administradores',     fmt(inf.adminCount)],
+                                          ['Producto',            str(inf.productName)],
+                                          ['Firmware',            str(inf.firmwareVersion)],
+                                          ['Plataforma',          str(inf.platform)],
+                                          ['Capacidad registros', fmt(inf.logCapacity)],
                                         ].map(([label, val]) => (
                                           <tr key={label}>
-                                            <td className="px-3 py-1.5 text-slate-500 w-36">{label}</td>
-                                            <td className="px-3 py-1.5 text-slate-800 font-medium">{val}</td>
+                                            <td className="px-3 py-1.5 text-slate-500 w-40">{label}</td>
+                                            <td className="px-3 py-1.5 text-slate-800 font-semibold">{val}</td>
                                           </tr>
                                         ))}
                                       </tbody>
                                     </table>
                                   </div>
                                 </div>
-
-                                {/* Sección Capacity — solo si tenemos datos en vivo */}
-                                {isLive && (
-                                  <div className="border border-slate-100 rounded-xl overflow-hidden">
-                                    <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
-                                      <p className="text-xs font-semibold text-slate-600">Capacidad</p>
-                                    </div>
-                                    <div className="grid grid-cols-4 text-xs divide-x divide-slate-100">
-                                      {[
-                                        ['Usuario',   inf.userCapacity],
-                                        ['Huella',    inf.fpCapacity],
-                                        ['Registros', inf.logCapacity],
-                                        ['Facial',    inf.faceCapacity ?? 0],
-                                      ].map(([label, val]) => (
-                                        <div key={String(label)} className="px-4 py-3 text-center">
-                                          <p className="text-slate-500 mb-1">{label}</p>
-                                          <p className="text-base font-bold text-slate-800">
-                                            {val !== undefined && Number(val) > 0 ? Number(val).toLocaleString() : '—'}
-                                          </p>
-                                        </div>
-                                      ))}
-                                    </div>
+                                {isLive && inf.userCapacity && (
+                                  <div className="grid grid-cols-3 gap-3 text-center text-xs">
+                                    {[
+                                      ['Cap. usuarios', inf.userCapacity, 'blue'],
+                                      ['Cap. huellas',  inf.fpCapacity,   'purple'],
+                                      ['Cap. registros',inf.logCapacity,  'green'],
+                                    ].map(([label, val, color]) => (
+                                      <div key={String(label)} className={`rounded-xl border p-3 bg-${color}-50 border-${color}-100`}>
+                                        <p className={`text-${color}-500 mb-1`}>{label}</p>
+                                        <p className={`text-lg font-bold text-${color}-700`}>{Number(val) > 0 ? Number(val).toLocaleString() : '—'}</p>
+                                      </div>
+                                    ))}
                                   </div>
                                 )}
                               </div>
                             )
                           })()}
 
-                          {!deviceLoading[d.id] && !data.info && (
-                            <button onClick={() => loadInfo(d)} className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
-                              <RefreshCw size={14}/> Cargar información del reloj
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {/* TAB: USUARIOS */}
-                      {tab === 'usuarios' && (
-                        <div>
-                          {deviceLoading[d.id] === 'users' && (
-                            <div className="py-6 text-center text-slate-400 text-sm">Leyendo usuarios del reloj...</div>
-                          )}
-                          {data.users?.error && (
-                            <div className="flex items-start gap-2 p-3 bg-red-50 rounded-xl text-red-600 text-sm">
-                              <XCircle size={16} className="flex-shrink-0 mt-0.5"/>
-                              <div>
-                                <p className="font-medium">No se pudo leer los usuarios</p>
-                                <p className="text-xs mt-0.5">{data.users.error}</p>
-                              </div>
+                          {/* TAB: USUARIOS */}
+                          {tab === 'usuarios' && (
+                            <div>
+                              {deviceLoading[d.id] === 'users' && (
+                                <div className="py-8 flex flex-col items-center gap-3 text-slate-400">
+                                  <RefreshCw size={20} className="animate-spin text-blue-500"/>
+                                  <p className="text-sm">Leyendo usuarios del reloj...</p>
+                                </div>
+                              )}
+                              {data.users?.error && (
+                                <div className="flex items-start gap-2 p-3 bg-red-50 rounded-xl text-red-600 text-sm">
+                                  <XCircle size={16} className="flex-shrink-0 mt-0.5"/>
+                                  <div>
+                                    <p className="font-medium">No se pudo leer los usuarios</p>
+                                    <p className="text-xs mt-0.5">{data.users.error}</p>
+                                    <button onClick={() => loadUsers(d)} className="mt-2 text-xs underline">Reintentar</button>
+                                  </div>
+                                </div>
+                              )}
+                              {data.users?.users && (
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-sm font-semibold text-slate-700">
+                                      {data.users.total} usuario{data.users.total !== 1 ? 's' : ''} enrolado{data.users.total !== 1 ? 's' : ''}
+                                    </p>
+                                    <button onClick={() => loadUsers(d)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                                      <RefreshCw size={12}/> Actualizar
+                                    </button>
+                                  </div>
+                                  <div className="max-h-64 overflow-y-auto rounded-xl border border-slate-100">
+                                    <table className="w-full text-xs">
+                                      <thead className="bg-slate-50 sticky top-0">
+                                        <tr>
+                                          <th className="text-left px-3 py-2 text-slate-500 font-medium">ID</th>
+                                          <th className="text-left px-3 py-2 text-slate-500 font-medium">Nombre</th>
+                                          <th className="text-left px-3 py-2 text-slate-500 font-medium">Rol</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-50">
+                                        {data.users.users.map((u: any, i: number) => (
+                                          <tr key={i} className="hover:bg-slate-50">
+                                            <td className="px-3 py-2 font-mono text-slate-600">{u.userId}</td>
+                                            <td className="px-3 py-2 text-slate-800">{u.name || <span className="text-slate-400 italic">sin nombre</span>}</td>
+                                            <td className="px-3 py-2">
+                                              <span className={`px-1.5 py-0.5 rounded font-medium ${u.privilege === 14 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                {u.privilege === 14 ? 'Admin' : 'Usuario'}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+                              {!deviceLoading[d.id] && !data.users && (
+                                <button onClick={() => loadUsers(d)} className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
+                                  <Users size={14}/> Cargar usuarios del reloj
+                                </button>
+                              )}
                             </div>
                           )}
-                          {data.users?.users && (
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between mb-3">
-                                <p className="text-sm text-slate-600 font-medium">
-                                  {data.users.total} usuario{data.users.total !== 1 ? 's' : ''} registrado{data.users.total !== 1 ? 's' : ''}
-                                </p>
-                                <button onClick={() => loadUsers(d)} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                                  <RefreshCw size={12}/> Actualizar
+
+                          {/* TAB: DESCARGAR */}
+                          {tab === 'funciones' && (
+                            <div className="space-y-4">
+                              {/* Acción principal */}
+                              <div className="border-2 border-blue-200 bg-blue-50 rounded-xl p-4 space-y-3">
+                                <div>
+                                  <p className="font-semibold text-blue-900 text-sm">Descargar marcaciones del reloj</p>
+                                  <p className="text-xs text-blue-700 mt-0.5">
+                                    Lee todas las marcaciones del reloj y las guarda en att2000 y MySQL local.
+                                    Luego podés sincronizar desde la pestaña "Sincronización BD".
+                                  </p>
+                                </div>
+                                <button onClick={() => doBackup(d, true)} disabled={!!busy}
+                                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                                  <Database size={16} className={busy === 'backup' ? 'animate-bounce' : ''}/>
+                                  {busy === 'backup' ? 'Descargando marcaciones...' : '⬇️  Descargar → att2000 + MySQL local'}
+                                </button>
+                                <button onClick={() => doBackup(d, false)} disabled={!!busy}
+                                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-blue-200 text-blue-700 rounded-xl text-xs hover:bg-blue-100 disabled:opacity-50">
+                                  <Download size={13}/> Solo MySQL local (sin att2000)
                                 </button>
                               </div>
-                              <div className="max-h-64 overflow-y-auto rounded-xl border border-slate-100">
-                                <table className="w-full text-xs">
-                                  <thead className="bg-slate-50 sticky top-0">
-                                    <tr>
-                                      <th className="text-left px-3 py-2 text-slate-500 font-medium">ID Reloj</th>
-                                      <th className="text-left px-3 py-2 text-slate-500 font-medium">Nombre</th>
-                                      <th className="text-left px-3 py-2 text-slate-500 font-medium">Rol</th>
-                                      <th className="text-left px-3 py-2 text-slate-500 font-medium">Grupo</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-50">
-                                    {data.users.users.map((u: any, i: number) => (
-                                      <tr key={i} className="hover:bg-slate-50">
-                                        <td className="px-3 py-2 font-mono text-slate-700">{u.userId}</td>
-                                        <td className="px-3 py-2 text-slate-800">{u.name || <span className="text-slate-400 italic">sin nombre</span>}</td>
-                                        <td className="px-3 py-2">
-                                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${u.privilege === 14 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
-                                            {u.privilege === 14 ? 'Admin' : 'Usuario'}
-                                          </span>
-                                        </td>
-                                        <td className="px-3 py-2 text-slate-500">{u.groupId || '—'}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+
+                              {/* Acciones secundarias */}
+                              <div className="grid grid-cols-3 gap-2">
+                                <button onClick={() => doClear(d)} disabled={!!busy}
+                                  className="flex flex-col items-center gap-1 p-3 border border-red-200 text-red-600 rounded-xl hover:bg-red-50 disabled:opacity-50 text-xs">
+                                  <Eraser size={16}/>
+                                  {busy === 'clear' ? 'Limpiando...' : 'Limpiar reloj'}
+                                </button>
+                                <button onClick={() => doEnable(d)} disabled={!!busy}
+                                  className="flex flex-col items-center gap-1 p-3 border border-green-200 text-green-700 rounded-xl hover:bg-green-50 disabled:opacity-50 text-xs">
+                                  <Power size={16}/>
+                                  {busy === 'enable' ? 'Habilitando...' : 'Habilitar'}
+                                </button>
+                                <button onClick={() => doDisable(d)} disabled={!!busy}
+                                  className="flex flex-col items-center gap-1 p-3 border border-amber-200 text-amber-700 rounded-xl hover:bg-amber-50 disabled:opacity-50 text-xs">
+                                  <PowerOff size={16}/>
+                                  {busy === 'disable' ? 'Deshabilitando...' : 'Deshabilitar'}
+                                </button>
                               </div>
-                            </div>
-                          )}
-                          {!deviceLoading[d.id] && !data.users && (
-                            <button onClick={() => loadUsers(d)} className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
-                              <RefreshCw size={14}/> Cargar usuarios
-                            </button>
-                          )}
-                        </div>
-                      )}
 
-                      {/* TAB: FUNCIONES AVANZADAS */}
-                      {tab === 'funciones' && (
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="p-4 border border-slate-100 rounded-xl space-y-2">
-                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Datos</p>
-                              <button onClick={() => doBackup(d, false)} disabled={!!busy}
-                                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 justify-center">
-                                <Download size={14} className={busy === 'backup' ? 'animate-bounce' : ''}/>
-                                {busy === 'backup' ? 'Haciendo backup...' : 'Backup → MySQL local'}
-                              </button>
-                              <button onClick={() => doBackup(d, true)} disabled={!!busy}
-                                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 justify-center">
-                                <Database size={14} className={busy === 'backup' ? 'animate-bounce' : ''}/>
-                                {busy === 'backup' ? 'Enviando...' : 'Backup → MySQL + att2000'}
-                              </button>
-                              <button onClick={() => doClear(d)} disabled={!!busy}
-                                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm border border-red-200 text-red-600 rounded-xl hover:bg-red-50 disabled:opacity-50 justify-center">
-                                <Eraser size={14} className={busy === 'clear' ? 'animate-bounce' : ''}/>
-                                {busy === 'clear' ? 'Eliminando...' : 'Limpiar registros'}
-                              </button>
-                            </div>
-                            <div className="p-4 border border-slate-100 rounded-xl space-y-2">
-                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Dispositivo</p>
-                              <button onClick={() => doEnable(d)} disabled={!!busy}
-                                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm border border-green-200 text-green-700 rounded-xl hover:bg-green-50 disabled:opacity-50 justify-center">
-                                <Power size={14} className={busy === 'enable' ? 'animate-pulse' : ''}/>
-                                {busy === 'enable' ? 'Habilitando...' : 'Habilitar reloj'}
-                              </button>
-                              <button onClick={() => doDisable(d)} disabled={!!busy}
-                                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm border border-amber-200 text-amber-700 rounded-xl hover:bg-amber-50 disabled:opacity-50 justify-center">
-                                <PowerOff size={14} className={busy === 'disable' ? 'animate-pulse' : ''}/>
-                                {busy === 'disable' ? 'Deshabilitando...' : 'Deshabilitar reloj'}
-                              </button>
-                            </div>
-                          </div>
-
-                          {log.length > 0 && (
-                            <div className="bg-slate-900 rounded-xl p-3 font-mono text-xs text-green-400 space-y-0.5 max-h-40 overflow-y-auto">
-                              {log.map((line, i) => <div key={i}>{line}</div>)}
+                              {log.length > 0 && (
+                                <div className="bg-slate-900 rounded-xl p-3 font-mono text-xs text-green-400 space-y-0.5 max-h-40 overflow-y-auto">
+                                  {log.map((line, i) => <div key={i}>{line}</div>)}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -724,10 +740,12 @@ function RelojesTab() {
         </div>
       )}
 
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-700 space-y-1">
-        <p className="font-medium">Operaciones directas</p>
-        <p><strong>Backup → BD:</strong> lee todos los marcajes del reloj e importa los nuevos a la base de datos.</p>
-        <p><strong>Limpiar registros:</strong> borra marcajes del reloj (no de la BD) para liberar memoria del dispositivo.</p>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-600 space-y-1.5">
+        <p className="font-semibold text-slate-700">Flujo de trabajo</p>
+        <p>① <strong>Conectar al reloj</strong> — establece conexión directa vía protocolo ZKTeco</p>
+        <p>② <strong>Descargar → att2000 + MySQL local</strong> — baja las marcaciones al servidor</p>
+        <p>③ <strong>Sincronización BD</strong> (otra pestaña) — procesa att2000 y genera reportes</p>
+        <p className="text-xs text-slate-400 pt-1">⚠️ Cerrá el software Attendance Management (Windows) antes de conectar.</p>
       </div>
     </div>
   )
