@@ -39,17 +39,46 @@ const config = {
 };
 
 let pool = null;
+let poolHost = null;  // host con el que se creó el pool actual
 
 async function getAtt2000() {
+  const currentHost = process.env.ATT_HOST || 'ADVENTISTA';
+
+  // Si el host cambió, cerrar el pool viejo y reconectar
+  if (pool && poolHost !== currentHost) {
+    logger.info(`🔄 Host att2000 cambió (${poolHost} → ${currentHost}), reconectando...`);
+    try { await pool.close(); } catch {}
+    pool = null; poolHost = null;
+  }
+
   if (pool && pool.connected) return pool;
+
   try {
-    pool = await new sql.ConnectionPool(config).connect();
-    logger.info('✅ Conectado a SQL Server att2000');
+    // Reconstruir config con los env vars actuales (pueden haber cambiado en runtime)
+    const runtimeConfig = {
+      ...config,
+      server:   process.env.ATT_HOST     || 'ADVENTISTA',
+      port:     parseInt(process.env.ATT_PORT || '1433'),
+      user:     process.env.ATT_USER     || 'sa',
+      password: process.env.ATT_PASSWORD ?? '',
+      database: process.env.ATT_DATABASE || 'att2000',
+    };
+    pool = await new sql.ConnectionPool(runtimeConfig).connect();
+    poolHost = runtimeConfig.server;
+    logger.info(`✅ Conectado a SQL Server att2000 (${poolHost})`);
     return pool;
   } catch (err) {
+    pool = null; poolHost = null;
     logger.error('❌ Error conectando a att2000:', err.message);
     throw err;
   }
+}
+
+// Resetear pool (llamar cuando cambian los parámetros de conexión)
+function resetPool() {
+  if (pool) { try { pool.close(); } catch {} }
+  pool = null; poolHost = null;
+  logger.info('🔄 Pool att2000 reseteado');
 }
 
 async function queryAtt2000(sqlText, params = {}) {
@@ -135,4 +164,4 @@ async function writeCheckinOut(records) {
   return { inserted, skipped, errors, errList };
 }
 
-module.exports = { getAtt2000, queryAtt2000, testAtt2000Connection, writeCheckinOut };
+module.exports = { getAtt2000, queryAtt2000, testAtt2000Connection, writeCheckinOut, resetPool };

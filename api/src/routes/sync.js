@@ -15,7 +15,7 @@
 
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
-const { testAtt2000Connection, writeCheckinOut } = require('../config/att2000');
+const { testAtt2000Connection, writeCheckinOut, resetPool } = require('../config/att2000');
 const { sequelize } = require('../config/database');
 const {
   fetchCheckInOut, fetchUserInfo, fetchDepartments,
@@ -34,6 +34,7 @@ router.get('/test', async (req, res) => {
 
 // ─── POST /api/sync/test-conn — Probar conexión dinámica ─────────
 // Body: { host, port, database, user, password }
+// Al probar con éxito, actualiza los env vars para que fullSync use esa conexión.
 router.post('/test-conn', async (req, res) => {
   const { host, port, database, user, password } = req.body;
   if (!host || !database || !user) {
@@ -41,21 +42,27 @@ router.post('/test-conn', async (req, res) => {
   }
   const sql = require('mssql');
   const cfg = {
-    server: host,
-    port: parseInt(port || '1433'),
+    server:   host,
+    port:     parseInt(port || '1433'),
     user,
-    password: password || '',
+    password: password ?? '',
     database,
-    options: { encrypt: false, trustServerCertificate: true, connectTimeout: 10000 }
+    options: {
+      encrypt: false,
+      trustServerCertificate: true,
+      connectTimeout: 10000,
+      requestTimeout:  15000,
+    }
   };
+  let tmpPool = null;
   try {
-    const pool = await sql.connect(cfg);
+    tmpPool = await new sql.ConnectionPool(cfg).connect();
 
     const [rCheckin, rUsers, rMachines, rRecent] = await Promise.all([
-      pool.request().query('SELECT COUNT(*) AS total FROM CHECKINOUT'),
-      pool.request().query('SELECT COUNT(*) AS total FROM USERINFO').catch(() => ({ recordset: [{ total: 0 }] })),
-      pool.request().query('SELECT MACHINE_ALIAS, IP_ADDRESS FROM MACHINES').catch(() => ({ recordset: [] })),
-      pool.request().query(`
+      tmpPool.request().query('SELECT COUNT(*) AS total FROM CHECKINOUT'),
+      tmpPool.request().query('SELECT COUNT(*) AS total FROM USERINFO').catch(() => ({ recordset: [{ total: 0 }] })),
+      tmpPool.request().query('SELECT MACHINE_ALIAS, IP_ADDRESS FROM MACHINES').catch(() => ({ recordset: [] })),
+      tmpPool.request().query(`
         SELECT TOP 8 c.USERID, ui.Name AS nombre, c.CHECKTIME, c.CHECKTYPE
         FROM CHECKINOUT c
         LEFT JOIN USERINFO ui ON ui.USERID = c.USERID
@@ -63,7 +70,16 @@ router.post('/test-conn', async (req, res) => {
       `).catch(() => ({ recordset: [] })),
     ]);
 
-    await pool.close();
+    await tmpPool.close();
+
+    // Guardar parámetros probados para que fullSync los use
+    resetPool();
+    process.env.ATT_HOST     = host;
+    process.env.ATT_PORT     = String(port || '1433');
+    process.env.ATT_DATABASE = database;
+    process.env.ATT_USER     = user;
+    process.env.ATT_PASSWORD = password ?? '';
+
     res.json({
       ok: true,
       totalRecords:   rCheckin.recordset[0].total,
@@ -72,6 +88,7 @@ router.post('/test-conn', async (req, res) => {
       recentRecords:  rRecent.recordset,
     });
   } catch (err) {
+    if (tmpPool) try { await tmpPool.close(); } catch {}
     res.status(503).json({ ok: false, error: err.message });
   }
 });
@@ -80,14 +97,18 @@ router.post('/test-conn', async (req, res) => {
 // Body: { dateFrom, dateTo, conn?: { host, port, database, user, password } }
 router.post('/full', async (req, res) => {
   const { dateFrom, dateTo, conn } = req.body;
-  // Si viene conn dinámico, inyectarlo al env temporalmente
+
+  // Si viene conn dinámico, resetear el pool y actualizar env vars
+  // (el pool cacheado puede apuntar a otro host)
   if (conn) {
-    process.env.ATT_HOST     = conn.host     || process.env.ATT_HOST;
-    process.env.ATT_PORT     = conn.port     || process.env.ATT_PORT;
-    process.env.ATT_DATABASE = conn.database || process.env.ATT_DATABASE;
-    process.env.ATT_USER     = conn.user     || process.env.ATT_USER;
-    process.env.ATT_PASSWORD = conn.password !== undefined ? conn.password : process.env.ATT_PASSWORD;
+    resetPool();  // ← fuerza nueva conexión con los parámetros recibidos
+    if (conn.host     !== undefined) process.env.ATT_HOST     = conn.host;
+    if (conn.port     !== undefined) process.env.ATT_PORT     = String(conn.port);
+    if (conn.database !== undefined) process.env.ATT_DATABASE = conn.database;
+    if (conn.user     !== undefined) process.env.ATT_USER     = conn.user;
+    if (conn.password !== undefined) process.env.ATT_PASSWORD = conn.password;
   }
+
   try {
     const result = await fullSync({ dateFrom, dateTo });
     res.json({ ok: true, result });
@@ -115,9 +136,17 @@ router.post('/employees', async (req, res) => {
 });
 
 // ─── POST /api/sync/attendance — Importar marcajes ───────────────
-// Body: { dateFrom: "2026-04-01", dateTo: "2026-04-11", limit: 10000 }
+// Body: { dateFrom: "2026-04-01", dateTo: "2026-04-11", limit: 10000, conn? }
 router.post('/attendance', async (req, res) => {
-  const { dateFrom, dateTo, limit = 10000 } = req.body;
+  const { dateFrom, dateTo, limit = 10000, conn } = req.body;
+  if (conn) {
+    resetPool();
+    if (conn.host     !== undefined) process.env.ATT_HOST     = conn.host;
+    if (conn.port     !== undefined) process.env.ATT_PORT     = String(conn.port);
+    if (conn.database !== undefined) process.env.ATT_DATABASE = conn.database;
+    if (conn.user     !== undefined) process.env.ATT_USER     = conn.user;
+    if (conn.password !== undefined) process.env.ATT_PASSWORD = conn.password;
+  }
   try {
     const result = await syncAttendance({ dateFrom, dateTo, limit });
     res.json({ ok: true, ...result });
