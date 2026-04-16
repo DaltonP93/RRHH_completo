@@ -298,11 +298,19 @@ function RelojesTab() {
 
   const errMsg = (e: any) => e.response?.data?.error || e.response?.data?.message || e.message
 
-  async function doBackup(d: Device) {
-    setBusy(d.id, 'backup'); addLog(d.id, `⬇️ Iniciando backup de "${d.name}"...`)
+  async function doBackup(d: Device, pushAtt2000 = false) {
+    setBusy(d.id, 'backup')
+    addLog(d.id, pushAtt2000
+      ? `⬇️ Backup de "${d.name}" + envío a att2000...`
+      : `⬇️ Iniciando backup de "${d.name}"...`)
     try {
-      const r = await api.post(`/api/devices/${d.id}/backup`)
+      const r = await api.post(`/api/devices/${d.id}/backup`, { push_att2000: pushAtt2000 })
       addLog(d.id, `✅ Backup: ${r.data.imported} importados, ${r.data.skipped} omitidos (${r.data.total} total)`)
+      if (pushAtt2000 && r.data.att2000) {
+        const a = r.data.att2000
+        if (a.error) addLog(d.id, `⚠️ att2000: ${a.error}`)
+        else addLog(d.id, `✅ att2000: ${a.inserted} enviados, ${a.skipped} ya existían`)
+      }
     } catch (e: any) { addLog(d.id, `❌ Error: ${errMsg(e)}`) }
     setBusy(d.id, '')
   }
@@ -669,10 +677,15 @@ function RelojesTab() {
                           <div className="grid grid-cols-2 gap-3">
                             <div className="p-4 border border-slate-100 rounded-xl space-y-2">
                               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Datos</p>
-                              <button onClick={() => doBackup(d)} disabled={!!busy}
+                              <button onClick={() => doBackup(d, false)} disabled={!!busy}
                                 className="w-full flex items-center gap-2 px-3 py-2.5 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 justify-center">
                                 <Download size={14} className={busy === 'backup' ? 'animate-bounce' : ''}/>
-                                {busy === 'backup' ? 'Haciendo backup...' : 'Backup → BD'}
+                                {busy === 'backup' ? 'Haciendo backup...' : 'Backup → MySQL local'}
+                              </button>
+                              <button onClick={() => doBackup(d, true)} disabled={!!busy}
+                                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 justify-center">
+                                <Database size={14} className={busy === 'backup' ? 'animate-bounce' : ''}/>
+                                {busy === 'backup' ? 'Enviando...' : 'Backup → MySQL + att2000'}
                               </button>
                               <button onClick={() => doClear(d)} disabled={!!busy}
                                 className="w-full flex items-center gap-2 px-3 py-2.5 text-sm border border-red-200 text-red-600 rounded-xl hover:bg-red-50 disabled:opacity-50 justify-center">
@@ -732,6 +745,9 @@ function SyncTab() {
   const [log, setLog]           = useState<string[]>([])
   const [testing, setTesting]   = useState(false)
   const [syncing, setSyncing]   = useState(false)
+  const [pushing, setPushing]   = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  const [pushPreview, setPushPreview] = useState<{ total: number } | null>(null)
   const [showPass, setShowPass] = useState(false)
   const [saved, setSaved]       = useState(false)
   const [connResult, setConnResult] = useState<ConnResult | null>(null)
@@ -740,6 +756,8 @@ function SyncTab() {
   const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
   const [dateFrom, setDateFrom] = useState(firstDay)
   const [dateTo, setDateTo]     = useState(today)
+  const [pushFrom, setPushFrom] = useState(firstDay)
+  const [pushTo, setPushTo]     = useState(today)
 
   const [conn, setConn] = useState<DbConn>(defaultConn)
   useEffect(() => { setConn(loadConn()) }, [])
@@ -784,6 +802,36 @@ function SyncTab() {
       addLog(`❌ Error: ${e.response?.data?.error || e.message}`)
     }
     setSyncing(false)
+  }
+
+  async function previewPush() {
+    setPreviewing(true); setPushPreview(null)
+    try {
+      const r = await api.get('/api/sync/push-to-att2000/preview', { params: { dateFrom: pushFrom, dateTo: pushTo } })
+      setPushPreview(r.data)
+      addLog(`🔍 Vista previa: ${r.data.total?.toLocaleString()} registros locales listos para enviar a att2000 (${pushFrom} → ${pushTo})`)
+    } catch (e: any) {
+      addLog(`❌ Error en vista previa: ${e.response?.data?.error || e.message}`)
+    }
+    setPreviewing(false)
+  }
+
+  async function pushToAtt2000() {
+    if (!pushPreview) return
+    if (!confirm(`¿Enviar ${pushPreview.total?.toLocaleString()} marcajes a att2000?\nSolo se insertarán registros que no existan todavía (no hay duplicados).`)) return
+    setPushing(true)
+    addLog(`📤 Enviando marcajes locales → att2000 (${pushFrom} → ${pushTo})...`)
+    try {
+      const r = await api.post('/api/sync/push-to-att2000', { dateFrom: pushFrom, dateTo: pushTo })
+      addLog(`✅ Enviado a att2000: ${r.data.inserted} insertados, ${r.data.skipped} ya existían, ${r.data.errors} errores`)
+      if (r.data.errList?.length) {
+        addLog(`   ⚠️ Primeros errores: ${r.data.errList.slice(0, 3).map((e: any) => e.error).join('; ')}`)
+      }
+      setPushPreview(null)
+    } catch (e: any) {
+      addLog(`❌ Error: ${e.response?.data?.error || e.message}`)
+    }
+    setPushing(false)
   }
 
   return (
@@ -970,9 +1018,83 @@ function SyncTab() {
         </div>
       )}
 
-      <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-sm text-amber-700">
-        <p className="font-medium">Solo lectura</p>
-        <p>La sincronización no modifica la base de datos de origen. Solo importa datos al sistema.</p>
+      {/* ── Sección: Enviar marcajes locales → att2000 ─────────── */}
+      <div className="border border-slate-200 rounded-2xl overflow-hidden">
+        <div className="bg-gradient-to-r from-indigo-50 to-blue-50 px-5 py-3 border-b border-slate-200 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+            <Database size={16} className="text-indigo-600"/>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-800 text-sm">Enviar marcajes locales → att2000</p>
+            <p className="text-xs text-slate-500">Publica en att2000 los registros almacenados en SisHoras (marcajes manuales o desde relojes).</p>
+          </div>
+        </div>
+        <div className="p-5 space-y-4">
+          {/* Info del protocolo ZKTeco */}
+          <div className="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+            <AlertCircle size={15} className="flex-shrink-0 mt-0.5"/>
+            <div>
+              <p className="font-semibold">Conexión directa a relojes — protocolo ZKTeco</p>
+              <p className="mt-0.5 text-amber-600">
+                El protocolo ZKTeco solo permite <strong>una conexión TCP a la vez</strong>. Mientras el software
+                att2000 ADMS (Windows) esté activo, los intentos de conectarse directamente al reloj desde
+                SisHoras darán error 503. Esta sección envía los registros que ya están en el MySQL local
+                a att2000, sin necesitar conexión directa al reloj.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={labelCls}>Desde</label>
+              <input type="date" value={pushFrom} onChange={e => { setPushFrom(e.target.value); setPushPreview(null) }} className={inputCls} />
+            </div>
+            <div><label className={labelCls}>Hasta</label>
+              <input type="date" value={pushTo} onChange={e => { setPushTo(e.target.value); setPushPreview(null) }} className={inputCls} />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <button onClick={previewPush} disabled={previewing || pushing}
+              className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm hover:bg-slate-50 disabled:opacity-50">
+              <Eye size={15}/> {previewing ? 'Verificando...' : 'Vista previa'}
+            </button>
+
+            {pushPreview && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-slate-600">
+                  <strong className="text-slate-900">{pushPreview.total?.toLocaleString()}</strong> registros listos
+                </span>
+                <button onClick={pushToAtt2000} disabled={pushing || pushPreview.total === 0}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700 disabled:opacity-50 font-medium">
+                  <Download size={15} className={pushing ? 'animate-bounce' : ''}/>
+                  {pushing ? 'Enviando...' : `Enviar ${pushPreview.total?.toLocaleString()} registros → att2000`}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Flujo visual */}
+          <div className="flex items-center gap-2 text-xs text-slate-400 mt-1 flex-wrap">
+            <span className="px-2 py-1 bg-slate-100 rounded text-slate-600 font-medium">MySQL local</span>
+            <span>→ SisHoras procesa →</span>
+            <span className="px-2 py-1 bg-indigo-100 rounded text-indigo-700 font-medium">att2000.CHECKINOUT</span>
+            <span>→ att2000 genera reportes →</span>
+            <span className="px-2 py-1 bg-blue-100 rounded text-blue-700 font-medium">SisHoras lee att2000</span>
+          </div>
+        </div>
+      </div>
+
+      {log.length > 0 && (
+        <div className="bg-slate-900 rounded-xl p-4 font-mono text-xs text-green-400 space-y-1 max-h-48 overflow-y-auto">
+          {log.map((line, i) => <div key={i}>{line}</div>)}
+        </div>
+      )}
+
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-700 space-y-1">
+        <p className="font-medium">Flujo de datos del sistema</p>
+        <p>① Relojes ZKTeco → att2000 ADMS (automático, por el software Windows)</p>
+        <p>② att2000 → SisHoras MySQL local (sincronización manual o programada)</p>
+        <p>③ SisHoras MySQL local → att2000 (este panel — para marcajes manuales o recuperación)</p>
       </div>
     </div>
   )

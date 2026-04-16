@@ -288,9 +288,13 @@ router.get('/:id/users', authorize('admin','gestor'), async (req, res) => {
 });
 
 // POST /api/devices/:id/backup
+// Query param: ?push_att2000=true  → también escribe en att2000.CHECKINOUT
 router.post('/:id/backup', authorize('admin','gestor'), async (req, res) => {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
+
+  const pushAtt2000 = req.query.push_att2000 === 'true' || req.body.push_att2000 === true;
+
   try {
     const logs = await withZK(device, async zk => {
       const { data } = await zk.getAttendances();
@@ -318,7 +322,27 @@ router.post('/:id/backup', authorize('admin','gestor'), async (req, res) => {
       imported++;
     }
     await sequelize.query('UPDATE devices SET last_sync=NOW() WHERE id=?', { replacements: [device.id] });
-    res.json({ ok: true, total: logs.length, imported, skipped });
+
+    // ── Opcional: también escribir en att2000.CHECKINOUT ──────────
+    let att2000Result = null;
+    if (pushAtt2000 && logs.length > 0) {
+      try {
+        const { writeCheckinOut } = require('../config/att2000');
+        // Mapear formato ZKLib → formato esperado por writeCheckinOut
+        const mapped = logs.map(l => ({
+          userId:      l.deviceUserId,
+          attTime:     l.attTime,
+          inOutStatus: l.inOutStatus,
+          sensorId:    device.id,
+          verifyMode:  l.verifyType ?? 0,
+        }));
+        att2000Result = await writeCheckinOut(mapped);
+      } catch (e) {
+        att2000Result = { error: e.message };
+      }
+    }
+
+    res.json({ ok: true, total: logs.length, imported, skipped, att2000: att2000Result });
   } catch (err) {
     res.status(503).json({ ok: false, error: fmtErr(err) });
   }
