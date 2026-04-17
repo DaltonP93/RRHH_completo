@@ -81,8 +81,9 @@ async function fetchUserInfo() {
 
 // ─── DEPARTMENTS ─────────────────────────────────────────────────
 async function fetchDepartments() {
+  // DeptCode no existe en todas las versiones de att2000 — se omite para compatibilidad
   return queryAtt2000(`
-    SELECT DEPTID, DeptName, ParentDeptID, DeptCode
+    SELECT DEPTID, DeptName, ParentDeptID
     FROM DEPARTMENTS
     ORDER BY DeptName
   `);
@@ -130,10 +131,10 @@ async function syncDepartments() {
   let synced = 0;
   for (const d of depts) {
     await sequelize.query(`
-      INSERT INTO departments (id, name, code)
-      VALUES (?, ?, ?)
-      ON DUPLICATE KEY UPDATE name = VALUES(name), code = VALUES(code)
-    `, { replacements: [d.DEPTID, d.DeptName, d.DeptCode || null] });
+      INSERT INTO departments (id, name)
+      VALUES (?, ?)
+      ON DUPLICATE KEY UPDATE name = VALUES(name)
+    `, { replacements: [d.DEPTID, d.DeptName] });
     synced++;
   }
   logger.info(`Sync departamentos: ${synced}`);
