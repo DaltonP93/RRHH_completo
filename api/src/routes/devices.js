@@ -35,13 +35,16 @@ function fmtErr(err) {
       return `No se pudo conectar al reloj${inner ? ': ' + inner : '. Verifique la red.'}`;
     }
     if (inner && inner.includes('TIMEOUT_ON_WRITING_MESSAGE') || err.message?.includes('TIMEOUT_ON_WRITING')) {
-      return 'El reloj está siendo usado por otro sistema (att2000). Inténtelo en unos segundos.';
+      return `El reloj aceptó la conexión TCP pero no respondió al protocolo ZKTeco [${err.command || 'CMD'}]. `
+           + `Posibles causas: (1) otro software tiene la sesión activa, (2) el reloj tiene contraseña de comunicación configurada, `
+           + `(3) el firmware del reloj no es compatible. Error interno: ${inner || 'TIMEOUT_ON_WRITING_MESSAGE'}`;
     }
     return `Error protocolo ZKTeco [${err.command}]${inner ? ': ' + inner : ': sin respuesta del dispositivo.'}`;
   }
   if (err.message) {
     if (err.message.includes('TIMEOUT_ON_WRITING_MESSAGE')) {
-      return 'El reloj está ocupado (att2000 tiene sesión activa). Inténtelo en unos segundos.';
+      return 'El reloj aceptó TCP pero no respondió al protocolo ZKTeco. '
+           + 'Verifique: (1) ningún otro software conectado al reloj, (2) sin contraseña de comunicación configurada en el reloj.';
     }
     return err.message;
   }
@@ -90,6 +93,51 @@ async function withZK(device, fn, { maxAttempts = 3, delayMs = 3000 } = {}) {
   }
   throw lastErr instanceof Error ? lastErr : new Error(fmtErr(lastErr));
 }
+
+// GET /api/devices/:id/diagnose — diagnóstico detallado de conectividad
+// Prueba TCP + ZKLib por separado para identificar en qué paso falla
+router.get('/:id/diagnose', authorize('admin','gestor'), async (req, res) => {
+  const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
+  if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
+
+  const result = { device: device.name, ip: device.ip_address, port: device.port, steps: [] };
+
+  // Paso 1: TCP connect (sin ZKLib)
+  const tcpOk = await pingDevice(device.ip_address, device.port, 5000);
+  result.steps.push({ step: 'TCP connect', ...tcpOk });
+
+  if (tcpOk.status !== 'online') {
+    result.conclusion = 'El reloj no es alcanzable por TCP. Verificar red/firewall.';
+    return res.json(result);
+  }
+
+  // Paso 2: ZKLib createSocket (handshake inicial)
+  const ZKLib = require('node-zklib');
+  const zk = new ZKLib(device.ip_address, device.port, 8000, 0);
+  try {
+    await zk.createSocket();
+    result.steps.push({ step: 'ZKLib createSocket', status: 'ok' });
+
+    // Paso 3: getInfo básico
+    try {
+      const info = await zk.getInfo();
+      result.steps.push({ step: 'ZKLib getInfo', status: 'ok', data: info });
+      result.conclusion = 'Reloj accesible y respondiendo correctamente.';
+    } catch (e) {
+      result.steps.push({ step: 'ZKLib getInfo', status: 'error', error: String(e.message || e) });
+      result.conclusion = 'TCP OK, handshake OK, pero getInfo falla. Posible contraseña de comunicación.';
+    }
+    await zk.disconnect().catch(() => {});
+  } catch (e) {
+    const msg = String(e.message || e.err?.message || JSON.stringify(e));
+    result.steps.push({ step: 'ZKLib createSocket', status: 'error', error: msg });
+    result.conclusion = msg.includes('TIMEOUT_ON_WRITING')
+      ? 'TCP OK pero ZKLib no puede autenticarse. Otro software tiene la sesión o hay contraseña configurada.'
+      : 'Error en handshake ZKLib: ' + msg;
+  }
+
+  res.json(result);
+});
 
 // GET /api/devices
 router.get('/', authorize('admin','gestor','hr'), async (req, res) => {
