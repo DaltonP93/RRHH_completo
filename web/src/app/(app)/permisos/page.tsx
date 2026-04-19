@@ -384,7 +384,7 @@ export default function PermisosPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-semibold text-xs shrink-0">
-                          {(row.employee_name || row.code || '?').split(' ').slice(0,2).map((n: string) => n[0] || '').join('') || '?'}
+                          {(row.employee_name || '?').split(' ').slice(0,2).map((n: string) => n[0] || '').join('') || '?'}
                         </div>
                         <span className="font-medium text-slate-900">{row.employee_name}</span>
                       </div>
