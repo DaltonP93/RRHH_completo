@@ -177,13 +177,24 @@ async function syncEmployees() {
   let synced = 0, errors = 0;
 
   for (const u of users) {
-    // Name en att2000 es nombre completo; separamos en first/last.
-    // Si Name es basura (vacío, igual a USERID, numérico, "<<<<"), dejar en blanco
-    // para no contaminar la UI con códigos como nombres.
+    // Name en att2000 viene como "Apellido,Nombre [Segundo...]" (coma separador).
+    // Si no hay coma, asumimos "Nombre Apellido" por espacio.
+    // Si Name es basura (vacío, igual a USERID, numérico, "<<<<"), dejar en blanco.
     const cleanName = looksLikeRealName(u.Name, u.USERID) ? String(u.Name).trim() : '';
-    const parts     = cleanName ? cleanName.split(/\s+/) : [];
-    const firstName = parts[0] || '';
-    const lastName  = parts.slice(1).join(' ') || '';
+    let firstName = '', lastName = '';
+    if (cleanName) {
+      if (cleanName.includes(',')) {
+        // Formato ZKTeco: "Apellido,Nombre Segundo..."
+        const [last, rest] = cleanName.split(',', 2).map(s => s.trim());
+        lastName  = last || '';
+        firstName = rest || '';
+      } else {
+        // Sin coma: "Nombre Apellido" por espacio
+        const parts = cleanName.split(/\s+/);
+        firstName = parts[0] || '';
+        lastName  = parts.slice(1).join(' ') || '';
+      }
+    }
 
     try {
       await sequelize.query(`
