@@ -200,7 +200,7 @@ export default function AsistenciaPage() {
     if (statusFilter && r.status !== statusFilter) return false
     if (!search) return true
     const q = search.toLowerCase()
-    return r.employee_name?.toLowerCase().includes(q) || r.code?.toLowerCase().includes(q)
+    return (r.employee_name || '').toLowerCase().includes(q) || (r.code || '').toLowerCase().includes(q)
   })
 
   // Stats
@@ -378,7 +378,7 @@ export default function AsistenciaPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-blue-600 font-bold text-xs shrink-0">
-                          {row.employee_name?.split(' ').slice(0,2).map(n => n[0]).join('')}
+                          {(row.employee_name || row.code || '?').split(' ').slice(0,2).map(n => n[0] || '').join('') || '?'}
                         </div>
                         <div>
                           <p className="font-semibold text-slate-900 text-sm">{row.employee_name}</p>

@@ -16,11 +16,18 @@
  * Lee credenciales de api/.env (ATT_HOST, ATT_USER, etc. + MySQL).
  */
 
-require('dotenv').config({ path: require('path').resolve(__dirname, '../api/.env') });
-const sql   = require('mssql');
-const mysql = require('mysql2/promise');
+// Resolver módulos desde api/node_modules (que ya tiene todo instalado)
+const path = require('path');
+const Module = require('module');
+const apiNodeModules = path.resolve(__dirname, '../api/node_modules');
+Module.globalPaths.unshift(apiNodeModules);
+
+require(path.join(apiNodeModules, 'dotenv')).config({
+  path: path.resolve(__dirname, '../api/.env')
+});
+const sql   = require(path.join(apiNodeModules, 'mssql'));
+const mysql = require(path.join(apiNodeModules, 'mysql2/promise'));
 const fs    = require('fs');
-const path  = require('path');
 
 async function main() {
   // ─── MySQL: lista de códigos sin nombre ─────────────────────────
