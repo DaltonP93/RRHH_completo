@@ -1,25 +1,32 @@
 'use client'
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, UserCheck, UserX, TrendingUp, Download, Upload, ChevronDown, Users, CheckCircle, AlertCircle, X, FileText } from 'lucide-react'
+import { Search, Plus, UserCheck, UserX, TrendingUp, Download, Upload, ChevronDown, Users, CheckCircle, AlertCircle, X, FileText, Pencil, Check, Settings2 } from 'lucide-react'
 import { employeesApi, api } from '@/lib/api'
 import Link from 'next/link'
 import { format } from 'date-fns'
+import { useDisplayMode } from '@/lib/useSettings'
+import { formatEmployee, formatEmployeeInitials } from '@/lib/displayMode'
 
 // ─── Columnas esperadas y sus alias ──────────────────────────────
 const FIELD_MAP: Record<string, string[]> = {
-  code:       ['código', 'codigo', 'code', 'legajo', 'id', 'cód'],
-  first_name: ['nombre', 'name', 'first_name', 'firstname', 'primer nombre'],
-  last_name:  ['apellido', 'last_name', 'lastname', 'surname', 'segundo nombre'],
-  email:      ['email', 'correo', 'mail', 'e-mail'],
-  phone:      ['teléfono', 'telefono', 'phone', 'celular', 'tel'],
-  position:   ['cargo', 'puesto', 'position', 'role', 'ocupación'],
-  department: ['departamento', 'department', 'area', 'área', 'sector'],
+  code:            ['código', 'codigo', 'code', 'id reloj', 'zk', 'cód'],
+  employee_number: ['legajo', 'cedula', 'cédula', 'dni', 'documento', 'employee_number', 'ci'],
+  first_name:      ['nombre', 'name', 'first_name', 'firstname', 'primer nombre'],
+  last_name:       ['apellido', 'last_name', 'lastname', 'surname', 'segundo nombre'],
+  email:           ['email', 'correo', 'mail', 'e-mail'],
+  phone:           ['teléfono', 'telefono', 'phone', 'celular', 'tel'],
+  position:        ['cargo', 'puesto', 'position', 'role', 'ocupación'],
+  department:      ['departamento', 'department', 'area', 'área', 'sector'],
+  hire_date:       ['fecha ingreso', 'fecha_ingreso', 'hire_date', 'ingreso', 'alta'],
+  status:          ['estado', 'status', 'activo'],
 }
 
 const FIELD_LABELS: Record<string, string> = {
-  code: 'Código *', first_name: 'Nombre *', last_name: 'Apellido',
+  code: 'Código *', employee_number: 'Legajo/Cédula',
+  first_name: 'Nombre *', last_name: 'Apellido',
   email: 'Email', phone: 'Teléfono', position: 'Cargo', department: 'Departamento',
+  hire_date: 'Fecha ingreso', status: 'Estado',
 }
 
 // Detectar separador automáticamente
@@ -90,7 +97,7 @@ function exportData(employees: any[], fmt: 'csv' | 'txt') {
 
 // Descargar plantilla CSV
 function downloadTemplate() {
-  const csv = 'Código,Nombre,Apellido,Email,Teléfono,Cargo,Departamento\n1001,Juan,García,juan@empresa.com,0981123456,Operario,Producción\n1002,María,López,maria@empresa.com,,Administrativo,Administración'
+  const csv = 'Código,Legajo,Nombre,Apellido,Email,Teléfono,Cargo,Departamento,Fecha ingreso,Estado\n3081,12345678,Juan,García,juan@empresa.com,0981123456,Operario,Producción,2024-03-15,activo\n3082,87654321,María,López,maria@empresa.com,,Administrativo,Administración,01/06/2023,activo'
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a'); a.href = url; a.download = 'plantilla_empleados.csv'; a.click(); URL.revokeObjectURL(url)
@@ -424,6 +431,108 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
   )
 }
 
+// ─── Edición inline de un campo ───────────────────────────────────
+function InlineEdit({
+  value, onSave, className = '', placeholder = '—',
+}: { value: string; onSave: (v: string) => Promise<void>; className?: string; placeholder?: string }) {
+  const [editing, setEditing] = useState(false)
+  const [v, setV] = useState(value || '')
+  const [busy, setBusy] = useState(false)
+
+  async function commit() {
+    if (v === (value || '')) { setEditing(false); return }
+    setBusy(true)
+    try { await onSave(v); setEditing(false) }
+    catch (e: any) { alert(e?.response?.data?.error || 'Error'); setV(value || '') }
+    finally { setBusy(false) }
+  }
+
+  if (!editing) {
+    return (
+      <span onClick={() => setEditing(true)}
+        className={`cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 transition-colors ${className}`}
+        title="Click para editar">
+        {value || <span className="text-slate-300 italic">{placeholder}</span>}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input autoFocus value={v} onChange={e => setV(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setV(value || ''); setEditing(false) } }}
+        onBlur={commit} disabled={busy}
+        className="border border-blue-300 rounded px-1.5 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[140px]" />
+      {busy && <span className="text-xs text-slate-400">…</span>}
+    </span>
+  )
+}
+
+// ─── Barra de acciones masivas ────────────────────────────────────
+function BulkActionsBar({
+  selected, onClear, onApplied, departments,
+}: { selected: number[]; onClear: () => void; onApplied: () => void; departments: any[] }) {
+  const [field, setField] = useState<'department_id' | 'status' | 'position'>('department_id')
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function apply() {
+    if (!value && field !== 'position') { alert('Elija un valor'); return }
+    if (!confirm(`¿Aplicar cambio a ${selected.length} empleado(s)?`)) return
+    setBusy(true)
+    try {
+      const changes: any = { [field]: value }
+      await api.patch('/api/employees/bulk', { ids: selected, changes })
+      onApplied(); onClear(); setValue('')
+    } catch (err: any) {
+      alert(err?.response?.data?.error || 'Error al aplicar cambios')
+    } finally { setBusy(false) }
+  }
+
+  if (!selected.length) return null
+  return (
+    <div className="sticky top-0 z-10 bg-blue-600 text-white rounded-2xl shadow-lg px-5 py-3 flex items-center gap-3 flex-wrap">
+      <span className="font-semibold text-sm">{selected.length} seleccionado(s)</span>
+      <select value={field} onChange={e => { setField(e.target.value as any); setValue('') }}
+        className="bg-blue-700 text-white border border-blue-400 rounded-lg px-2 py-1 text-sm">
+        <option value="department_id">Cambiar departamento</option>
+        <option value="status">Cambiar estado</option>
+        <option value="position">Cambiar cargo</option>
+      </select>
+
+      {field === 'department_id' && (
+        <select value={value} onChange={e => setValue(e.target.value)}
+          className="bg-white text-slate-800 border border-blue-400 rounded-lg px-2 py-1 text-sm">
+          <option value="">(seleccionar)</option>
+          {departments.map((d: any) => (
+            <option key={d.id} value={d.id}>{d.name}</option>
+          ))}
+        </select>
+      )}
+      {field === 'status' && (
+        <select value={value} onChange={e => setValue(e.target.value)}
+          className="bg-white text-slate-800 border border-blue-400 rounded-lg px-2 py-1 text-sm">
+          <option value="">(seleccionar)</option>
+          <option value="active">Activo</option>
+          <option value="inactive">Inactivo</option>
+          <option value="suspended">Suspendido</option>
+        </select>
+      )}
+      {field === 'position' && (
+        <input value={value} onChange={e => setValue(e.target.value)} placeholder="Cargo"
+          className="bg-white text-slate-800 border border-blue-400 rounded-lg px-2 py-1 text-sm" />
+      )}
+
+      <button onClick={apply} disabled={busy}
+        className="bg-white text-blue-700 px-3 py-1 rounded-lg text-sm font-semibold hover:bg-blue-50 disabled:opacity-60">
+        {busy ? 'Aplicando...' : 'Aplicar'}
+      </button>
+      <button onClick={onClear} className="text-blue-200 hover:text-white text-sm">
+        Cancelar
+      </button>
+    </div>
+  )
+}
+
 // ─── Página principal ─────────────────────────────────────────────
 export default function EmpleadosPage() {
   const qc = useQueryClient()
@@ -431,6 +540,13 @@ export default function EmpleadosPage() {
   const [status, setStatus]       = useState('active')
   const [dept, setDept]           = useState('')
   const [showImport, setImport]   = useState(false)
+  const [selected, setSelected]   = useState<number[]>([])
+  const displayMode = useDisplayMode()
+
+  async function quickUpdate(id: number, field: string, value: string) {
+    await api.patch(`/api/employees/${id}/quick`, { field, value })
+    qc.invalidateQueries({ queryKey: ['employees'] })
+  }
 
   const { data: deptsData } = useQuery({
     queryKey: ['departments'],
@@ -518,6 +634,11 @@ export default function EmpleadosPage() {
         </select>
       </div>
 
+      {/* Barra de acciones masivas */}
+      <BulkActionsBar selected={selected} onClear={() => setSelected([])}
+        onApplied={() => qc.invalidateQueries({ queryKey: ['employees'] })}
+        departments={deptsData || []} />
+
       {/* Tabla */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
         {isLoading ? (
@@ -529,8 +650,16 @@ export default function EmpleadosPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-100">
               <tr>
+                <th className="px-3 py-3 w-10">
+                  <input type="checkbox"
+                    checked={selected.length > 0 && selected.length === employees.length}
+                    ref={el => { if (el) el.indeterminate = selected.length > 0 && selected.length < employees.length }}
+                    onChange={e => setSelected(e.target.checked ? employees.map((e: any) => e.id) : [])}
+                    className="w-4 h-4 accent-blue-600 cursor-pointer" />
+                </th>
                 <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase">Código</th>
                 <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase">Nombre</th>
+                <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase">Legajo</th>
                 <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase">Departamento</th>
                 <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase">Cargo</th>
                 <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase">Horario</th>
@@ -539,54 +668,79 @@ export default function EmpleadosPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {employees.map((emp: any) => (
-                <tr key={emp.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 font-mono text-slate-400 text-xs">{emp.code}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-blue-600 font-bold text-sm shrink-0">
-                        {emp.first_name?.[0]}{emp.last_name?.[0]}
+              {employees.map((emp: any) => {
+                const isSel = selected.includes(emp.id)
+                return (
+                  <tr key={emp.id} className={`transition-colors ${isSel ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+                    <td className="px-3 py-3">
+                      <input type="checkbox" checked={isSel}
+                        onChange={e => setSelected(prev => e.target.checked ? [...prev, emp.id] : prev.filter(x => x !== emp.id))}
+                        className="w-4 h-4 accent-blue-600 cursor-pointer" />
+                    </td>
+                    <td className="px-4 py-3 font-mono text-slate-400 text-xs">{emp.code}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-blue-600 font-bold text-sm shrink-0">
+                          {formatEmployeeInitials(emp, displayMode)}
+                        </div>
+                        <div>
+                          {displayMode === 'code_only' ? (
+                            <p className="font-mono font-semibold text-slate-900">{emp.code}</p>
+                          ) : (
+                            <p className="font-semibold text-slate-900 flex items-center gap-1">
+                              {displayMode === 'code_name' && <span className="font-mono text-xs text-slate-400">[{emp.code}]</span>}
+                              <InlineEdit value={emp.first_name || ''} placeholder="Nombre"
+                                onSave={v => quickUpdate(emp.id, 'first_name', v)} />
+                              <InlineEdit value={emp.last_name || ''} placeholder="Apellido"
+                                onSave={v => quickUpdate(emp.id, 'last_name', v)} />
+                            </p>
+                          )}
+                          {emp.email && <p className="text-xs text-slate-400">{emp.email}</p>}
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-semibold text-slate-900">{emp.full_name}</p>
-                        {emp.email && <p className="text-xs text-slate-400">{emp.email}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 font-mono text-xs">
+                      <InlineEdit value={emp.employee_number || ''} placeholder="—"
+                        onSave={v => quickUpdate(emp.id, 'employee_number', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 text-sm">{emp.department || '—'}</td>
+                    <td className="px-4 py-3 text-slate-500 text-xs">
+                      <InlineEdit value={emp.position || ''} placeholder="—"
+                        onSave={v => quickUpdate(emp.id, 'position', v)} />
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 font-mono text-xs">
+                      {emp.check_in && emp.check_out
+                        ? `${emp.check_in.slice(0,5)} – ${emp.check_out.slice(0,5)}`
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                        emp.status === 'active'
+                          ? 'bg-green-50 text-green-700 border border-green-200'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}>
+                        {emp.status === 'active' ? <UserCheck size={11} /> : <UserX size={11} />}
+                        {emp.status === 'active' ? 'Activo' : 'Inactivo'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <Link href={`/analytics/${emp.id}`}
+                          className="p-1.5 text-purple-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Analytics">
+                          <TrendingUp size={14} />
+                        </Link>
+                        <Link href={`/empleados/${emp.id}`}
+                          className="px-3 py-1.5 text-blue-600 hover:text-blue-800 text-xs font-semibold hover:bg-blue-50 rounded-xl transition-colors">
+                          Ver perfil →
+                        </Link>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600 text-sm">{emp.department || '—'}</td>
-                  <td className="px-4 py-3 text-slate-500 text-xs">{emp.position || '—'}</td>
-                  <td className="px-4 py-3 text-slate-500 font-mono text-xs">
-                    {emp.check_in && emp.check_out
-                      ? `${emp.check_in.slice(0,5)} – ${emp.check_out.slice(0,5)}`
-                      : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                      emp.status === 'active'
-                        ? 'bg-green-50 text-green-700 border border-green-200'
-                        : 'bg-slate-100 text-slate-600 border border-slate-200'
-                    }`}>
-                      {emp.status === 'active' ? <UserCheck size={11} /> : <UserX size={11} />}
-                      {emp.status === 'active' ? 'Activo' : 'Inactivo'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center gap-1.5 justify-end">
-                      <Link href={`/analytics/${emp.id}`}
-                        className="p-1.5 text-purple-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Analytics">
-                        <TrendingUp size={14} />
-                      </Link>
-                      <Link href={`/empleados/${emp.id}`}
-                        className="px-3 py-1.5 text-blue-600 hover:text-blue-800 text-xs font-semibold hover:bg-blue-50 rounded-xl transition-colors">
-                        Ver perfil →
-                      </Link>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                )
+              })}
               {employees.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="text-center py-14 text-slate-400">
+                  <td colSpan={9} className="text-center py-14 text-slate-400">
                     <Users size={36} className="mx-auto mb-3 opacity-30" />
                     <p className="font-medium">Sin resultados</p>
                     <p className="text-xs mt-1">Ajuste los filtros o importe empleados</p>

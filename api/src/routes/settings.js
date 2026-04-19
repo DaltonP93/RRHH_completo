@@ -11,6 +11,9 @@ const SETTING_KEYS = [
   'system_name', 'system_logo_url', 'system_favicon_url',
   'system_login_bg', 'system_primary_color', 'system_login_title',
   'system_login_subtitle', 'system_company',
+  // Display mode: cómo se muestran los empleados en toda la UI
+  // 'full_name' (default) | 'code_name' | 'code_only'
+  'employee_display_mode',
 ];
 
 // GET /api/settings — obtener todas las configuraciones
@@ -30,6 +33,7 @@ router.get('/', async (req, res) => {
     settings.system_favicon_url  = '';
     settings.system_login_bg     = 'from-slate-900 to-blue-900';
     settings.system_primary_color = '#2563eb';
+    settings.employee_display_mode = 'full_name';
     for (const row of rows) settings[row.setting_key] = row.setting_value;
     res.json(settings);
   } catch (err) {

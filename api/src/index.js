@@ -25,6 +25,7 @@ const integrationRoutes     = require('./routes/integration');
 const userRoutes            = require('./routes/users');
 const notificationRoutes    = require('./routes/notifications');
 const settingsRoutes        = require('./routes/settings');
+const hrSourceRoutes        = require('./routes/hrSources');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -79,6 +80,7 @@ app.use('/api/integration',    integrationRoutes);
 app.use('/api/users',          userRoutes);
 app.use('/api/notifications',  notificationRoutes);
 app.use('/api/settings',       settingsRoutes);
+app.use('/api/hr-sources',     hrSourceRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
@@ -123,6 +125,10 @@ async function start() {
     // Reconciliación nocturna att2000 vs MySQL
     const { startReconciliationCron } = require('./services/reconciliation');
     startReconciliationCron();
+
+    // Schedules de sincronización HR externa
+    const { loadHrSchedules } = require('./services/hrSourceSync');
+    setTimeout(() => loadHrSchedules().catch(() => {}), 6000);
 
     // Conectar MySQL
     await sequelize.authenticate();

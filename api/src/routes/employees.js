@@ -22,6 +22,32 @@ router.put('/:id',                 authorize('admin','hr'), update);
 router.delete('/:id',              authorize('admin'), deactivate);
 router.get('/:id/attendance',      getAttendanceHistory);
 
+// Helper: normalizar fecha de hire_date aceptando "DD/MM/YYYY", "YYYY-MM-DD", etc.
+function parseDate(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  // ISO
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // DD/MM/YYYY o DD-MM-YYYY
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if (m) {
+    const [, d, mo, y] = m;
+    const yyyy = y.length === 2 ? '20' + y : y;
+    return `${yyyy}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  const dt = new Date(s);
+  return isNaN(dt.getTime()) ? null : dt.toISOString().slice(0, 10);
+}
+
+function parseStatus(v) {
+  if (!v) return 'active';
+  const s = String(v).toLowerCase().trim();
+  if (['inactive', 'inactivo', 'baja', 'disabled', '0', 'no', 'false'].includes(s)) return 'inactive';
+  if (['suspended', 'suspendido', 'suspenso'].includes(s)) return 'suspended';
+  return 'active';
+}
+
 // POST /api/employees/import — importar lote de empleados (CSV/Excel)
 router.post('/import', authorize('admin','hr'), async (req, res) => {
   const { employees } = req.body;
@@ -33,9 +59,15 @@ router.post('/import', authorize('admin','hr'), async (req, res) => {
   const errors = [];
 
   for (const emp of employees) {
-    const code      = String(emp.code || '').trim();
-    const firstName = String(emp.first_name || emp.nombre || emp.Nombre || '').trim();
-    const lastName  = String(emp.last_name  || emp.apellido || emp.Apellido || '').trim();
+    const code       = String(emp.code || '').trim();
+    const firstName  = String(emp.first_name || emp.nombre || emp.Nombre || '').trim();
+    const lastName   = String(emp.last_name  || emp.apellido || emp.Apellido || '').trim();
+    const empNumber  = String(emp.employee_number || emp.legajo || emp.cedula || emp.document_id || '').trim() || null;
+    const hireDate   = parseDate(emp.hire_date || emp.fecha_ingreso || emp.hiredate);
+    const status     = parseStatus(emp.status || emp.estado);
+    const email      = String(emp.email || '').trim() || null;
+    const phone      = String(emp.phone || emp.telefono || '').trim() || null;
+    const position   = String(emp.position || emp.cargo || '').trim() || null;
 
     if (!code || !firstName) {
       errors.push({ code: code || '?', error: 'Código y nombre son requeridos' });
@@ -46,12 +78,21 @@ router.post('/import', authorize('admin','hr'), async (req, res) => {
       // Resolver department_id desde nombre de departamento si no viene el ID
       let deptId = emp.department_id || null;
       if (!deptId && (emp.department || emp.departamento)) {
-        const deptName = emp.department || emp.departamento;
+        const deptName = String(emp.department || emp.departamento).trim();
         const [[dept]] = await sequelize.query(
           'SELECT id FROM departments WHERE name=? OR code=? LIMIT 1',
           { replacements: [deptName, deptName] }
         );
-        deptId = dept?.id || null;
+        if (dept) {
+          deptId = dept.id;
+        } else if (deptName) {
+          // Auto-crear el departamento si no existe (facilita imports desde HR externo)
+          const [ins] = await sequelize.query(
+            'INSERT INTO departments (name, active) VALUES (?, 1)',
+            { replacements: [deptName] }
+          );
+          deptId = ins; // insertId
+        }
       }
 
       const [[existing]] = await sequelize.query(
@@ -59,11 +100,20 @@ router.post('/import', authorize('admin','hr'), async (req, res) => {
       );
 
       if (existing) {
-        // Actualizar solo si el campo _update=true
         if (emp._update) {
-          await sequelize.query(
-            'UPDATE employees SET first_name=COALESCE(NULLIF(?,\'\'),first_name), last_name=COALESCE(NULLIF(?,\'\'),last_name), email=COALESCE(NULLIF(?,\'\'),email), phone=COALESCE(NULLIF(?,\'\'),phone), position=COALESCE(NULLIF(?,\'\'),position), department_id=COALESCE(?,department_id) WHERE code=?',
-            { replacements: [firstName, lastName, emp.email||null, emp.phone||null, emp.position||emp.cargo||null, deptId, code] }
+          await sequelize.query(`
+            UPDATE employees SET
+              first_name      = COALESCE(NULLIF(?,''), first_name),
+              last_name       = COALESCE(NULLIF(?,''), last_name),
+              employee_number = COALESCE(NULLIF(?,''), employee_number),
+              email           = COALESCE(NULLIF(?,''), email),
+              phone           = COALESCE(NULLIF(?,''), phone),
+              position        = COALESCE(NULLIF(?,''), position),
+              department_id   = COALESCE(?, department_id),
+              hire_date       = COALESCE(?, hire_date),
+              status          = COALESCE(NULLIF(?,''), status)
+            WHERE code = ?`,
+            { replacements: [firstName, lastName, empNumber, email, phone, position, deptId, hireDate, status, code] }
           );
           updated++;
         } else {
@@ -72,15 +122,11 @@ router.post('/import', authorize('admin','hr'), async (req, res) => {
         continue;
       }
 
-      await sequelize.query(
-        'INSERT INTO employees (code, first_name, last_name, email, phone, position, department_id, status) VALUES (?,?,?,?,?,?,?,\'active\')',
-        { replacements: [
-          code, firstName, lastName,
-          emp.email    || null,
-          emp.phone    || emp.telefono || null,
-          emp.position || emp.cargo    || null,
-          deptId,
-        ]}
+      await sequelize.query(`
+        INSERT INTO employees
+          (code, employee_number, first_name, last_name, email, phone, position, department_id, hire_date, status)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        { replacements: [code, empNumber, firstName, lastName, email, phone, position, deptId, hireDate, status] }
       );
       created++;
     } catch (e) {
@@ -89,6 +135,57 @@ router.post('/import', authorize('admin','hr'), async (req, res) => {
   }
 
   res.json({ ok: true, created, updated, skipped, errors, total: employees.length });
+});
+
+// PATCH /api/employees/bulk — actualizar varios empleados a la vez
+// Body: { ids: [1,2,3], changes: { department_id, status, position, schedule_id } }
+router.patch('/bulk', authorize('admin','hr'), async (req, res) => {
+  const { ids, changes } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: 'ids requerido (array)' });
+  }
+  if (!changes || typeof changes !== 'object') {
+    return res.status(400).json({ error: 'changes requerido' });
+  }
+  const allowed = ['department_id', 'schedule_id', 'status', 'position'];
+  const sets = [];
+  const vals = [];
+  for (const f of allowed) {
+    if (changes[f] !== undefined) {
+      sets.push(`${f} = ?`);
+      vals.push(changes[f] === '' ? null : changes[f]);
+    }
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Ningún campo válido en changes' });
+  try {
+    const placeholders = ids.map(() => '?').join(',');
+    const [result] = await sequelize.query(
+      `UPDATE employees SET ${sets.join(', ')} WHERE id IN (${placeholders})`,
+      { replacements: [...vals, ...ids] }
+    );
+    res.json({ ok: true, affected: result?.affectedRows ?? ids.length });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PATCH /api/employees/:id/quick — edición inline rápida (nombre, apellido, etc.)
+router.patch('/:id/quick', authorize('admin','hr'), async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { field, value } = req.body || {};
+  const allowed = ['first_name', 'last_name', 'employee_number', 'email', 'phone', 'position'];
+  if (!allowed.includes(field)) {
+    return res.status(400).json({ error: 'Campo no permitido para edición rápida' });
+  }
+  try {
+    await sequelize.query(
+      `UPDATE employees SET ${field} = ? WHERE id = ?`,
+      { replacements: [value === '' ? null : value, id] }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 module.exports = router;

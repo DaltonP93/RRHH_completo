@@ -66,7 +66,12 @@
       "Bash(curl -s http://localhost:3000/login)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(node -c api/src/routes/employees.js)",
+      "Bash(node -c api/src/routes/hrSources.js)",
+      "Bash(node -c api/src/services/hrSourceSync.js)",
+      "Bash(node -c api/src/index.js)",
+      "Bash(node -c api/src/routes/settings.js)"
     ]
   }
 }

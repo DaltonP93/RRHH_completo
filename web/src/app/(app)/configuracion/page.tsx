@@ -23,6 +23,7 @@ interface SystemSettings {
   system_name: string; system_logo_url: string; system_favicon_url: string
   system_login_bg: string; system_primary_color: string
   system_login_title: string; system_login_subtitle: string; system_company: string
+  employee_display_mode: 'full_name' | 'code_name' | 'code_only'
 }
 
 const CONN_KEY = 'sishoras_db_conn'
@@ -80,6 +81,7 @@ function SistemaTab() {
     system_name: 'Sistema de Asistencia', system_logo_url: '', system_favicon_url: '',
     system_login_bg: 'from-slate-900 to-blue-900', system_primary_color: '#2563eb',
     system_login_title: 'Sistema de Asistencia', system_login_subtitle: 'Recursos Humanos', system_company: '',
+    employee_display_mode: 'full_name',
   })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved]   = useState(false)
@@ -156,6 +158,56 @@ function SistemaTab() {
               className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
           </div>
         </div>
+      </div>
+
+      {/* Visualización de empleados */}
+      <div className="border border-slate-200 rounded-2xl p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Users size={16} className="text-blue-600" />
+          <h3 className="font-medium text-slate-800">Visualización de empleados</h3>
+        </div>
+        <p className="text-xs text-slate-500 -mt-2">
+          Cómo mostrar los empleados en toda la aplicación. Útil si los ZKTeco no tienen nombres cargados.
+        </p>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { value: 'full_name', label: 'Nombre completo', sample: 'Juan García', desc: 'Muestra nombre + apellido' },
+            { value: 'code_name', label: 'Código + Nombre', sample: '[3081] Juan García', desc: 'Ambos visibles' },
+            { value: 'code_only', label: 'Solo código',     sample: '3081',              desc: 'Cuando no hay nombres reales' },
+          ].map(opt => (
+            <label key={opt.value}
+              className={`block cursor-pointer rounded-xl border-2 p-3 transition-all ${
+                settings.employee_display_mode === opt.value
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-slate-200 hover:border-slate-300'
+              }`}>
+              <input type="radio" name="display_mode" value={opt.value}
+                checked={settings.employee_display_mode === opt.value}
+                onChange={e => setSettings(s => ({ ...s, employee_display_mode: e.target.value as any }))}
+                className="sr-only" />
+              <div className="font-semibold text-sm text-slate-800">{opt.label}</div>
+              <div className="text-xs text-slate-500 mt-0.5">{opt.desc}</div>
+              <div className="font-mono text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 mt-2 text-slate-700">{opt.sample}</div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Integraciones HR externas — shortcut */}
+      <div className="border border-purple-200 bg-purple-50/50 rounded-2xl p-5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
+            <Zap size={18} className="text-purple-600" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-slate-800">Integraciones HR externas</h3>
+            <p className="text-xs text-slate-500">Sincronizar empleados desde SAP, Bejerman, Meta4, Odoo, CSV remoto, etc.</p>
+          </div>
+        </div>
+        <a href="/configuracion/integraciones-hr"
+          className="bg-purple-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-purple-700">
+          Configurar →
+        </a>
       </div>
 
       {/* Login */}
