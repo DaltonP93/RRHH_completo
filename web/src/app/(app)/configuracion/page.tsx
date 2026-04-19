@@ -16,6 +16,9 @@ import { api } from '@/lib/api'
 interface Device {
   id: number; name: string; ip_address: string; port: number
   location?: string; serial_no?: string; status?: string; last_sync?: string
+  connection_mode?: 'auto' | 'tcp' | 'udp'
+  comm_password?: string | null
+  timeout_ms?: number
 }
 interface Webhook  { id: number; name: string; url: string; events: string[]; active: number; last_called: string; last_status: number }
 interface DbConn   { host: string; port: string; database: string; user: string; password: string; label: string }
@@ -275,7 +278,12 @@ function RelojesTab() {
   const [lastCheck, setLastCheck]   = useState('')
   const [showForm, setShowForm]     = useState(false)
   const [editDevice, setEditDevice] = useState<Device | null>(null)
-  const [form, setForm]             = useState({ name: '', ip_address: '', port: '4370', location: '', serial_no: '' })
+  const [form, setForm]             = useState({
+    name: '', ip_address: '', port: '4370', location: '', serial_no: '',
+    connection_mode: 'auto' as 'auto'|'tcp'|'udp',
+    comm_password: '', timeout_ms: '10000',
+  })
+  const [diagnose, setDiagnose]     = useState<Record<number, any>>({})
   const [saving, setSaving]         = useState(false)
   const [expanded, setExpanded]     = useState<number | null>(null)
   const [deviceTab, setDeviceTab]   = useState<Record<number, 'info'|'usuarios'|'funciones'>>({})
@@ -298,19 +306,47 @@ function RelojesTab() {
   }
 
   function openAdd() {
-    setEditDevice(null); setForm({ name: '', ip_address: '', port: '4370', location: '', serial_no: '' }); setShowForm(true)
+    setEditDevice(null)
+    setForm({ name: '', ip_address: '', port: '4370', location: '', serial_no: '',
+              connection_mode: 'auto', comm_password: '', timeout_ms: '10000' })
+    setShowForm(true)
   }
   function openEdit(d: Device) {
-    setEditDevice(d); setForm({ name: d.name, ip_address: d.ip_address, port: String(d.port), location: d.location || '', serial_no: d.serial_no || '' }); setShowForm(true)
+    setEditDevice(d)
+    setForm({
+      name: d.name, ip_address: d.ip_address, port: String(d.port),
+      location: d.location || '', serial_no: d.serial_no || '',
+      connection_mode: (d.connection_mode || 'auto'),
+      comm_password: d.comm_password || '',
+      timeout_ms: String(d.timeout_ms || 10000),
+    })
+    setShowForm(true)
   }
   async function saveDevice() {
     setSaving(true)
     try {
-      if (editDevice) await api.put(`/api/devices/${editDevice.id}`, { ...form, port: Number(form.port) })
-      else await api.post('/api/devices', { ...form, port: Number(form.port) })
+      const payload = {
+        ...form,
+        port: Number(form.port),
+        timeout_ms: Number(form.timeout_ms) || 10000,
+        comm_password: form.comm_password || null,
+      }
+      if (editDevice) await api.put(`/api/devices/${editDevice.id}`, payload)
+      else await api.post('/api/devices', payload)
       setShowForm(false); await loadDevices()
     } catch (e: any) { alert('Error: ' + (e.response?.data?.error || e.message)) }
     setSaving(false)
+  }
+  async function doDiagnose(d: Device) {
+    setBusy(d.id, 'diagnose')
+    addLog(d.id, `🔍 Diagnosticando conectividad con ${d.name}...`)
+    try {
+      const r = await api.post(`/api/devices/${d.id}/diagnose`, {})
+      setDiagnose(p => ({ ...p, [d.id]: r.data }))
+      addLog(d.id, `✓ ${r.data.summary}`)
+      if (r.data.recommendation) addLog(d.id, `💡 ${r.data.recommendation}`)
+    } catch (e: any) { addLog(d.id, `❌ Error: ${errMsg(e)}`) }
+    setBusy(d.id, '')
   }
   async function deleteDevice(id: number, name: string) {
     if (!confirm(`¿Eliminar el reloj "${name}"?`)) return
@@ -445,6 +481,53 @@ function RelojesTab() {
             <div><label className={labelCls}>Puerto</label><input value={form.port} onChange={e => setForm(f=>({...f,port:e.target.value}))} placeholder="4370" className={inputCls} /></div>
           </div>
           <div><label className={labelCls}>N° de serie (opcional)</label><input value={form.serial_no} onChange={e => setForm(f=>({...f,serial_no:e.target.value}))} placeholder="ej: ABCD123456" className={inputCls} /></div>
+
+          {/* Parámetros avanzados de conexión */}
+          <details className="rounded-lg bg-white border border-blue-100 p-3">
+            <summary className="text-sm font-medium text-slate-700 cursor-pointer">
+              ⚙️ Parámetros de conexión ZKTeco (avanzado)
+            </summary>
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className={labelCls}>Modo de conexión</label>
+                <div className="flex gap-2">
+                  {(['auto','tcp','udp'] as const).map(m => (
+                    <label key={m} className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm ${
+                      form.connection_mode === m ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 hover:bg-slate-50'
+                    }`}>
+                      <input type="radio" checked={form.connection_mode === m}
+                        onChange={() => setForm(f => ({ ...f, connection_mode: m }))} className="sr-only" />
+                      <span className="font-medium">{m.toUpperCase()}</span>
+                      <span className="text-xs text-slate-500">
+                        {m === 'auto' && '(TCP con fallback UDP)'}
+                        {m === 'tcp' && '(modelos modernos)'}
+                        {m === 'udp' && '(GT200 y modelos antiguos)'}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Si el reloj acepta TCP pero no responde al protocolo ZKTeco, probar <strong>UDP</strong>.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Contraseña comunicación (commkey)</label>
+                  <input type="text" value={form.comm_password}
+                    onChange={e => setForm(f => ({ ...f, comm_password: e.target.value }))}
+                    placeholder="solo si está configurada en el reloj"
+                    className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Timeout (ms)</label>
+                  <input type="number" value={form.timeout_ms}
+                    onChange={e => setForm(f => ({ ...f, timeout_ms: e.target.value }))}
+                    placeholder="10000" className={inputCls} />
+                </div>
+              </div>
+            </div>
+          </details>
+
           <div className="flex gap-3">
             <button onClick={saveDevice} disabled={saving || !form.name || !form.ip_address}
               className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm hover:bg-blue-700 disabled:opacity-50">
@@ -504,6 +587,11 @@ function RelojesTab() {
                     }`}>
                       {status === 'online' ? '● En línea' : status === 'offline' ? '● Sin conexión' : '● Sin estado'}
                     </span>
+                    <button onClick={() => doDiagnose(d)} disabled={!!deviceLoading[d.id]}
+                      title="Diagnosticar conectividad"
+                      className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg disabled:opacity-50">
+                      <Activity size={15}/>
+                    </button>
                     <button onClick={() => openEdit(d)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 size={15}/></button>
                     <button onClick={() => deleteDevice(d.id, d.name)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={15}/></button>
                     <button onClick={() => toggleExpand(d.id)} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg">
@@ -511,6 +599,31 @@ function RelojesTab() {
                     </button>
                   </div>
                 </div>
+
+                {/* Resultado de diagnóstico (si existe) */}
+                {diagnose[d.id] && (
+                  <div className="px-4 py-3 bg-amber-50 border-t border-amber-100 text-xs">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <p className="font-semibold text-amber-900">🔍 Diagnóstico de conectividad</p>
+                      <button onClick={() => setDiagnose(p => { const n = {...p}; delete n[d.id]; return n })}
+                        className="text-amber-600 hover:text-amber-800"><X size={14}/></button>
+                    </div>
+                    <div className="space-y-1 font-mono text-slate-700">
+                      {diagnose[d.id].steps?.map((s: any, i: number) => (
+                        <div key={i} className="flex gap-2">
+                          <span className={s.ok ? 'text-green-600' : 'text-red-500'}>{s.ok ? '✓' : '✗'}</span>
+                          <span className="font-semibold">{s.step}:</span>
+                          <span className="text-slate-500">{s.detail}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {diagnose[d.id].recommendation && (
+                      <div className="mt-2 p-2 rounded bg-white border border-amber-200 text-amber-900">
+                        💡 <strong>Recomendación:</strong> {diagnose[d.id].recommendation}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Panel expandido */}
                 {isOpen && (

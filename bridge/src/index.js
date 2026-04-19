@@ -18,7 +18,7 @@ const express = require('express');
 const { createClient } = require('redis');
 const winston = require('winston');
 
-const { syncDevice, connectToDevice, getDeviceUsers } = require('./zkManager');
+const { syncDevice, connectToDevice, getDeviceUsers, diagnoseDevice } = require('./zkManager');
 const { startPushServer, pushState } = require('./pushServer');
 
 // ─── Logger ─────────────────────────────────────────────────────
@@ -167,11 +167,45 @@ function startBridgeApi(devices) {
   });
 
   // Probar conectividad con un reloj
+  // Body opcional: { connection_mode, comm_password, timeout_ms, port }
+  // — permite probar parámetros sin guardar
   app.get('/devices/:id/ping', async (req, res) => {
     const device = devices.find(d => d.id == req.params.id);
     if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
-    const result = await connectToDevice(device);
+    const result = await connectToDevice({ ...device, ...(req.query || {}) });
     res.json({ device: device.name, ...result });
+  });
+
+  app.post('/devices/:id/ping', async (req, res) => {
+    const device = devices.find(d => d.id == req.params.id);
+    if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
+    const result = await connectToDevice({ ...device, ...(req.body || {}) });
+    res.json({ device: device.name, ...result });
+  });
+
+  // Diagnóstico detallado paso a paso
+  app.post('/devices/:id/diagnose', async (req, res) => {
+    const device = devices.find(d => d.id == req.params.id);
+    if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
+    try {
+      const report = await diagnoseDevice({ ...device, ...(req.body || {}) });
+      res.json({ device: device.name, ...report });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Diagnóstico "ad-hoc" por IP directa (sin device registrado)
+  // Body: { ip, port?, connection_mode?, comm_password?, timeout_ms? }
+  app.post('/diagnose', async (req, res) => {
+    const { ip, port, connection_mode, comm_password, timeout_ms } = req.body || {};
+    if (!ip) return res.status(400).json({ error: 'ip requerido' });
+    try {
+      const report = await diagnoseDevice({ ip, port, connection_mode, comm_password, timeout_ms });
+      res.json(report);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Estado de los relojes vía PUSH ADMS (últimos heartbeats/marcajes recibidos)

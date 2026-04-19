@@ -53,41 +53,67 @@ function fmtErr(err) {
 }
 
 /**
+ * Abre una conexión ZKTeco según el connection_mode configurado del device:
+ *   - 'tcp'  → fuerza TCP (ZKLibTCP directo)
+ *   - 'udp'  → fuerza UDP (ZKLibUDP directo)  — para modelos antiguos (GT200)
+ *   - 'auto' → usa ZKLib que prueba TCP y cae a UDP (default)
+ *
+ * El cliente devuelto expone los mismos métodos que ZKLib: getInfo(),
+ * getUsers(), getAttendances(), executeCmd(), disconnect(), etc.
+ */
+async function openZK(device) {
+  const timeout = parseInt(device.timeout_ms || 12000);
+  const mode = String(device.connection_mode || 'auto').toLowerCase();
+
+  if (mode === 'udp') {
+    const ZKLibUDP = require('node-zklib/zklibudp');
+    const c = new ZKLibUDP(device.ip_address, device.port, timeout, 0);
+    await c.createSocket();
+    await c.connect();
+    return c;
+  }
+  if (mode === 'tcp') {
+    const ZKLibTCP = require('node-zklib/zklibtcp');
+    const c = new ZKLibTCP(device.ip_address, device.port, timeout);
+    await c.createSocket();
+    await c.connect();
+    return c;
+  }
+  // auto
+  const ZKLib = require('node-zklib');
+  const zk = new ZKLib(device.ip_address, device.port, timeout, 0);
+  await zk.createSocket();
+  return zk;
+}
+
+/**
  * Helper: conectar ZKLib, ejecutar fn, desconectar.
  * Reintenta hasta maxAttempts veces si el dispositivo está ocupado.
- * inPort=0 → OS asigna puerto local libre.
  */
 async function withZK(device, fn, { maxAttempts = 3, delayMs = 3000 } = {}) {
-  const ZKLib = require('node-zklib');
   let lastErr;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const zk = new ZKLib(device.ip_address, device.port, 12000, 0);
+    let zk;
     try {
-      await zk.createSocket();
+      zk = await openZK(device);
       const result = await fn(zk);
-      await zk.disconnect().catch(() => {});
+      try { await zk.disconnect(); } catch {}
       return result;
     } catch (err) {
-      await zk.disconnect().catch(() => {});
+      if (zk) { try { await zk.disconnect(); } catch {} }
       lastErr = err;
 
-      // Decidir si reintentar
       const msg = err?.message || err?.err?.message || '';
       const isBusy = msg.includes('TIMEOUT_ON_WRITING') || msg.includes('TIMEOUT_ON_WRITING_MESSAGE');
       const isConnRefused = msg.includes('ECONNREFUSED') || (err && 'command' in err && err.command === 'TCP CONNECT');
 
-      if (isConnRefused) break; // no reintentar si el puerto está cerrado
-
-      if (isBusy && attempt < maxAttempts) {
-        await sleep(delayMs);
-        continue;
-      }
+      if (isConnRefused) break;
+      if (isBusy && attempt < maxAttempts) { await sleep(delayMs); continue; }
       break;
     }
   }
 
-  // Convertir error ZKLib a Error legible
   if (lastErr && typeof lastErr === 'object' && 'command' in lastErr) {
     throw new Error(fmtErr(lastErr));
   }
@@ -133,50 +159,90 @@ router.get('/:id/push-status', authorize('admin','gestor','hr'), async (req, res
   }
 });
 
-// GET /api/devices/:id/diagnose — diagnóstico detallado de conectividad
-// Prueba TCP + ZKLib por separado para identificar en qué paso falla
-router.get('/:id/diagnose', authorize('admin','gestor'), async (req, res) => {
+// GET/POST /api/devices/:id/diagnose — diagnóstico detallado paso a paso
+// Prueba: (1) TCP socket raw, (2) handshake ZKTeco TCP, (3) handshake ZKTeco UDP
+// y devuelve una recomendación de connection_mode adecuado.
+// POST body opcional: { connection_mode, comm_password, timeout_ms } para probar
+// parámetros sin persistirlos.
+async function handleDiagnose(req, res) {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
 
-  const result = { device: device.name, ip: device.ip_address, port: device.port, steps: [] };
+  const overrides = req.body || {};
+  const ip = overrides.ip_address || device.ip_address;
+  const port = parseInt(overrides.port || device.port || 4370);
+  const timeout = parseInt(overrides.timeout_ms || device.timeout_ms || 8000);
 
-  // Paso 1: TCP connect (sin ZKLib)
-  const tcpOk = await pingDevice(device.ip_address, device.port, 5000);
-  result.steps.push({ step: 'TCP connect', ...tcpOk });
+  const result = {
+    device: device.name,
+    ip, port,
+    mode_configured: overrides.connection_mode || device.connection_mode || 'auto',
+    timeout_ms: timeout,
+    has_commkey: !!(overrides.comm_password || device.comm_password),
+    steps: [],
+  };
+
+  // Paso 1 — TCP socket raw
+  const tcpOk = await pingDevice(ip, port, 3000);
+  result.steps.push({ step: 'tcp_socket', ok: tcpOk.status === 'online', detail: tcpOk.status === 'online' ? `latencia ${tcpOk.latency}ms` : 'timeout/no alcanzable' });
 
   if (tcpOk.status !== 'online') {
-    result.conclusion = 'El reloj no es alcanzable por TCP. Verificar red/firewall.';
+    result.recommendation = 'El reloj no es alcanzable por TCP. Verificar red / firewall / que el reloj esté encendido.';
+    result.summary = result.steps.map(s => `${s.ok ? '✓' : '✗'} ${s.step}`).join(' · ');
     return res.json(result);
   }
 
-  // Paso 2: ZKLib createSocket (handshake inicial)
-  const ZKLib = require('node-zklib');
-  const zk = new ZKLib(device.ip_address, device.port, 8000, 0);
-  try {
-    await zk.createSocket();
-    result.steps.push({ step: 'ZKLib createSocket', status: 'ok' });
-
-    // Paso 3: getInfo básico
+  // Paso 2 — ZKTeco TCP handshake
+  const tcpZk = await (async () => {
     try {
-      const info = await zk.getInfo();
-      result.steps.push({ step: 'ZKLib getInfo', status: 'ok', data: info });
-      result.conclusion = 'Reloj accesible y respondiendo correctamente.';
-    } catch (e) {
-      result.steps.push({ step: 'ZKLib getInfo', status: 'error', error: String(e.message || e) });
-      result.conclusion = 'TCP OK, handshake OK, pero getInfo falla. Posible contraseña de comunicación.';
+      const ZKLibTCP = require('node-zklib/zklibtcp');
+      const c = new ZKLibTCP(ip, port, Math.min(timeout, 8000));
+      await c.createSocket();
+      await c.connect();
+      try { await c.getInfo(); } catch {}
+      try { await c.disconnect(); } catch {}
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, err: err?.message || err?.err?.message || String(err) };
     }
-    await zk.disconnect().catch(() => {});
-  } catch (e) {
-    const msg = String(e.message || e.err?.message || JSON.stringify(e));
-    result.steps.push({ step: 'ZKLib createSocket', status: 'error', error: msg });
-    result.conclusion = msg.includes('TIMEOUT_ON_WRITING')
-      ? 'TCP OK pero ZKLib no puede autenticarse. Otro software tiene la sesión o hay contraseña configurada.'
-      : 'Error en handshake ZKLib: ' + msg;
-  }
+  })();
+  result.steps.push({ step: 'zkteco_tcp_handshake', ok: tcpZk.ok, detail: tcpZk.err || 'handshake TCP OK' });
 
+  // Paso 3 — ZKTeco UDP handshake
+  const udpZk = await (async () => {
+    try {
+      const ZKLibUDP = require('node-zklib/zklibudp');
+      const c = new ZKLibUDP(ip, port, Math.min(timeout, 8000), 0);
+      await c.createSocket();
+      await c.connect();
+      try { await c.getInfo(); } catch {}
+      try { await c.disconnect(); } catch {}
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, err: err?.message || err?.err?.message || String(err) };
+    }
+  })();
+  result.steps.push({ step: 'zkteco_udp_handshake', ok: udpZk.ok, detail: udpZk.err || 'handshake UDP OK' });
+
+  // Recomendación
+  if (tcpZk.ok && udpZk.ok) {
+    result.recommendation = 'TCP y UDP responden. Use connection_mode=auto o tcp (recomendado).';
+  } else if (tcpZk.ok) {
+    result.recommendation = 'Solo TCP responde. Configure connection_mode=tcp.';
+  } else if (udpZk.ok) {
+    result.recommendation = 'Solo UDP responde (típico en modelos antiguos como GT200). Configure connection_mode=udp.';
+  } else {
+    result.recommendation = 'TCP acepta socket pero ningún handshake ZKTeco responde. Causas probables: '
+      + '(1) otro software (Attendance Management) conectado — cerrarlo; '
+      + '(2) contraseña de comunicación configurada en el reloj — ingresarla en comm_password; '
+      + '(3) firmware incompatible con ZKProtocol.';
+  }
+  result.summary = result.steps.map(s => `${s.ok ? '✓' : '✗'} ${s.step}`).join(' · ');
   res.json(result);
-});
+}
+
+router.get('/:id/diagnose', authorize('admin','gestor'), handleDiagnose);
+router.post('/:id/diagnose', authorize('admin','gestor'), handleDiagnose);
 
 // GET /api/devices
 router.get('/', authorize('admin','gestor','hr'), async (req, res) => {
@@ -216,14 +282,31 @@ router.get('/ping-all', authorize('admin','gestor','hr'), async (req, res) => {
   } catch (err) { res.status(500).json({ error: fmtErr(err) }); }
 });
 
+// Normalizar connection_mode
+function normMode(m) {
+  const v = String(m || '').toLowerCase().trim();
+  return ['auto', 'tcp', 'udp'].includes(v) ? v : null;
+}
+
 // POST /api/devices
 router.post('/', authorize('admin','gestor'), async (req, res) => {
   try {
-    const { name, ip_address, port = 4370, location, serial_no } = req.body;
+    const {
+      name, ip_address, port = 4370, location, serial_no,
+      connection_mode, comm_password, timeout_ms,
+    } = req.body;
     if (!name || !ip_address) return res.status(400).json({ error: 'Nombre e IP son requeridos' });
+    const mode = normMode(connection_mode) || 'auto';
     const [result] = await sequelize.query(
-      'INSERT INTO devices (name, ip_address, port, location, serial_no) VALUES (?,?,?,?,?)',
-      { replacements: [name, ip_address, port, location || null, serial_no || null] }
+      `INSERT INTO devices (name, ip_address, port, location, serial_no,
+                            connection_mode, comm_password, timeout_ms)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      {
+        replacements: [
+          name, ip_address, port, location || null, serial_no || null,
+          mode, comm_password || null, parseInt(timeout_ms) || 10000,
+        ],
+      }
     );
     res.status(201).json({ id: result.insertId, message: 'Reloj agregado' });
   } catch (err) { res.status(500).json({ error: fmtErr(err) }); }
@@ -232,14 +315,30 @@ router.post('/', authorize('admin','gestor'), async (req, res) => {
 // PUT /api/devices/:id
 router.put('/:id', authorize('admin','gestor'), async (req, res) => {
   try {
-    const { name, ip_address, port, location, serial_no } = req.body;
+    const {
+      name, ip_address, port, location, serial_no,
+      connection_mode, comm_password, timeout_ms,
+    } = req.body;
+    const mode = connection_mode === undefined ? null : (normMode(connection_mode) || 'auto');
     await sequelize.query(
       `UPDATE devices SET
         name=COALESCE(?,name), ip_address=COALESCE(?,ip_address),
         port=COALESCE(?,port), location=COALESCE(?,location),
-        serial_no=COALESCE(?,serial_no)
+        serial_no=COALESCE(?,serial_no),
+        connection_mode=COALESCE(?,connection_mode),
+        comm_password=CASE WHEN ? IS NULL THEN comm_password ELSE ? END,
+        timeout_ms=COALESCE(?,timeout_ms)
        WHERE id=?`,
-      { replacements: [name, ip_address, port, location, serial_no, req.params.id] }
+      {
+        replacements: [
+          name, ip_address, port, location, serial_no,
+          mode,
+          comm_password === undefined ? null : (comm_password || null),
+          comm_password === undefined ? null : (comm_password || null),
+          timeout_ms === undefined ? null : parseInt(timeout_ms),
+          req.params.id,
+        ],
+      }
     );
     res.json({ message: 'Reloj actualizado' });
   } catch (err) { res.status(500).json({ error: fmtErr(err) }); }
