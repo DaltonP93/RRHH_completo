@@ -213,10 +213,11 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
       if (r.CHECKTYPE === 'I' || r.CHECKTYPE === 'i') type = 'in';
       else if (r.CHECKTYPE === 'O' || r.CHECKTYPE === 'o') type = 'out';
 
-      // Buscar dispositivo por SENSORID
+      // Buscar dispositivo por sensor_id (MachineNo en att2000) con fallback al id MySQL
+      const sid = r.SENSORID || 0;
       const [[device]] = await sequelize.query(
-        'SELECT id FROM devices WHERE id = ?',
-        { replacements: [r.SENSORID || 0] }
+        'SELECT id FROM devices WHERE sensor_id = ? OR id = ? ORDER BY (sensor_id = ?) DESC LIMIT 1',
+        { replacements: [sid, sid, sid] }
       ).catch(() => [[]]);
 
       const [result] = await sequelize.query(`
