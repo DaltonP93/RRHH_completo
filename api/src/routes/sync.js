@@ -278,4 +278,29 @@ router.get('/push-to-att2000/preview', async (req, res) => {
   }
 });
 
+// POST /api/sync/reconcile — ejecutar reconciliación manual (default: ayer)
+router.post('/reconcile', async (req, res) => {
+  try {
+    const { runReconciliation } = require('../services/reconciliation');
+    const { date } = req.body || {};
+    const result = await runReconciliation(date);
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/sync/reconcile/history — últimos 30 reportes
+router.get('/reconcile/history', async (req, res) => {
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT * FROM reconciliation_report
+      ORDER BY report_date DESC LIMIT 30
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

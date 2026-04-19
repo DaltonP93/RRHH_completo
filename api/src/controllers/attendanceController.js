@@ -3,10 +3,12 @@ const { getIO } = require('../socket/socketServer');
 const logger = require('../config/logger');
 let fireWebhooks;
 try { ({ fireWebhooks } = require('../routes/webhooks')); } catch {}
+let writeCheckinOut;
+try { ({ writeCheckinOut } = require('../config/att2000')); } catch {}
 
 // ─── Procesar evento de marcaje (desde Redis Pub/Sub del Bridge) ────────────
 async function processAttendanceEvent(data) {
-  const { employeeCode, timestamp, deviceId, type = 'unknown', raw } = data;
+  const { employeeCode, timestamp, deviceId, deviceIp, deviceSn, type = 'unknown', raw } = data;
 
   try {
     // Buscar empleado por código ZKTeco
@@ -23,11 +25,32 @@ async function processAttendanceEvent(data) {
     const ts = new Date(timestamp);
     const detectedType = type !== 'unknown' ? type : await detectMarkType(emp.id, ts);
 
-    // Insertar log
+    // Resolver device_id si no vino pero tenemos IP
+    let resolvedDeviceId = deviceId;
+    if (!resolvedDeviceId && deviceIp) {
+      const [[dev]] = await sequelize.query(
+        'SELECT id FROM devices WHERE ip_address = ? LIMIT 1',
+        { replacements: [deviceIp] }
+      ).catch(() => [[]]);
+      resolvedDeviceId = dev?.id || null;
+    }
+
+    // Insertar log (INSERT IGNORE — idempotente por clave única)
     await sequelize.query(`
-      INSERT INTO attendance_logs (employee_id, device_id, timestamp, type, source, raw_data)
+      INSERT IGNORE INTO attendance_logs (employee_id, device_id, timestamp, type, source, raw_data)
       VALUES (?, ?, ?, ?, 'device', ?)
-    `, { replacements: [emp.id, deviceId, ts, detectedType, JSON.stringify(raw || {})] });
+    `, { replacements: [emp.id, resolvedDeviceId, ts, detectedType, JSON.stringify(raw || {})] });
+
+    // Replicar el marcaje en att2000.CHECKINOUT si está habilitado
+    if (process.env.ATT2000_WRITE_ENABLED === 'true' && writeCheckinOut) {
+      writeCheckinOut([{
+        userId: employeeCode,
+        attTime: ts,
+        inOutStatus: detectedType === 'in' ? 0 : detectedType === 'out' ? 1 : null,
+        sensorId: resolvedDeviceId || 0,
+        verifyMode: 0
+      }]).catch(err => logger.error(`att2000 write falló: ${err.message}`));
+    }
 
     // Recalcular resumen diario
     await recalcDailySummary(emp.id, ts);

@@ -284,6 +284,17 @@ function RelojesTab() {
     }
     setBusy(d.id, '')
   }
+  async function loadPushStatus(d: Device) {
+    setBusy(d.id, 'push')
+    try {
+      const r = await api.get(`/api/devices/${d.id}/push-status`)
+      setDeviceData(p => ({ ...p, [d.id]: { ...p[d.id], push: r.data } }))
+    } catch (e: any) {
+      const msg = e.response?.data?.error || e.response?.data?.message || e.message
+      setDeviceData(p => ({ ...p, [d.id]: { ...p[d.id], push: { error: msg } } }))
+    }
+    setBusy(d.id, '')
+  }
   async function loadUsers(d: Device) {
     setBusy(d.id, 'users')
     try {
@@ -466,10 +477,40 @@ function RelojesTab() {
                             Asegúrese de que ningún otro software esté usando el reloj.
                           </p>
                         </div>
-                        <button onClick={() => loadInfo(d)}
-                          className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">
-                          <Wifi size={15}/> Conectar al reloj
-                        </button>
+                        <div className="flex gap-2">
+                          <button onClick={() => loadInfo(d)}
+                            className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">
+                            <Wifi size={15}/> Conectar al reloj
+                          </button>
+                          <button onClick={() => loadPushStatus(d)} disabled={deviceLoading[d.id] === 'push'}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50">
+                            <RefreshCw size={14} className={deviceLoading[d.id] === 'push' ? 'animate-spin' : ''}/> Verificar PUSH
+                          </button>
+                        </div>
+
+                        {data.push && !data.push.error && (
+                          <div className={`w-full mt-2 p-3 rounded-xl border text-left text-xs ${
+                            data.push.pushActive ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                                 : 'bg-amber-50 border-amber-200 text-amber-800'
+                          }`}>
+                            <p className="font-semibold">
+                              {data.push.pushActive ? '✅ PUSH ADMS activo' : '⚠ PUSH ADMS sin actividad reciente'}
+                            </p>
+                            <p className="mt-1">SN: {data.push.sn || '—'}</p>
+                            <p>Último heartbeat: {data.push.lastSeen ? new Date(data.push.lastSeen).toLocaleString() : 'nunca'}</p>
+                            <p>Último marcaje PUSH: {data.push.lastPunch ? new Date(data.push.lastPunch).toLocaleString() : 'nunca'}</p>
+                            {!data.push.pushActive && (
+                              <p className="mt-2 text-amber-700">
+                                Configure el reloj: Menú → Comm → Cloud Server → IP del servidor SisHoras, puerto 8080, y reinicie el reloj.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {data.push?.error && (
+                          <div className="w-full mt-2 p-3 bg-red-50 border border-red-200 rounded-xl text-left text-xs text-red-700">
+                            {data.push.error}
+                          </div>
+                        )}
                       </div>
                     )}
 

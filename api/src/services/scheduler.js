@@ -257,6 +257,31 @@ function stopJob(scheduleId) {
   }
 }
 
+// ─── Cron respaldo: pull att2000 → MySQL ─────────────────────────
+// Activar con ATT2000_PULL_CRON="*/10 * * * *" (sintaxis node-cron)
+let _att2000PullJob = null;
+function startAtt2000PullCron() {
+  const expr = process.env.ATT2000_PULL_CRON;
+  if (!expr) return;
+  if (_att2000PullJob) _att2000PullJob.stop();
+
+  try {
+    const { syncAttendance } = require('../config/zkAdapter');
+    _att2000PullJob = cron.schedule(expr, async () => {
+      try {
+        const dateFrom = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0,10);
+        const result = await syncAttendance({ dateFrom, limit: 5000 });
+        logger.info(`⏱️  Cron att2000 pull: ${JSON.stringify(result)}`);
+      } catch (err) {
+        logger.error('Error en cron att2000 pull:', err.message);
+      }
+    });
+    logger.info(`📅 Cron respaldo att2000 → MySQL activo: ${expr}`);
+  } catch (err) {
+    logger.error('No se pudo registrar ATT2000_PULL_CRON:', err.message);
+  }
+}
+
 module.exports = {
   loadSchedules,
   registerJob,
@@ -265,4 +290,5 @@ module.exports = {
   buildMarcadasTableHtml,
   minsToHM,
   fmtTime,
+  startAtt2000PullCron,
 };

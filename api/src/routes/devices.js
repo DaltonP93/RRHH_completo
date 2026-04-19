@@ -94,6 +94,45 @@ async function withZK(device, fn, { maxAttempts = 3, delayMs = 3000 } = {}) {
   throw lastErr instanceof Error ? lastErr : new Error(fmtErr(lastErr));
 }
 
+// GET /api/devices/:id/push-status — ¿está el reloj enviando marcajes por PUSH?
+router.get('/:id/push-status', authorize('admin','gestor','hr'), async (req, res) => {
+  const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
+  if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
+
+  const bridgeUrl = process.env.BRIDGE_URL || 'http://localhost:8081';
+  try {
+    const r = await fetch(`${bridgeUrl}/devices/${device.id}/push-state`);
+    if (!r.ok) throw new Error(`Bridge respondió ${r.status}`);
+    const payload = await r.json();
+
+    // Último marcaje recibido por PUSH en las últimas 24 h según attendance_logs
+    const [[last]] = await sequelize.query(`
+      SELECT MAX(timestamp) AS last_push
+      FROM attendance_logs
+      WHERE device_id = ? AND timestamp >= NOW() - INTERVAL 24 HOUR
+    `, { replacements: [device.id] });
+
+    const state = payload?.state || null;
+    const lastSeen = state?.lastSeen ? new Date(state.lastSeen) : null;
+    const now = Date.now();
+    const activeMs = 5 * 60 * 1000;
+    const pushActive = lastSeen && (now - lastSeen.getTime()) < activeMs;
+
+    res.json({
+      device: device.name,
+      ip: device.ip_address,
+      pushActive: !!pushActive,
+      sn: state?.sn || null,
+      lastSeen: state?.lastSeen || null,
+      lastPunch: state?.lastPunch || null,
+      punches24h: last?.last_push ? 1 : 0,
+      lastPunchInDb: last?.last_push || null
+    });
+  } catch (err) {
+    res.status(502).json({ error: `No se pudo consultar el Bridge: ${err.message}` });
+  }
+});
+
 // GET /api/devices/:id/diagnose — diagnóstico detallado de conectividad
 // Prueba TCP + ZKLib por separado para identificar en qué paso falla
 router.get('/:id/diagnose', authorize('admin','gestor'), async (req, res) => {

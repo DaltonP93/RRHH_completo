@@ -1,0 +1,108 @@
+/**
+ * reconciliation.js
+ * Job nocturno que compara attendance_logs (MySQL) vs CHECKINOUT (att2000)
+ * y registra las discrepancias en reconciliation_report.
+ *
+ * Se ejecuta si RECONCILIATION_CRON está configurado en .env.
+ * Default recomendado: "30 3 * * *" — 3:30 AM.
+ */
+
+const cron = require('node-cron');
+const { sequelize } = require('../config/database');
+const logger = require('../config/logger');
+
+async function runReconciliation(dateStr) {
+  const date = dateStr || new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 10);
+  logger.info(`🔍 Reconciliación att2000 vs MySQL para ${date}...`);
+
+  // Contar en MySQL
+  const [[mysqlRow]] = await sequelize.query(`
+    SELECT COUNT(*) AS cnt FROM attendance_logs
+    WHERE DATE(timestamp) = ?
+  `, { replacements: [date] });
+
+  // Contar en att2000
+  let att2000Count = 0;
+  let diff = { missingInMysql: [], missingInAtt2000: [] };
+  try {
+    const { queryAtt2000 } = require('../config/att2000');
+    const att2000Rows = await queryAtt2000(`
+      SELECT USERID, CHECKTIME FROM CHECKINOUT
+      WHERE CAST(CHECKTIME AS DATE) = '${date}'
+    `);
+    att2000Count = att2000Rows.length;
+
+    // Comparar: marcajes en att2000 que no estén en MySQL (por user code + timestamp)
+    const [mysqlLogs] = await sequelize.query(`
+      SELECT e.code, al.timestamp
+      FROM attendance_logs al
+      JOIN employees e ON al.employee_id = e.id
+      WHERE DATE(al.timestamp) = ?
+    `, { replacements: [date] });
+
+    const mysqlSet = new Set(mysqlLogs.map(r => `${r.code}|${new Date(r.timestamp).toISOString().slice(0, 19)}`));
+    const attSet = new Set(att2000Rows.map(r => `${r.USERID}|${new Date(r.CHECKTIME).toISOString().slice(0, 19)}`));
+
+    for (const k of attSet) if (!mysqlSet.has(k)) diff.missingInMysql.push(k);
+    for (const k of mysqlSet) if (!attSet.has(k)) diff.missingInAtt2000.push(k);
+  } catch (err) {
+    logger.error(`Reconciliación: att2000 inaccesible — ${err.message}`);
+    return { date, error: err.message };
+  }
+
+  const summary = {
+    date,
+    mysqlCount: mysqlRow.cnt,
+    att2000Count,
+    missingInMysql: diff.missingInMysql.length,
+    missingInAtt2000: diff.missingInAtt2000.length,
+    samplesMissingInMysql: diff.missingInMysql.slice(0, 10),
+    samplesMissingInAtt2000: diff.missingInAtt2000.slice(0, 10),
+  };
+
+  // Persistir en tabla reconciliation_report (si existe)
+  try {
+    await sequelize.query(`
+      INSERT INTO reconciliation_report (report_date, mysql_count, att2000_count,
+        missing_in_mysql, missing_in_att2000, samples_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        mysql_count = VALUES(mysql_count),
+        att2000_count = VALUES(att2000_count),
+        missing_in_mysql = VALUES(missing_in_mysql),
+        missing_in_att2000 = VALUES(missing_in_att2000),
+        samples_json = VALUES(samples_json),
+        created_at = NOW()
+    `, { replacements: [
+      date, summary.mysqlCount, summary.att2000Count,
+      summary.missingInMysql, summary.missingInAtt2000,
+      JSON.stringify({
+        mysql: summary.samplesMissingInMysql,
+        att2000: summary.samplesMissingInAtt2000
+      })
+    ]});
+  } catch (e) {
+    logger.warn(`reconciliation_report no existe aún — saltando persistencia: ${e.message}`);
+  }
+
+  logger.info(`✅ Reconciliación ${date}: MySQL=${summary.mysqlCount}, att2000=${summary.att2000Count}, ` +
+              `faltan en MySQL=${summary.missingInMysql}, faltan en att2000=${summary.missingInAtt2000}`);
+  return summary;
+}
+
+let _job = null;
+function startReconciliationCron() {
+  const expr = process.env.RECONCILIATION_CRON;
+  if (!expr) return;
+  if (_job) _job.stop();
+  try {
+    _job = cron.schedule(expr, () => {
+      runReconciliation().catch(err => logger.error('Reconciliation job error:', err.message));
+    });
+    logger.info(`📅 Cron reconciliación activo: ${expr}`);
+  } catch (err) {
+    logger.error('No se pudo registrar RECONCILIATION_CRON:', err.message);
+  }
+}
+
+module.exports = { runReconciliation, startReconciliationCron };

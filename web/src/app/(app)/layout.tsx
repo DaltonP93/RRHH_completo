@@ -1,4 +1,5 @@
 import Sidebar from '@/components/layout/Sidebar'
+import DeviceAlertBanner from '@/components/layout/DeviceAlertBanner'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -7,6 +8,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 overflow-auto">
         {children}
       </main>
+      <DeviceAlertBanner />
     </div>
   )
 }

@@ -116,8 +116,13 @@ async function start() {
     logger.info('✅ Redis conectado');
 
     // Inicializar scheduler de reportes automáticos
-    const { loadSchedules } = require('./services/scheduler');
+    const { loadSchedules, startAtt2000PullCron } = require('./services/scheduler');
     setTimeout(() => loadSchedules().catch(() => {}), 5000);
+    startAtt2000PullCron();
+
+    // Reconciliación nocturna att2000 vs MySQL
+    const { startReconciliationCron } = require('./services/reconciliation');
+    startReconciliationCron();
 
     // Conectar MySQL
     await sequelize.authenticate();

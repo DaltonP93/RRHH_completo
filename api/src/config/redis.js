@@ -35,6 +35,18 @@ async function initRedis() {
     }
   });
 
+  // Alertas del Bridge (heartbeat perdido / recuperado)
+  await subscriber.subscribe('device:alert', async (message) => {
+    try {
+      const data = JSON.parse(message);
+      const { getIO } = require('../socket/socketServer');
+      try { getIO().to('role:admin').to('role:gestor').emit('device:alert', data); } catch {}
+      logger.warn(`🚨 device:alert — ${data.type} SN=${data.sn} (${data.ip})`);
+    } catch (err) {
+      logger.error('Error en device:alert:', err);
+    }
+  });
+
   return client;
 }
 

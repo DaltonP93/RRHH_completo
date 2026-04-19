@@ -19,7 +19,7 @@ const { createClient } = require('redis');
 const winston = require('winston');
 
 const { syncDevice, connectToDevice, getDeviceUsers } = require('./zkManager');
-const { startPushServer } = require('./pushServer');
+const { startPushServer, pushState } = require('./pushServer');
 
 // ─── Logger ─────────────────────────────────────────────────────
 const logger = winston.createLogger({
@@ -174,6 +174,20 @@ function startBridgeApi(devices) {
     res.json({ device: device.name, ...result });
   });
 
+  // Estado de los relojes vía PUSH ADMS (últimos heartbeats/marcajes recibidos)
+  app.get('/push-state', (req, res) => {
+    res.json(pushState);
+  });
+
+  app.get('/devices/:id/push-state', (req, res) => {
+    const device = devices.find(d => d.id == req.params.id);
+    if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
+    // Buscar por IP del dispositivo — el SN del reloj registrado debe coincidir o la IP
+    const byIp = Object.entries(pushState).find(([sn, s]) => s.ip === device.ip);
+    const state = byIp ? { sn: byIp[0], ...byIp[1] } : null;
+    res.json({ device: device.name, ip: device.ip, state });
+  });
+
   // Obtener usuarios registrados en un reloj
   app.get('/devices/:id/users', async (req, res) => {
     const device = devices.find(d => d.id == req.params.id);
@@ -198,7 +212,36 @@ async function main() {
   logger.info('');
 
   // Modo 1: Servidor PUSH (relojes envían datos en tiempo real)
-  startPushServer(publishAttendance, logger);
+  startPushServer(publishAttendance, logger, { redis });
+
+  // Watcher: detectar relojes caídos y publicar alerta
+  const HEARTBEAT_ALERT_MS = parseInt(process.env.HEARTBEAT_ALERT_MS || String(15 * 60 * 1000));
+  const alertedDown = new Set();
+  setInterval(async () => {
+    const now = Date.now();
+    for (const [sn, state] of Object.entries(pushState)) {
+      const last = state.lastSeen ? new Date(state.lastSeen).getTime() : 0;
+      const downtime = now - last;
+      if (downtime > HEARTBEAT_ALERT_MS && !alertedDown.has(sn)) {
+        alertedDown.add(sn);
+        logger.error(`🚨 Reloj SN=${sn} (${state.ip}) sin heartbeat hace ${Math.round(downtime/60000)} min`);
+        if (redis?.isReady) {
+          await redis.publish('device:alert', JSON.stringify({
+            type: 'heartbeat_lost', sn, ip: state.ip,
+            lastSeen: state.lastSeen, downtimeMs: downtime
+          })).catch(() => {});
+        }
+      } else if (downtime < HEARTBEAT_ALERT_MS && alertedDown.has(sn)) {
+        alertedDown.delete(sn);
+        logger.info(`✅ Reloj SN=${sn} (${state.ip}) recuperado`);
+        if (redis?.isReady) {
+          await redis.publish('device:alert', JSON.stringify({
+            type: 'heartbeat_recovered', sn, ip: state.ip
+          })).catch(() => {});
+        }
+      }
+    }
+  }, 60000); // chequear cada minuto
 
   // Modo 2: Polling periódico por ZKLib
   // DESACTIVADO por defecto — requiere ZKTECO_AUTO_POLL=true en .env
