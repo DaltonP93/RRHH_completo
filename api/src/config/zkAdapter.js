@@ -16,7 +16,7 @@
  * └─────────────────┴─────────────────────────────────────────┘
  */
 
-const { queryAtt2000 } = require('./att2000');
+const { queryAtt2000, getTableColumns, pickCol } = require('./att2000');
 const { sequelize }    = require('./database');
 const logger           = require('./logger');
 
@@ -34,17 +34,20 @@ async function fetchCheckInOut({ dateFrom, dateTo, limit = 5000 } = {}) {
   if (dateFrom) where += ` AND CHECKTIME >= '${dateFrom}'`;
   if (dateTo)   where += ` AND CHECKTIME <= '${dateTo}'`;
 
+  const chkCols  = await getTableColumns('CHECKINOUT');
+  const userCols = await getTableColumns('USERINFO');
+
   const rows = await queryAtt2000(`
     SELECT TOP ${limit}
-      c.USERID,
-      c.CHECKTIME,
-      c.CHECKTYPE,
-      c.VERIFYCODE,
-      c.SENSORID,
-      c.WorkCode,
-      u.Badgenumber,
-      u.Name        AS EmployeeName,
-      u.DefaultDeptID
+      ${pickCol(chkCols,  'USERID',     { prefix: 'c.' })},
+      ${pickCol(chkCols,  'CHECKTIME',  { prefix: 'c.' })},
+      ${pickCol(chkCols,  'CHECKTYPE',  { prefix: 'c.' })},
+      ${pickCol(chkCols,  'VERIFYCODE', { prefix: 'c.' })},
+      ${pickCol(chkCols,  'SENSORID',   { prefix: 'c.' })},
+      ${pickCol(chkCols,  'WorkCode',   { prefix: 'c.' })},
+      ${pickCol(userCols, 'Badgenumber',{ prefix: 'u.' })},
+      ${pickCol(userCols, 'Name',       { prefix: 'u.', alias: 'EmployeeName' })},
+      ${pickCol(userCols, 'DefaultDeptID', { prefix: 'u.' })}
     FROM CHECKINOUT c
     LEFT JOIN USERINFO u ON c.USERID = u.USERID
     WHERE ${where}
@@ -64,15 +67,17 @@ async function fetchCheckInOut({ dateFrom, dateTo, limit = 5000 } = {}) {
 //   VerifyMode      int
 
 async function fetchUserInfo() {
+  const userCols = await getTableColumns('USERINFO');
+  const deptCols = await getTableColumns('DEPARTMENTS');
   return queryAtt2000(`
     SELECT
-      u.USERID,
-      u.Badgenumber,
-      u.Name,
-      u.DefaultDeptID,
-      u.HireDay,
-      u.CardNo,
-      d.DeptName
+      ${pickCol(userCols, 'USERID',        { prefix: 'u.' })},
+      ${pickCol(userCols, 'Badgenumber',   { prefix: 'u.' })},
+      ${pickCol(userCols, 'Name',          { prefix: 'u.' })},
+      ${pickCol(userCols, 'DefaultDeptID', { prefix: 'u.' })},
+      ${pickCol(userCols, 'HireDay',       { prefix: 'u.' })},
+      ${pickCol(userCols, 'CardNo',        { prefix: 'u.' })},
+      ${pickCol(deptCols, 'DeptName',      { prefix: 'd.' })}
     FROM USERINFO u
     LEFT JOIN DEPARTMENTS d ON u.DefaultDeptID = d.DEPTID
     ORDER BY u.USERID
@@ -81,9 +86,12 @@ async function fetchUserInfo() {
 
 // ─── DEPARTMENTS ─────────────────────────────────────────────────
 async function fetchDepartments() {
-  // DeptCode no existe en todas las versiones de att2000 — se omite para compatibilidad
+  const cols = await getTableColumns('DEPARTMENTS');
   return queryAtt2000(`
-    SELECT DEPTID, DeptName, ParentDeptID
+    SELECT
+      ${pickCol(cols, 'DEPTID')},
+      ${pickCol(cols, 'DeptName')},
+      ${pickCol(cols, 'ParentDeptID')}
     FROM DEPARTMENTS
     ORDER BY DeptName
   `);
@@ -106,8 +114,14 @@ async function fetchShifts() {
 
 // ─── Machines (Relojes) ───────────────────────────────────────────
 async function fetchMachines() {
+  const cols = await getTableColumns('Machines');
   return queryAtt2000(`
-    SELECT MachineID, MachineAlias, IPAddress, Port, Status
+    SELECT
+      ${pickCol(cols, 'MachineID')},
+      ${pickCol(cols, 'MachineAlias')},
+      ${pickCol(cols, 'IPAddress')},
+      ${pickCol(cols, 'Port')},
+      ${pickCol(cols, 'Status')}
     FROM Machines
   `);
 }

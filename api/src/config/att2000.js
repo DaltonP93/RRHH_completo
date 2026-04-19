@@ -78,7 +78,32 @@ async function getAtt2000() {
 function resetPool() {
   if (pool) { try { pool.close(); } catch {} }
   pool = null; poolHost = null;
+  _columnsCache.clear();
   logger.info('🔄 Pool att2000 reseteado');
+}
+
+// ─── Introspección de schema ─────────────────────────────────────
+// Cache en memoria: 'USERINFO' → Set(['USERID','Name',...])
+const _columnsCache = new Map();
+
+async function getTableColumns(table) {
+  if (_columnsCache.has(table)) return _columnsCache.get(table);
+  const db = await getAtt2000();
+  const r = await db.request().input('t', sql.VarChar, table).query(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @t
+  `);
+  // Case-insensitive match (SQL Server devuelve el casing real)
+  const cols = new Set(r.recordset.map(x => x.COLUMN_NAME));
+  _columnsCache.set(table, cols);
+  logger.info(`📋 ${table}: ${cols.size} columnas — ${[...cols].join(', ')}`);
+  return cols;
+}
+
+// Devuelve la expresión SQL para una columna: si existe → "<prefix>COL", si no → "NULL AS COL"
+function pickCol(colsSet, name, { prefix = '', alias = name } = {}) {
+  // Match case-insensitive
+  const real = [...colsSet].find(c => c.toLowerCase() === name.toLowerCase());
+  return real ? `${prefix}${real} AS ${alias}` : `NULL AS ${alias}`;
 }
 
 async function queryAtt2000(sqlText, params = {}) {
@@ -164,4 +189,4 @@ async function writeCheckinOut(records) {
   return { inserted, skipped, errors, errList };
 }
 
-module.exports = { getAtt2000, queryAtt2000, testAtt2000Connection, writeCheckinOut, resetPool };
+module.exports = { getAtt2000, queryAtt2000, testAtt2000Connection, writeCheckinOut, resetPool, getTableColumns, pickCol };
