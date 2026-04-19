@@ -155,14 +155,33 @@ async function syncDepartments() {
   return { synced };
 }
 
+// ¿El valor parece un nombre humano real?
+// Rechaza vacíos, cadenas iguales al USERID, puramente numéricas o con
+// caracteres basura típicos de registros ZK sin nombre ("<<<<", "---", etc.)
+function looksLikeRealName(raw, userId) {
+  if (!raw) return false;
+  const s = String(raw).trim();
+  if (!s) return false;
+  if (s === String(userId)) return false;
+  // Sin ninguna letra unicode → basura (dígitos, símbolos, "<<<<", "1001")
+  if (!/\p{L}/u.test(s)) return false;
+  // Menos de 2 caracteres alfabéticos → basura
+  const letters = s.match(/\p{L}/gu) || [];
+  if (letters.length < 2) return false;
+  return true;
+}
+
 // Importar empleados (USERINFO → employees)
 async function syncEmployees() {
   const users = await fetchUserInfo();
   let synced = 0, errors = 0;
 
   for (const u of users) {
-    // Name en att2000 es nombre completo; separamos en first/last
-    const parts = (u.Name || '').trim().split(' ');
+    // Name en att2000 es nombre completo; separamos en first/last.
+    // Si Name es basura (vacío, igual a USERID, numérico, "<<<<"), dejar en blanco
+    // para no contaminar la UI con códigos como nombres.
+    const cleanName = looksLikeRealName(u.Name, u.USERID) ? String(u.Name).trim() : '';
+    const parts     = cleanName ? cleanName.split(/\s+/) : [];
     const firstName = parts[0] || '';
     const lastName  = parts.slice(1).join(' ') || '';
 
@@ -171,10 +190,12 @@ async function syncEmployees() {
         INSERT INTO employees (code, employee_number, first_name, last_name, department_id, hire_date)
         VALUES (?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
-          first_name    = VALUES(first_name),
-          last_name     = VALUES(last_name),
-          employee_number = VALUES(employee_number),
-          department_id = VALUES(department_id)
+          -- Solo sobreescribir si el Name nuevo no está vacío.
+          -- Evita borrar nombres corregidos a mano cuando att2000 devuelve basura.
+          first_name    = COALESCE(NULLIF(VALUES(first_name), ''), first_name),
+          last_name     = COALESCE(NULLIF(VALUES(last_name),  ''), last_name),
+          employee_number = COALESCE(NULLIF(VALUES(employee_number), ''), employee_number),
+          department_id = COALESCE(VALUES(department_id), department_id)
       `, { replacements: [
         String(u.USERID),           // code = USERID del reloj
         u.Badgenumber || null,       // número de empleado
