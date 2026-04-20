@@ -107,7 +107,11 @@ export default function AparienciaPage() {
   if (!s) return <div className="p-6 text-slate-400">Cargando...</div>
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
-  const fullUrl = (u: string) => !u ? '' : (u.startsWith('http') ? u : `${apiUrl}${u}`)
+  function fullUrl(u: string): string {
+    if (!u) return ''
+    if (u.startsWith('http')) return u
+    return apiUrl + u
+  }
 
   return (
     <div className="p-6 space-y-6 max-w-7xl">
@@ -413,7 +417,8 @@ function UploadField({ label, url, apiUrl, onPick, inputRef, onUrlChange }: {
   label: string; url: string; apiUrl: string; onPick: (f: File) => void
   inputRef: React.RefObject<HTMLInputElement>; onUrlChange: (v: string) => void
 }) {
-  const fullUrl = !url ? '' : (url.startsWith('http') ? url : `${apiUrl}${url}`)
+  let fullUrl = ''
+  if (url) fullUrl = url.startsWith('http') ? url : apiUrl + url
   return (
     <Field label={label}>
       <div className="flex items-center gap-2">
