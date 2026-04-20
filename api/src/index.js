@@ -29,6 +29,7 @@ const hrSourceRoutes        = require('./routes/hrSources');
 const processingRoutes      = require('./routes/processing');
 const departmentRoutes      = require('./routes/departments');
 const approvalRulesRoutes   = require('./routes/approvalRules');
+const meRoutes              = require('./routes/me');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -101,6 +102,7 @@ app.use('/api/hr-sources',     hrSourceRoutes);
 app.use('/api/processing',     processingRoutes);
 app.use('/api/departments',    departmentRoutes);
 app.use('/api/approval-rules', approvalRulesRoutes);
+app.use('/api/me',             meRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

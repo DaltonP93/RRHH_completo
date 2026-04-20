@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { authApi } from '@/lib/api'
+import { landingFor } from '@/lib/useCurrentUser'
 
 interface SiteSettings {
   system_name: string
@@ -45,7 +46,7 @@ export default function LoginPage() {
       localStorage.setItem('access_token', data.accessToken)
       localStorage.setItem('refresh_token', data.refreshToken)
       localStorage.setItem('user', JSON.stringify(data.user))
-      router.push('/dashboard')
+      router.push(landingFor(data.user.role))
     } catch {
       setError('Usuario o contraseña incorrectos')
     } finally {

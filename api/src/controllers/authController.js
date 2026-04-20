@@ -7,7 +7,13 @@ const logger = require('../config/logger');
 const SALT_ROUNDS = 10;
 
 function generateTokens(user) {
-  const payload = { id: user.id, username: user.username, role: user.role, email: user.email };
+  const payload = {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    email: user.email,
+    employee_id: user.employee_id ?? null,
+  };
 
   const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
   const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
@@ -24,7 +30,7 @@ async function login(req, res) {
 
   try {
     const [users] = await sequelize.query(
-      'SELECT id, username, email, password_hash, full_name, role, active FROM users WHERE (username = ? OR email = ?) LIMIT 1',
+      'SELECT id, username, email, password_hash, full_name, role, active, employee_id FROM users WHERE (username = ? OR email = ?) LIMIT 1',
       { replacements: [username, username] }
     );
 
@@ -57,7 +63,7 @@ async function login(req, res) {
     res.json({
       accessToken,
       refreshToken,
-      user: { id: user.id, username: user.username, fullName: user.full_name, role: user.role, email: user.email }
+      user: { id: user.id, username: user.username, fullName: user.full_name, role: user.role, email: user.email, employee_id: user.employee_id ?? null }
     });
   } catch (err) {
     logger.error('Error en login:', err);

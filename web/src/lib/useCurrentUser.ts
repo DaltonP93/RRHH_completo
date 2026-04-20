@@ -11,6 +11,29 @@ export interface CurrentUser {
   fullName?: string
   email?: string
   role: Role
+  employee_id?: number | null
+}
+
+/**
+ * Ruta de aterrizaje tras login según rol.
+ */
+export function landingFor(role: Role): string {
+  switch (role) {
+    case 'super_admin':
+    case 'admin':
+    case 'gth':
+    case 'hr':
+    case 'gestor':
+    case 'supervisor':
+      return '/dashboard'
+    case 'coordinator':
+    case 'manager':
+      return '/aprobaciones'
+    case 'employee':
+      return '/mi-perfil'
+    default:
+      return '/dashboard'
+  }
 }
 
 function readUser(): CurrentUser | null {

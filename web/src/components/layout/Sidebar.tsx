@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar,
-  LogOut, Shield, Server, Building2, CheckSquare,
+  LogOut, Shield, Server, Building2, CheckSquare, UserCircle2,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -18,7 +18,13 @@ type NavItem = {
 }
 
 const NAV: NavItem[] = [
-  { href: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard' },
+  // ─── Portal del empleado ────────────────────────────────────
+  { href: '/mi-perfil',     icon: UserCircle2,     label: 'Mi perfil',     roles: ['employee','admin','gth','hr','coordinator','manager','gestor','supervisor'] },
+  { href: '/mi-asistencia', icon: Clock,           label: 'Mi asistencia', roles: ['employee'] },
+  { href: '/mis-permisos',  icon: Calendar,        label: 'Mis permisos',  roles: ['employee'] },
+
+  // ─── Gestión interna ─────────────────────────────────────────
+  { href: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard',    roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/empleados',     icon: Users,           label: 'Empleados',    roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/asistencia',    icon: Clock,           label: 'Asistencia',   roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/permisos',      icon: Calendar,        label: 'Permisos',     roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
