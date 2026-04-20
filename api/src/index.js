@@ -1,5 +1,7 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -30,6 +32,7 @@ const processingRoutes      = require('./routes/processing');
 const departmentRoutes      = require('./routes/departments');
 const approvalRulesRoutes   = require('./routes/approvalRules');
 const meRoutes              = require('./routes/me');
+const auditRoutes           = require('./routes/audit');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -52,6 +55,11 @@ app.use(cors({
   },
   credentials: true
 }));
+// Servir uploads locales (logos, favicons, bg)
+const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads'));
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined', { stream: { write: msg => logger.info(msg.trim()) } }));
@@ -103,6 +111,7 @@ app.use('/api/processing',     processingRoutes);
 app.use('/api/departments',    departmentRoutes);
 app.use('/api/approval-rules', approvalRulesRoutes);
 app.use('/api/me',             meRoutes);
+app.use('/api/audit',          auditRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

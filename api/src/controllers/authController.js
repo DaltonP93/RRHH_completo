@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { sequelize } = require('../config/database');
 const logger = require('../config/logger');
+const audit = require('../services/audit');
 
 const SALT_ROUNDS = 10;
 
@@ -36,11 +37,13 @@ async function login(req, res) {
 
     const user = users[0];
     if (!user || !user.active) {
+      audit.log({ req, user: null, action: 'login_fail', details: { username, reason: 'user_not_found_or_inactive' } });
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
+      audit.log({ req, user, action: 'login_fail', details: { reason: 'bad_password' } });
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
@@ -59,6 +62,7 @@ async function login(req, res) {
     await sequelize.query('UPDATE users SET last_login = NOW() WHERE id = ?', { replacements: [user.id] });
 
     logger.info(`Login: ${user.username} (${user.role})`);
+    audit.log({ req, user, action: 'login_ok', details: { role: user.role } });
 
     res.json({
       accessToken,

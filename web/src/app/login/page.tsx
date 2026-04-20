@@ -1,25 +1,54 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import { Lock, User, Clock as ClockIcon } from 'lucide-react'
 import { authApi } from '@/lib/api'
 import { landingFor } from '@/lib/useCurrentUser'
 
 interface SiteSettings {
   system_name: string
+  system_company: string
   system_logo_url: string
   system_login_bg: string
+  system_login_bg_image: string
   system_primary_color: string
+  system_secondary_color: string
   system_login_title: string
   system_login_subtitle: string
+  system_login_layout: 'center' | 'left' | 'right' | 'split'
+  system_login_show_datetime: string
+  system_login_glass: string
+  system_login_footer: string
+  system_locale: string
+  system_time_format: '24h' | '12h'
 }
 
 const DEFAULT: SiteSettings = {
   system_name: 'Sistema de Asistencia',
+  system_company: '',
   system_logo_url: '',
   system_login_bg: 'from-slate-900 to-blue-900',
+  system_login_bg_image: '',
   system_primary_color: '#2563eb',
+  system_secondary_color: '#1e40af',
   system_login_title: 'Sistema de Asistencia',
   system_login_subtitle: 'Recursos Humanos',
+  system_login_layout: 'center',
+  system_login_show_datetime: '1',
+  system_login_glass: '1',
+  system_login_footer: '',
+  system_locale: 'es-PY',
+  system_time_format: '24h',
+}
+
+function useNow(enabled: boolean) {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    if (!enabled) return
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [enabled])
+  return now
 }
 
 export default function LoginPage() {
@@ -36,6 +65,23 @@ export default function LoginPage() {
       .then(data => { if (data) setSettings(s => ({ ...s, ...data })) })
       .catch(() => {})
   }, [])
+
+  const showClock = settings.system_login_show_datetime === '1'
+  const glass     = settings.system_login_glass === '1'
+  const now       = useNow(showClock)
+
+  const datetimeStr = useMemo(() => {
+    try {
+      const opts: Intl.DateTimeFormatOptions = {
+        dateStyle: 'full',
+        timeStyle: 'medium',
+        hour12: settings.system_time_format === '12h',
+      }
+      return new Intl.DateTimeFormat(settings.system_locale || 'es-PY', opts).format(now)
+    } catch {
+      return now.toLocaleString()
+    }
+  }, [now, settings.system_locale, settings.system_time_format])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -54,51 +100,104 @@ export default function LoginPage() {
     }
   }
 
+  // Fondo: imagen local > gradient class
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+  const bgImage = settings.system_login_bg_image
+    ? (settings.system_login_bg_image.startsWith('http')
+        ? settings.system_login_bg_image
+        : `${apiUrl}${settings.system_login_bg_image}`)
+    : ''
+
+  const cardClass = glass
+    ? 'bg-white/85 backdrop-blur-xl border border-white/40'
+    : 'bg-white'
+
+  // Layout
+  const wrapperAlign =
+    settings.system_login_layout === 'left'  ? 'justify-start pl-8 md:pl-20' :
+    settings.system_login_layout === 'right' ? 'justify-end pr-8 md:pr-20' :
+                                               'justify-center'
+
   return (
-    <div className={`min-h-screen bg-gradient-to-br ${settings.system_login_bg} flex items-center justify-center p-4`}>
-      <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md">
+    <div
+      className={`relative min-h-screen flex items-center ${wrapperAlign} p-4 overflow-hidden ${!bgImage ? `bg-gradient-to-br ${settings.system_login_bg}` : ''}`}
+      style={bgImage ? {
+        backgroundImage: `url("${bgImage}")`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      } : undefined}
+    >
+      {/* overlay cuando hay imagen */}
+      {bgImage && (
+        <div className="absolute inset-0 bg-gradient-to-br from-black/40 via-black/20 to-black/50 pointer-events-none" />
+      )}
+
+      {/* Reloj flotante (esquina) */}
+      {showClock && (
+        <div className="hidden md:flex absolute top-6 right-8 items-center gap-2 text-white/90 bg-black/30 backdrop-blur px-4 py-2 rounded-xl z-10">
+          <ClockIcon size={16} />
+          <span className="text-sm font-medium tracking-wide">{datetimeStr}</span>
+        </div>
+      )}
+
+      <div className={`relative z-10 rounded-3xl shadow-2xl p-8 w-full max-w-md ${cardClass}`}>
         <div className="text-center mb-8">
           {settings.system_logo_url ? (
             <img
-              src={settings.system_logo_url}
+              src={settings.system_logo_url.startsWith('http') ? settings.system_logo_url : `${apiUrl}${settings.system_logo_url}`}
               alt={settings.system_name}
               className="h-16 mx-auto mb-4 object-contain"
               onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
             />
           ) : (
             <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-              style={{ backgroundColor: settings.system_primary_color }}
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg"
+              style={{
+                background: `linear-gradient(135deg, ${settings.system_primary_color}, ${settings.system_secondary_color})`,
+              }}
             >
-              <span className="text-3xl">🕐</span>
+              <ClockIcon className="text-white" size={28} />
             </div>
           )}
           <h1 className="text-2xl font-bold text-slate-900">{settings.system_login_title}</h1>
           <p className="text-slate-500 text-sm mt-1">{settings.system_login_subtitle}</p>
+          {showClock && (
+            <p className="md:hidden text-xs text-slate-400 mt-3">{datetimeStr}</p>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Usuario</label>
-            <input
-              type="text"
-              required
-              value={form.username}
-              onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
-              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="usuario o email"
-            />
+            <div className="relative">
+              <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                required
+                value={form.username}
+                onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
+                className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2"
+                style={{ '--tw-ring-color': settings.system_primary_color } as any}
+                placeholder="usuario o email"
+                autoComplete="username"
+              />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña</label>
-            <input
-              type="password"
-              required
-              value={form.password}
-              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="••••••••"
-            />
+            <div className="relative">
+              <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="password"
+                required
+                value={form.password}
+                onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2"
+                style={{ '--tw-ring-color': settings.system_primary_color } as any}
+                placeholder="••••••••"
+                autoComplete="current-password"
+              />
+            </div>
           </div>
 
           {error && (
@@ -110,13 +209,21 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-60"
-            style={{ backgroundColor: settings.system_primary_color }}
+            className="w-full text-white font-semibold py-3 rounded-xl transition-all hover:brightness-110 hover:shadow-lg disabled:opacity-60"
+            style={{
+              background: `linear-gradient(135deg, ${settings.system_primary_color}, ${settings.system_secondary_color})`,
+            }}
           >
             {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
           </button>
         </form>
 
+        {settings.system_login_footer && (
+          <p className="text-center text-xs text-slate-400 mt-6">{settings.system_login_footer}</p>
+        )}
+        {settings.system_company && (
+          <p className="text-center text-xs text-slate-400 mt-2">© {new Date().getFullYear()} {settings.system_company}</p>
+        )}
       </div>
     </div>
   )
