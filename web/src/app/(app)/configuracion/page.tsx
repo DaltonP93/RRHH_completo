@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCurrentUser, isSuperAdmin } from '@/lib/useCurrentUser'
@@ -45,7 +45,7 @@ const inputCls = "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm 
 const labelCls = "text-xs font-medium text-slate-600 block mb-1"
 
 // ─── Componente principal ─────────────────────────────────────
-export default function ConfiguracionPage() {
+function ConfiguracionPageInner() {
   const searchParams = useSearchParams()
   const user = useCurrentUser()
   const canTech = isSuperAdmin(user)
@@ -1452,5 +1452,13 @@ function ApiTab() {
         ))}
       </div>
     </div>
+  )
+}
+
+export default function ConfiguracionPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-slate-400">Cargando...</div>}>
+      <ConfiguracionPageInner />
+    </Suspense>
   )
 }
