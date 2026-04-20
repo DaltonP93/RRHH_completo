@@ -71,7 +71,10 @@
       "Bash(node -c api/src/routes/hrSources.js)",
       "Bash(node -c api/src/services/hrSourceSync.js)",
       "Bash(node -c api/src/index.js)",
-      "Bash(node -c api/src/routes/settings.js)"
+      "Bash(node -c api/src/routes/settings.js)",
+      "Bash(xargs grep *)",
+      "Bash(ls deploy/)",
+      "Bash(ls *.conf)"
     ]
   }
 }

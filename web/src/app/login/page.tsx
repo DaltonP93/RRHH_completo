@@ -116,9 +116,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="text-center text-xs text-slate-400 mt-6">
-          Usuario inicial: <strong>admin</strong> / Contraseña: <strong>Admin1234!</strong>
-        </p>
       </div>
     </div>
   )
