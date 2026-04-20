@@ -27,6 +27,8 @@ const notificationRoutes    = require('./routes/notifications');
 const settingsRoutes        = require('./routes/settings');
 const hrSourceRoutes        = require('./routes/hrSources');
 const processingRoutes      = require('./routes/processing');
+const departmentRoutes      = require('./routes/departments');
+const approvalRulesRoutes   = require('./routes/approvalRules');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -97,6 +99,8 @@ app.use('/api/notifications',  notificationRoutes);
 app.use('/api/settings',       settingsRoutes);
 app.use('/api/hr-sources',     hrSourceRoutes);
 app.use('/api/processing',     processingRoutes);
+app.use('/api/departments',    departmentRoutes);
+app.use('/api/approval-rules', approvalRulesRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

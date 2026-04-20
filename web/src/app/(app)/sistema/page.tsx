@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { Server, HardDrive, Database, Calculator, AlertTriangle } from 'lucide-react'
+import { Server, HardDrive, Database, Calculator, AlertTriangle, FileCog } from 'lucide-react'
 
 const cards = [
   {
@@ -23,6 +23,13 @@ const cards = [
     title: 'Procesar Horas',
     desc: 'Recalcular el resumen diario (daily_summary) para un rango de fechas. Útil tras importaciones o correcciones manuales.',
     color: 'bg-emerald-500',
+  },
+  {
+    href: '/configuracion/reglas-permisos',
+    icon: FileCog,
+    title: 'Reglas de Permisos',
+    desc: 'Configurar qué niveles (coordinador, gerente, GTH) son requeridos por departamento y tipo de permiso.',
+    color: 'bg-amber-500',
   },
 ]
 

@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar,
-  LogOut, Shield, Server,
+  LogOut, Shield, Server, Building2, CheckSquare,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -22,7 +22,9 @@ const NAV: NavItem[] = [
   { href: '/empleados',     icon: Users,           label: 'Empleados',    roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/asistencia',    icon: Clock,           label: 'Asistencia',   roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/permisos',      icon: Calendar,        label: 'Permisos',     roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
+  { href: '/aprobaciones',  icon: CheckSquare,     label: 'Aprobaciones', roles: ['admin','gth','hr','coordinator','manager'] },
   { href: '/reportes',      icon: BarChart2,       label: 'Reportes',     roles: ['admin','gth','hr','manager','gestor'] },
+  { href: '/departamentos', icon: Building2,       label: 'Departamentos', roles: ['admin','gth'] },
   { href: '/usuarios',      icon: Shield,          label: 'Usuarios',     roles: ['admin','gth'] },
   { href: '/configuracion', icon: Settings,        label: 'Configuración', roles: ['admin','gth'] },
   { href: '/sistema',       icon: Server,          label: 'Sistema',      superOnly: true },
