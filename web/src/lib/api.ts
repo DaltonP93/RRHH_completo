@@ -40,11 +40,15 @@ api.interceptors.response.use(
 
 // ─── Auth ─────────────────────────────────────────────────────────
 export const authApi = {
-  login: (username: string, password: string) =>
-    api.post('/api/auth/login', { username, password }).then(r => r.data),
+  login: (username: string, password: string, otp?: string) =>
+    api.post('/api/auth/login', { username, password, otp }).then(r => r.data),
   me: () => api.get('/api/auth/me').then(r => r.data),
   logout: (refreshToken: string) =>
     api.post('/api/auth/logout', { refreshToken }),
+  forgotPassword: (email: string) =>
+    api.post('/api/auth/password/forgot', { email }).then(r => r.data),
+  resetPassword: (token: string, newPassword: string) =>
+    api.post('/api/auth/password/reset', { token, newPassword }).then(r => r.data),
 }
 
 // ─── Empleados ────────────────────────────────────────────────────

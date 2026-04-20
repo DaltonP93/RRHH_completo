@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { Lock, User, Clock as ClockIcon } from 'lucide-react'
+import { Lock, User, Clock as ClockIcon, Shield } from 'lucide-react'
+import Link from 'next/link'
 import { authApi } from '@/lib/api'
 import { landingFor } from '@/lib/useCurrentUser'
 
@@ -54,6 +55,8 @@ function useNow(enabled: boolean) {
 export default function LoginPage() {
   const router = useRouter()
   const [form, setForm] = useState({ username: '', password: '' })
+  const [otp, setOtp] = useState('')
+  const [needsOtp, setNeedsOtp] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT)
@@ -88,13 +91,25 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
     try {
-      const data = await authApi.login(form.username, form.password)
+      const data = await authApi.login(form.username, form.password, needsOtp ? otp : undefined)
+
+      // Backend indica que se necesita 2FA
+      if (data?.twofaRequired) {
+        setNeedsOtp(true)
+        if (needsOtp) setError('Código 2FA incorrecto')
+        return
+      }
       localStorage.setItem('access_token', data.accessToken)
       localStorage.setItem('refresh_token', data.refreshToken)
       localStorage.setItem('user', JSON.stringify(data.user))
       router.push(landingFor(data.user.role))
-    } catch {
-      setError('Usuario o contraseña incorrectos')
+    } catch (e: any) {
+      if (e?.response?.data?.twofaRequired) {
+        setNeedsOtp(true)
+        setError(e.response.data.error || 'Código 2FA requerido')
+      } else {
+        setError('Usuario o contraseña incorrectos')
+      }
     } finally {
       setLoading(false)
     }
@@ -200,6 +215,31 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {needsOtp && (
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+                <Shield size={14} /> Código de autenticación 2FA
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  value={otp}
+                  onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-lg tracking-[0.4em] text-center font-mono focus:outline-none focus:ring-2"
+                  style={{ '--tw-ring-color': settings.system_primary_color } as any}
+                  placeholder="000000"
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  autoFocus
+                />
+              </div>
+              <p className="text-xs text-slate-500">
+                Ingresá el código de 6 dígitos de tu app (Google Authenticator / Authy).
+              </p>
+            </div>
+          )}
+
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
               {error}
@@ -214,8 +254,16 @@ export default function LoginPage() {
               background: `linear-gradient(135deg, ${settings.system_primary_color}, ${settings.system_secondary_color})`,
             }}
           >
-            {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
+            {loading ? 'Iniciando sesión...' : needsOtp ? 'Verificar código' : 'Iniciar sesión'}
           </button>
+
+          {!needsOtp && (
+            <div className="text-center">
+              <Link href="/forgot-password" className="text-xs text-slate-500 hover:text-slate-700 hover:underline">
+                ¿Olvidaste tu contraseña?
+              </Link>
+            </div>
+          )}
         </form>
 
         {settings.system_login_footer && (

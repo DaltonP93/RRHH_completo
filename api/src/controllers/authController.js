@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { sequelize } = require('../config/database');
 const logger = require('../config/logger');
 const audit = require('../services/audit');
+const totp = require('../services/totp');
 
 const SALT_ROUNDS = 10;
 
@@ -24,14 +25,16 @@ function generateTokens(user) {
 
 // POST /api/auth/login
 async function login(req, res) {
-  const { username, password } = req.body;
+  const { username, password, otp } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
   }
 
   try {
     const [users] = await sequelize.query(
-      'SELECT id, username, email, password_hash, full_name, role, active, employee_id FROM users WHERE (username = ? OR email = ?) LIMIT 1',
+      `SELECT id, username, email, password_hash, full_name, role, active, employee_id,
+              twofa_secret, twofa_enabled
+         FROM users WHERE (username = ? OR email = ?) LIMIT 1`,
       { replacements: [username, username] }
     );
 
@@ -45,6 +48,19 @@ async function login(req, res) {
     if (!valid) {
       audit.log({ req, user, action: 'login_fail', details: { reason: 'bad_password' } });
       return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    // ─── 2FA TOTP ──────────────────────────────────────────────
+    if (user.twofa_enabled && user.twofa_secret) {
+      if (!otp) {
+        // Password OK, pide el segundo factor
+        return res.status(200).json({ twofaRequired: true });
+      }
+      const ok = totp.verifyCode(user.twofa_secret, otp, { window: 1 });
+      if (!ok) {
+        audit.log({ req, user, action: 'login_fail', details: { reason: 'bad_otp' } });
+        return res.status(401).json({ twofaRequired: true, error: 'Código 2FA inválido' });
+      }
     }
 
     const { accessToken, refreshToken } = generateTokens(user);

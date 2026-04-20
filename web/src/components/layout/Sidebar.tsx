@@ -25,6 +25,7 @@ const NAV: NavItem[] = [
   { href: '/mi-perfil',     icon: UserCircle2,     label: 'Mi perfil',     section: 'portal', roles: ['employee','admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/mi-asistencia', icon: Clock,           label: 'Mi asistencia', section: 'portal', roles: ['employee'] },
   { href: '/mis-permisos',  icon: Calendar,        label: 'Mis permisos',  section: 'portal', roles: ['employee'] },
+  { href: '/seguridad',     icon: Shield,          label: 'Seguridad',     section: 'portal' },
 
   // Gestión
   { href: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard',     section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
