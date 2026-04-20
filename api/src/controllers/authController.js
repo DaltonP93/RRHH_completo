@@ -115,6 +115,50 @@ async function logout(req, res) {
   res.json({ message: 'Sesión cerrada' });
 }
 
+// POST /api/auth/change-password — cambiar password del usuario actual
+async function changePassword(req, res) {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'currentPassword y newPassword son requeridos' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
+  }
+  // Regla mínima: 1 letra + 1 número
+  if (!/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+    return res.status(400).json({ error: 'La contraseña debe contener letras y números' });
+  }
+
+  try {
+    const [rows] = await sequelize.query(
+      'SELECT password_hash FROM users WHERE id = ?',
+      { replacements: [req.user.id] }
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const valid = await bcrypt.compare(currentPassword, rows[0].password_hash);
+    if (!valid) return res.status(401).json({ error: 'Contraseña actual incorrecta' });
+
+    const newHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    await sequelize.query(
+      'UPDATE users SET password_hash = ?, password_changed_at = NOW() WHERE id = ?',
+      { replacements: [newHash, req.user.id] }
+    ).catch(() => sequelize.query(
+      'UPDATE users SET password_hash = ? WHERE id = ?',
+      { replacements: [newHash, req.user.id] }
+    ));
+
+    // Revocar todos los refresh tokens del usuario (forzar re-login en otros dispositivos)
+    await sequelize.query('DELETE FROM refresh_tokens WHERE user_id = ?', { replacements: [req.user.id] });
+
+    logger.info(`Password cambiada: user_id=${req.user.id} (${req.user.username})`);
+    res.json({ message: 'Contraseña actualizada. Se cerraron todas las otras sesiones.' });
+  } catch (err) {
+    logger.error('Error cambiando password:', err);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+
 // GET /api/auth/me
 async function me(req, res) {
   try {
@@ -129,4 +173,4 @@ async function me(req, res) {
   }
 }
 
-module.exports = { login, refresh, logout, me };
+module.exports = { login, refresh, logout, me, changePassword };

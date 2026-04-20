@@ -59,14 +59,28 @@ app.use(rateLimit({
   message: { error: 'Demasiadas solicitudes, intenta más tarde.' }
 }));
 
-// Rate limiting estricto para auth
+// Rate limiting estricto para login (anti fuerza bruta)
+// Solo cuenta intentos fallidos, no consultas /me, /refresh, /logout.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos de login. Espere 15 minutos.' }
+});
+
+// Rate limiting general para el resto de /api/auth/*
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { error: 'Demasiados intentos de login.' }
+  max: 60,
+  message: { error: 'Demasiadas solicitudes de autenticación.' }
 });
 
 // ─── Rutas ──────────────────────────────────────────────────────
+// Aplica loginLimiter SOLO a POST /api/auth/login (anti brute-force),
+// y un authLimiter más permisivo a todo lo demás del módulo.
+app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth',        authLimiter, authRoutes);
 app.use('/api/employees',   employeeRoutes);
 app.use('/api/attendance',  attendanceRoutes);

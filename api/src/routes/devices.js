@@ -4,7 +4,7 @@
  */
 const router  = require('express').Router();
 const net     = require('net');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, requireSuperAdmin } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 
 router.use(authenticate);
@@ -289,7 +289,7 @@ function normMode(m) {
 }
 
 // POST /api/devices
-router.post('/', authorize('admin','gestor'), async (req, res) => {
+router.post('/', requireSuperAdmin, async (req, res) => {
   try {
     const {
       name, ip_address, port = 4370, location, serial_no,
@@ -313,7 +313,7 @@ router.post('/', authorize('admin','gestor'), async (req, res) => {
 });
 
 // PUT /api/devices/:id
-router.put('/:id', authorize('admin','gestor'), async (req, res) => {
+router.put('/:id', requireSuperAdmin, async (req, res) => {
   try {
     const {
       name, ip_address, port, location, serial_no,
@@ -345,7 +345,7 @@ router.put('/:id', authorize('admin','gestor'), async (req, res) => {
 });
 
 // DELETE /api/devices/:id
-router.delete('/:id', authorize('admin'), async (req, res) => {
+router.delete('/:id', requireSuperAdmin, async (req, res) => {
   try {
     await sequelize.query('DELETE FROM devices WHERE id=?', { replacements: [req.params.id] });
     res.json({ message: 'Reloj eliminado' });
@@ -535,7 +535,7 @@ router.post('/:id/backup', authorize('admin','gestor'), async (req, res) => {
 });
 
 // POST /api/devices/:id/clear
-router.post('/:id/clear', authorize('admin'), async (req, res) => {
+router.post('/:id/clear', requireSuperAdmin, async (req, res) => {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
   try {
@@ -547,7 +547,7 @@ router.post('/:id/clear', authorize('admin'), async (req, res) => {
 });
 
 // POST /api/devices/:id/disable
-router.post('/:id/disable', authorize('admin','gestor'), async (req, res) => {
+router.post('/:id/disable', requireSuperAdmin, async (req, res) => {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
   try {
@@ -559,7 +559,7 @@ router.post('/:id/disable', authorize('admin','gestor'), async (req, res) => {
 });
 
 // POST /api/devices/:id/enable
-router.post('/:id/enable', authorize('admin','gestor'), async (req, res) => {
+router.post('/:id/enable', requireSuperAdmin, async (req, res) => {
   const [[device]] = await sequelize.query('SELECT * FROM devices WHERE id=?', { replacements: [req.params.id] });
   if (!device) return res.status(404).json({ error: 'Reloj no encontrado' });
   try {

@@ -14,7 +14,7 @@
  */
 
 const router = require('express').Router();
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, requireSuperAdmin } = require('../middleware/auth');
 const { testAtt2000Connection, writeCheckinOut, resetPool } = require('../config/att2000');
 const { sequelize } = require('../config/database');
 const {
@@ -24,7 +24,9 @@ const {
   syncMachines, syncHolidays, fullSync,
 } = require('../config/zkAdapter');
 
-router.use(authenticate, authorize('admin'));
+// Todo el módulo de sincronización con att2000 está restringido a super_admin.
+// La gestión de BD fuente NO debe ser visible al rol GTH/admin.
+router.use(authenticate, requireSuperAdmin);
 
 // ─── GET /api/sync/test — Probar conexión con config del .env ────
 router.get('/test', async (req, res) => {

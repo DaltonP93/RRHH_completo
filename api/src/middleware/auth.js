@@ -16,15 +16,27 @@ function authenticate(req, res, next) {
   }
 }
 
-// Verificar rol requerido
+// Verificar rol requerido.
+// super_admin siempre tiene acceso a todo (bypass implícito).
 function authorize(...roles) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+    if (req.user.role === 'super_admin') return next();  // super_admin bypass
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({ error: 'Sin permisos para esta acción' });
     }
     next();
   };
+}
+
+// Restricción estricta: SOLO super_admin (relojes, BD, sync, módulo sistema).
+// No hay bypass — ni admin ni GTH pueden entrar.
+function requireSuperAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+  if (req.user.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Requiere permisos de super-administrador' });
+  }
+  next();
 }
 
 // Clave interna entre servicios (Bridge → API)
@@ -36,4 +48,4 @@ function authenticateServiceKey(req, res, next) {
   next();
 }
 
-module.exports = { authenticate, authorize, authenticateServiceKey };
+module.exports = { authenticate, authorize, requireSuperAdmin, authenticateServiceKey };
