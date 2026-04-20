@@ -1,21 +1,42 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar, LogOut, Shield, TrendingUp } from 'lucide-react'
+import {
+  LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar,
+  LogOut, Shield, Server,
+  type LucideIcon
+} from 'lucide-react'
 import clsx from 'clsx'
+import { useCurrentUser, hasRole, isSuperAdmin, type Role } from '@/lib/useCurrentUser'
 
-const nav = [
-  { href: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard'      },
-  { href: '/empleados',     icon: Users,            label: 'Empleados'     },
-  { href: '/asistencia',    icon: Clock,            label: 'Asistencia'    },
-  { href: '/permisos',      icon: Calendar,         label: 'Permisos'      },
-  { href: '/reportes',      icon: BarChart2,        label: 'Reportes'      },
-  { href: '/usuarios',      icon: Shield,           label: 'Usuarios'      },
-  { href: '/configuracion', icon: Settings,         label: 'Configuración' },
+type NavItem = {
+  href: string
+  icon: LucideIcon
+  label: string
+  roles?: Role[]      // roles permitidos (super_admin siempre ve todo)
+  superOnly?: boolean // solo super_admin
+}
+
+const NAV: NavItem[] = [
+  { href: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/empleados',     icon: Users,           label: 'Empleados',    roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
+  { href: '/asistencia',    icon: Clock,           label: 'Asistencia',   roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
+  { href: '/permisos',      icon: Calendar,        label: 'Permisos',     roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
+  { href: '/reportes',      icon: BarChart2,       label: 'Reportes',     roles: ['admin','gth','hr','manager','gestor'] },
+  { href: '/usuarios',      icon: Shield,          label: 'Usuarios',     roles: ['admin','gth'] },
+  { href: '/configuracion', icon: Settings,        label: 'Configuración', roles: ['admin','gth'] },
+  { href: '/sistema',       icon: Server,          label: 'Sistema',      superOnly: true },
 ]
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const user = useCurrentUser()
+
+  const items = NAV.filter(item => {
+    if (item.superOnly) return isSuperAdmin(user)
+    if (!item.roles) return true
+    return hasRole(user, ...item.roles)
+  })
 
   function handleLogout() {
     const refresh = localStorage.getItem('refresh_token')
@@ -34,14 +55,16 @@ export default function Sidebar() {
           </div>
           <div>
             <p className="text-white font-bold text-sm">Asistencia</p>
-            <p className="text-slate-400 text-xs">Recursos Humanos</p>
+            <p className="text-slate-400 text-xs">
+              {user?.role === 'super_admin' ? 'Super Admin' : 'Recursos Humanos'}
+            </p>
           </div>
         </div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {nav.map(({ href, icon: Icon, label }) => {
+        {items.map(({ href, icon: Icon, label }) => {
           const active = pathname.startsWith(href)
           return (
             <Link key={href} href={href}
@@ -59,8 +82,14 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Logout */}
-      <div className="px-3 py-4 border-t border-slate-700">
+      {/* User + Logout */}
+      <div className="px-3 py-4 border-t border-slate-700 space-y-2">
+        {user && (
+          <div className="px-3 py-2 text-xs text-slate-400">
+            <p className="text-slate-200 font-medium truncate">{user.fullName || user.username}</p>
+            <p className="truncate capitalize">{user.role.replace('_', ' ')}</p>
+          </div>
+        )}
         <button onClick={handleLogout}
           className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
         >

@@ -336,5 +336,6 @@ async function registerMobile(req, res) {
 
 module.exports = {
   processAttendanceEvent, bridgeWebhook, getDashboardStats,
-  getByDate, registerManual, registerMobile
+  getByDate, registerManual, registerMobile,
+  recalcDailySummary,
 };

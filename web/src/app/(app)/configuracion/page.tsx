@@ -1,6 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCurrentUser, isSuperAdmin } from '@/lib/useCurrentUser'
 import {
   Wifi, WifiOff, RefreshCw, Plus, Trash2, Globe,
   Zap, CheckCircle, XCircle, AlertCircle, Database,
@@ -44,15 +46,34 @@ const labelCls = "text-xs font-medium text-slate-600 block mb-1"
 
 // ─── Componente principal ─────────────────────────────────────
 export default function ConfiguracionPage() {
-  const [tab, setTab] = useState<'sistema'|'relojes'|'sync'|'webhooks'|'api'>('relojes')
+  const searchParams = useSearchParams()
+  const user = useCurrentUser()
+  const canTech = isSuperAdmin(user)
 
-  const tabs = [
-    { id: 'sistema',   label: '🖥️ Sistema' },
-    { id: 'relojes',   label: '⌚ Relojes ZKTeco' },
-    { id: 'sync',      label: '🔄 Sincronización BD' },
-    { id: 'webhooks',  label: '🔗 Webhooks' },
-    { id: 'api',       label: '📖 API & Integración' },
+  // Tabs técnicos (relojes / sync) solo para super_admin.
+  // Resto de roles ven únicamente Sistema / Webhooks / API.
+  const allTabs = [
+    { id: 'sistema',   label: '🖥️ Sistema',              show: true },
+    { id: 'relojes',   label: '⌚ Relojes ZKTeco',         show: canTech },
+    { id: 'sync',      label: '🔄 Sincronización BD',      show: canTech },
+    { id: 'webhooks',  label: '🔗 Webhooks',               show: true },
+    { id: 'api',       label: '📖 API & Integración',      show: true },
   ] as const
+  const tabs = allTabs.filter(t => t.show)
+
+  const initialTab = (() => {
+    const q = searchParams.get('tab') as any
+    if (q && tabs.some(t => t.id === q)) return q
+    return canTech ? 'relojes' : 'sistema'
+  })()
+
+  const [tab, setTab] = useState<'sistema'|'relojes'|'sync'|'webhooks'|'api'>(initialTab)
+
+  // Si el rol cambia y el tab actual ya no está permitido, resetear
+  useEffect(() => {
+    if (!tabs.some(t => t.id === tab)) setTab(tabs[0]?.id as any)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canTech])
 
   return (
     <div className="p-6 space-y-6">
