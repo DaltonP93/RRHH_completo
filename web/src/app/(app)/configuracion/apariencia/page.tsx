@@ -57,17 +57,17 @@ export default function AparienciaPage() {
   const faviconRef = useRef<HTMLInputElement>(null)
   const bgRef      = useRef<HTMLInputElement>(null)
 
-  async function load() {
+  const load = async () => {
     const { data } = await api.get('/api/settings')
     setS(data)
   }
   useEffect(() => { load() }, [])
 
-  function patch(p: Partial<Settings>) {
+  const patch = (p: Partial<Settings>) => {
     setS(prev => prev ? { ...prev, ...p } : prev)
   }
 
-  async function save() {
+  const save = async () => {
     if (!s) return
     setSaving(true); setMsg(null)
     try {
@@ -78,7 +78,7 @@ export default function AparienciaPage() {
     } finally { setSaving(false) }
   }
 
-  async function reset() {
+  const reset = async () => {
     if (!confirm('Restaurar apariencia a valores por defecto?')) return
     try {
       await api.post('/api/settings/reset')
@@ -89,7 +89,7 @@ export default function AparienciaPage() {
     }
   }
 
-  async function upload(kind: 'logo'|'favicon'|'login_bg', file: File) {
+  const upload = async (kind: 'logo'|'favicon'|'login_bg', file: File) => {
     const fd = new FormData()
     fd.append('file', file)
     setMsg(null)
@@ -107,7 +107,7 @@ export default function AparienciaPage() {
   if (!s) return <div className="p-6 text-slate-400">Cargando...</div>
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
-  function fullUrl(u: string): string {
+  const resolveUrl = (u: string): string => {
     if (!u) return ''
     if (u.startsWith('http')) return u
     return apiUrl + u
@@ -311,14 +311,14 @@ export default function AparienciaPage() {
               <div
                 className={`h-72 relative flex items-center justify-center p-4 ${!s.system_login_bg_image ? `bg-gradient-to-br ${s.system_login_bg}` : ''}`}
                 style={s.system_login_bg_image ? {
-                  backgroundImage: `url("${fullUrl(s.system_login_bg_image)}")`,
+                  backgroundImage: `url("${resolveUrl(s.system_login_bg_image)}")`,
                   backgroundSize: 'cover', backgroundPosition: 'center',
                 } : undefined}
               >
                 {s.system_login_bg_image && <div className="absolute inset-0 bg-black/30" />}
                 <div className={`relative z-10 rounded-2xl p-4 w-full max-w-[200px] text-center ${s.system_login_glass === '1' ? 'bg-white/85 backdrop-blur' : 'bg-white'}`}>
                   {s.system_logo_url
-                    ? <img src={fullUrl(s.system_logo_url)} alt="" className="h-8 mx-auto mb-1 object-contain" />
+                    ? <img src={resolveUrl(s.system_logo_url)} alt="" className="h-8 mx-auto mb-1 object-contain" />
                     : <div className="w-8 h-8 rounded-lg mx-auto mb-1"
                         style={{ background: `linear-gradient(135deg, ${s.system_primary_color}, ${s.system_secondary_color})` }} />
                   }
