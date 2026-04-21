@@ -4,7 +4,7 @@ const logger = require('../config/logger');
 // GET /api/employees
 async function getAll(req, res) {
   try {
-    const { dept, department_id, status, search, page = 1, limit = 50 } = req.query;
+    const { dept, department_id, branch_id, status, search, page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
 
     // status vacío = mostrar activos por defecto; 'all' o '' sin especificar = todos
@@ -19,6 +19,7 @@ async function getAll(req, res) {
 
     const deptVal = dept || department_id;
     if (deptVal) { where += ' AND e.department_id = ?'; params.push(deptVal); }
+    if (branch_id) { where += ' AND e.branch_id = ?'; params.push(branch_id); }
     if (search) {
       where += ' AND (e.first_name LIKE ? OR e.last_name LIKE ? OR e.code LIKE ? OR CONCAT(e.first_name," ",e.last_name) LIKE ?)';
       params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
@@ -31,10 +32,12 @@ async function getAll(req, res) {
         e.first_name, e.last_name, e.email, e.phone,
         e.position, e.hire_date, e.status, e.photo_url,
         d.name AS department, d.id AS department_id,
+        e.branch_id, b.name AS branch_name,
         s.name AS schedule, s.check_in, s.check_out
       FROM employees e
       LEFT JOIN departments d ON e.department_id = d.id
       LEFT JOIN schedules   s ON e.schedule_id   = s.id
+      LEFT JOIN branches    b ON e.branch_id     = b.id
       ${where}
       ORDER BY e.last_name, e.first_name
       LIMIT ? OFFSET ?
