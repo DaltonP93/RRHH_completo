@@ -1,7 +1,33 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Shield, Lock, Smartphone, Copy, CheckCircle, AlertCircle, KeyRound, X } from 'lucide-react'
 import { api } from '@/lib/api'
+
+// Focus trap minimal: foco cicla dentro del modal, restaura al cerrar, Esc cierra.
+function useFocusTrap(active: boolean, onEscape: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!active || !ref.current) return
+    const container = ref.current
+    const prev = document.activeElement as HTMLElement | null
+    const selector = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const focusables = () => Array.from(container.querySelectorAll<HTMLElement>(selector))
+    const first = focusables()[0]
+    first?.focus()
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.preventDefault(); onEscape(); return }
+      if (e.key !== 'Tab') return
+      const items = focusables()
+      if (!items.length) return
+      const firstEl = items[0], lastEl = items[items.length - 1]
+      if (e.shiftKey && document.activeElement === firstEl) { e.preventDefault(); lastEl.focus() }
+      else if (!e.shiftKey && document.activeElement === lastEl) { e.preventDefault(); firstEl.focus() }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('keydown', onKey); prev?.focus?.() }
+  }, [active, onEscape])
+  return ref
+}
 
 // QR renderer: usa chart vía API externa? No — usa <img> con QR data URL embebido.
 // Para minimizar deps, renderizamos el QR usando una lib ligera inline.
@@ -202,12 +228,13 @@ function Setup2faModal({ onClose, onDone, setError }: { onClose: () => void; onD
     } finally { setLoading(false) }
   }
 
+  const trapRef = useFocusTrap(true, onClose)
   return (
     <div
+      ref={trapRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="setup2fa-title"
-      onKeyDown={e => { if (e.key === 'Escape') onClose() }}
       className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
     >
       <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4">
@@ -226,12 +253,14 @@ function Setup2faModal({ onClose, onDone, setError }: { onClose: () => void; onD
               <li>Ingresá el código de 6 dígitos que aparece en la app.</li>
             </ol>
 
-            <div className="flex justify-center bg-slate-50 rounded-xl p-4">
+            <div role="img" aria-label="Código QR de configuración 2FA. Escanealo con tu app autenticadora."
+                 className="flex justify-center bg-slate-50 rounded-xl p-4">
               {QRCodeComp && url
                 ? <QRCodeComp value={url} size={180} level="M" />
                 : <div className="text-xs text-slate-500">
                     <p className="mb-2">Pegá esta URL en tu app:</p>
                     <textarea readOnly value={url} rows={4}
+                      aria-label="URL de configuración 2FA"
                       className="w-full bg-white border border-slate-200 rounded p-2 font-mono text-[10px]" />
                   </div>
               }
@@ -296,12 +325,13 @@ function Disable2faModal({ onClose, onDone, setError }: { onClose: () => void; o
     } finally { setLoading(false) }
   }
 
+  const trapRef = useFocusTrap(true, onClose)
   return (
     <div
+      ref={trapRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="disable2fa-title"
-      onKeyDown={e => { if (e.key === 'Escape') onClose() }}
       className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
     >
       <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4">

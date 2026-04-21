@@ -149,8 +149,9 @@ export default function LoginPage() {
 
       {/* Reloj flotante (esquina) */}
       {showClock && (
-        <div className="hidden md:flex absolute top-6 right-8 items-center gap-2 text-white/90 bg-black/30 backdrop-blur px-4 py-2 rounded-xl z-10">
-          <ClockIcon size={16} />
+        <div className="hidden md:flex absolute top-6 right-8 items-center gap-2 text-white bg-black/60 backdrop-blur px-4 py-2 rounded-xl z-10"
+             aria-live="off">
+          <ClockIcon size={16} aria-hidden="true" />
           <span className="text-sm font-medium tracking-wide">{datetimeStr}</span>
         </div>
       )}
