@@ -117,6 +117,7 @@ app.use('/api/me',             meRoutes);
 app.use('/api/audit',          auditRoutes);
 app.use('/api/holidays',       holidayRoutes);
 app.use('/api/branches',       branchRoutes);
+app.use('/api/justifications', justificationsBulk);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
