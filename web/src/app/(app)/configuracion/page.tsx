@@ -92,6 +92,10 @@ function ConfiguracionPageInner() {
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium shadow-sm hover:bg-indigo-700 transition-colors">
             🏢 Sedes
           </a>
+          <a href="/configuracion/qr-asistencia"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-medium shadow-sm hover:bg-slate-900 transition-colors">
+            📱 QR asistencia
+          </a>
           <a href="/configuracion/apariencia"
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-medium shadow-sm hover:shadow-md transition-shadow">
             🎨 Personalizar apariencia

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar,
   LogOut, Shield, Server, Building2, CheckSquare, UserCircle2,
-  Menu, X, FileText,
+  Menu, X, FileText, TrendingUp, QrCode, DollarSign,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   // Portal del empleado
   { href: '/mi-perfil',     icon: UserCircle2,     label: 'Mi perfil',     section: 'portal', roles: ['employee','admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/mi-asistencia', icon: Clock,           label: 'Mi asistencia', section: 'portal', roles: ['employee'] },
+  { href: '/marcar',        icon: QrCode,          label: 'Marcar (QR/GPS)', section: 'portal', roles: ['employee'] },
   { href: '/mis-permisos',  icon: Calendar,        label: 'Mis permisos',  section: 'portal', roles: ['employee'] },
   { href: '/seguridad',     icon: Shield,          label: 'Seguridad',     section: 'portal' },
 
@@ -34,6 +35,8 @@ const NAV: NavItem[] = [
   { href: '/permisos',      icon: Calendar,        label: 'Permisos',      section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/aprobaciones',  icon: CheckSquare,     label: 'Aprobaciones',  section: 'gestion', roles: ['admin','gth','hr','coordinator','manager'] },
   { href: '/reportes',      icon: BarChart2,       label: 'Reportes',      section: 'gestion', roles: ['admin','gth','hr','manager','gestor'] },
+  { href: '/ejecutivo',     icon: TrendingUp,      label: 'Ejecutivo',     section: 'gestion', roles: ['admin','gth','hr','manager'] },
+  { href: '/nomina',        icon: DollarSign,      label: 'Nómina SAA',    section: 'gestion', roles: ['admin','gth','hr'] },
 
   // Admin
   { href: '/departamentos', icon: Building2,       label: 'Departamentos', section: 'admin', roles: ['admin','gth'] },

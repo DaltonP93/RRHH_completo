@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
 import {
-  FileText, Filter, User as UserIcon, Globe, Clock, Search,
-  CheckCircle, XCircle, AlertCircle, Settings as SettingsIcon, LogIn, Shield
+  FileText, Filter, User as UserIcon, Globe, Clock, Search, Download,
+  CheckCircle, XCircle, AlertCircle, Settings as SettingsIcon, LogIn, Shield,
+  Eye, ChevronLeft, ChevronRight, X
 } from 'lucide-react'
 import { api } from '@/lib/api'
 
@@ -14,14 +15,23 @@ interface Event {
   actor_name: string | null; actor_role: string | null
 }
 interface ActionCount { action: string; total: number }
+interface EntityCount { entity: string; total: number }
 
 const ACTION_META: Record<string, { color: string; icon: any; label: string }> = {
-  login_ok:          { color: 'bg-emerald-100 text-emerald-800', icon: LogIn,         label: 'Login OK' },
-  login_fail:        { color: 'bg-red-100 text-red-800',         icon: XCircle,       label: 'Login falló' },
-  settings_update:   { color: 'bg-blue-100 text-blue-800',       icon: SettingsIcon,  label: 'Config actualizada' },
-  permission_create: { color: 'bg-purple-100 text-purple-800',   icon: FileText,      label: 'Permiso creado' },
-  permission_approve:{ color: 'bg-emerald-100 text-emerald-800', icon: CheckCircle,   label: 'Permiso aprobado' },
-  permission_reject: { color: 'bg-red-100 text-red-800',         icon: XCircle,       label: 'Permiso rechazado' },
+  login_ok:           { color: 'bg-emerald-100 text-emerald-800', icon: LogIn,        label: 'Login OK' },
+  login_fail:         { color: 'bg-red-100 text-red-800',         icon: XCircle,      label: 'Login falló' },
+  logout:             { color: 'bg-slate-100 text-slate-700',     icon: LogIn,        label: 'Logout' },
+  settings_update:    { color: 'bg-blue-100 text-blue-800',       icon: SettingsIcon, label: 'Config actualizada' },
+  permission_create:  { color: 'bg-purple-100 text-purple-800',   icon: FileText,     label: 'Permiso creado' },
+  permission_approve: { color: 'bg-emerald-100 text-emerald-800', icon: CheckCircle,  label: 'Permiso aprobado' },
+  permission_reject:  { color: 'bg-red-100 text-red-800',         icon: XCircle,      label: 'Permiso rechazado' },
+  employee_create:    { color: 'bg-indigo-100 text-indigo-800',   icon: UserIcon,     label: 'Empleado creado' },
+  employee_update:    { color: 'bg-blue-100 text-blue-800',       icon: UserIcon,     label: 'Empleado modificado' },
+  employee_delete:    { color: 'bg-red-100 text-red-800',         icon: XCircle,      label: 'Empleado eliminado' },
+  user_create:        { color: 'bg-indigo-100 text-indigo-800',   icon: Shield,       label: 'Usuario creado' },
+  user_update:        { color: 'bg-blue-100 text-blue-800',       icon: Shield,       label: 'Usuario modificado' },
+  checkin_self:       { color: 'bg-emerald-100 text-emerald-800', icon: Clock,        label: 'Auto-marcación' },
+  export:             { color: 'bg-slate-100 text-slate-700',     icon: Download,     label: 'Export' },
 }
 
 function todayISO()     { return new Date().toISOString().slice(0,10) }
@@ -29,39 +39,67 @@ function daysAgoISO(n: number) {
   const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0,10)
 }
 
+const PAGE_SIZE = 50
+
 export default function AuditoriaPage() {
   const [events, setEvents] = useState<Event[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
   const [actions, setActions] = useState<ActionCount[]>([])
+  const [entities, setEntities] = useState<EntityCount[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [filter, setFilter] = useState({ action: '', from: daysAgoISO(7), to: todayISO() })
+  const [detail, setDetail] = useState<Event | null>(null)
+  const [filter, setFilter] = useState({
+    action: '', entity: '', q: '',
+    from: daysAgoISO(7), to: todayISO(),
+  })
 
   async function load() {
     setLoading(true); setError('')
     try {
-      const [{ data: ev }, { data: ac }] = await Promise.all([
-        api.get('/api/audit', { params: filter }),
+      const params = { ...filter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }
+      const [{ data: ev }, { data: ac }, { data: en }] = await Promise.all([
+        api.get('/api/audit', { params }),
         api.get('/api/audit/actions'),
+        api.get('/api/audit/entities'),
       ])
-      setEvents(ev); setActions(ac)
+      setEvents(ev.rows || []); setTotal(ev.total || 0)
+      setActions(ac); setEntities(en)
     } catch (e: any) {
       setError(e.response?.data?.error || e.message)
     } finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [filter.action, filter.from, filter.to])
+  useEffect(() => { load() /* eslint-disable-next-line */ }, [filter.action, filter.entity, filter.from, filter.to, page])
+
+  async function exportCsv() {
+    try {
+      const res = await api.get('/api/audit/export.csv', { params: filter, responseType: 'blob' })
+      const url = URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url; a.download = `auditoria_${todayISO()}.csv`; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) { setError(e.response?.data?.error || 'Error al exportar') }
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   return (
     <div className="p-6 space-y-6 max-w-7xl">
-      <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl bg-slate-800 flex items-center justify-center">
-          <FileText className="text-white" size={22} />
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-slate-800 flex items-center justify-center">
+            <FileText className="text-white" size={22} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Auditoría</h1>
+            <p className="text-slate-500 text-sm">Registro de eventos del sistema. {total.toLocaleString()} evento(s) en el filtro actual.</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Auditoría</h1>
-          <p className="text-slate-500 text-sm">
-            Registro de eventos del sistema (logins, cambios sensibles, workflow).
-          </p>
-        </div>
+        <button onClick={exportCsv}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm">
+          <Download size={14} /> Exportar CSV
+        </button>
       </div>
 
       {/* KPIs por acción */}
@@ -71,13 +109,13 @@ export default function AuditoriaPage() {
           return (
             <button
               key={a.action}
-              onClick={() => setFilter(f => ({ ...f, action: f.action === a.action ? '' : a.action }))}
+              onClick={() => { setFilter(f => ({ ...f, action: f.action === a.action ? '' : a.action })); setPage(0) }}
               className={`p-3 rounded-xl border text-left transition-all ${filter.action === a.action ? 'border-blue-500 ring-2 ring-blue-200' : 'border-slate-200 hover:border-slate-300'} bg-white`}
             >
               <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${meta.color}`}>
                 <meta.icon size={12} /> {meta.label}
               </div>
-              <p className="text-2xl font-bold text-slate-900 mt-2">{a.total}</p>
+              <p className="text-2xl font-bold text-slate-900 mt-2">{a.total.toLocaleString()}</p>
             </button>
           )
         })}
@@ -90,23 +128,38 @@ export default function AuditoriaPage() {
         </div>
         <div>
           <label className="text-xs font-medium text-slate-600 block mb-1">Acción</label>
-          <select value={filter.action} onChange={e => setFilter(f => ({ ...f, action: e.target.value }))}
+          <select value={filter.action} onChange={e => { setFilter(f => ({ ...f, action: e.target.value })); setPage(0) }}
             className="border border-slate-200 rounded-xl px-3 py-2 text-sm min-w-[180px]">
             <option value="">— Todas —</option>
             {actions.map(a => <option key={a.action} value={a.action}>{a.action} ({a.total})</option>)}
           </select>
         </div>
         <div>
+          <label className="text-xs font-medium text-slate-600 block mb-1">Entidad</label>
+          <select value={filter.entity} onChange={e => { setFilter(f => ({ ...f, entity: e.target.value })); setPage(0) }}
+            className="border border-slate-200 rounded-xl px-3 py-2 text-sm min-w-[160px]">
+            <option value="">— Todas —</option>
+            {entities.map(a => <option key={a.entity} value={a.entity}>{a.entity} ({a.total})</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-slate-600 block mb-1">Buscar (usuario/detalle)</label>
+          <input value={filter.q} onChange={e => setFilter(f => ({ ...f, q: e.target.value }))}
+            onKeyDown={e => { if (e.key === 'Enter') { setPage(0); load() } }}
+            placeholder="admin, error, 192.168..."
+            className="border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+        </div>
+        <div>
           <label className="text-xs font-medium text-slate-600 block mb-1">Desde</label>
-          <input type="date" value={filter.from} onChange={e => setFilter(f => ({ ...f, from: e.target.value }))}
+          <input type="date" value={filter.from} onChange={e => { setFilter(f => ({ ...f, from: e.target.value })); setPage(0) }}
             className="border border-slate-200 rounded-xl px-3 py-2 text-sm" />
         </div>
         <div>
           <label className="text-xs font-medium text-slate-600 block mb-1">Hasta</label>
-          <input type="date" value={filter.to} onChange={e => setFilter(f => ({ ...f, to: e.target.value }))}
+          <input type="date" value={filter.to} onChange={e => { setFilter(f => ({ ...f, to: e.target.value })); setPage(0) }}
             className="border border-slate-200 rounded-xl px-3 py-2 text-sm" />
         </div>
-        <button onClick={load}
+        <button onClick={() => { setPage(0); load() }}
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm">
           <Search size={14} /> Buscar
         </button>
@@ -138,6 +191,7 @@ export default function AuditoriaPage() {
                 <th className="px-4 py-3">Entidad</th>
                 <th className="px-4 py-3">IP</th>
                 <th className="px-4 py-3">Detalles</th>
+                <th className="px-4 py-3 w-12"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -174,13 +228,69 @@ export default function AuditoriaPage() {
                     <td className="px-4 py-2.5 text-xs text-slate-500 max-w-xs">
                       {e.details ? <pre className="truncate text-[10px] font-mono">{e.details}</pre> : <span className="text-slate-300">—</span>}
                     </td>
+                    <td className="px-4 py-2.5">
+                      <button onClick={() => setDetail(e)} className="p-1 rounded hover:bg-slate-100 text-slate-500">
+                        <Eye size={14} />
+                      </button>
+                    </td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
         )}
+        {/* Paginación */}
+        {total > PAGE_SIZE && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm text-slate-500">
+            <span>Página {page + 1} de {totalPages}</span>
+            <div className="flex gap-2">
+              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+                className="px-3 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-1">
+                <ChevronLeft size={14} /> Anterior
+              </button>
+              <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
+                className="px-3 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-1">
+                Siguiente <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Modal detalle */}
+      {detail && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={() => setDetail(null)}>
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h3 className="font-semibold text-slate-900">Evento #{detail.id}</h3>
+              <button onClick={() => setDetail(null)} className="p-1 rounded hover:bg-slate-100"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-3 text-sm">
+              <Row k="Fecha" v={new Date(detail.created_at).toLocaleString()} />
+              <Row k="Acción" v={detail.action} />
+              <Row k="Usuario" v={`${detail.actor_name || detail.username || '—'} (${detail.actor_role || 'sin rol'})`} />
+              <Row k="Entidad" v={detail.entity ? `${detail.entity}${detail.entity_id ? ` #${detail.entity_id}` : ''}` : '—'} />
+              <Row k="IP" v={detail.ip || '—'} />
+              <Row k="User-Agent" v={detail.user_agent || '—'} />
+              <div>
+                <div className="text-xs text-slate-500 mb-1">Detalles (JSON)</div>
+                <pre className="bg-slate-50 rounded-lg p-3 text-xs overflow-auto max-h-72 font-mono">
+                  {(() => { try { return JSON.stringify(JSON.parse(detail.details || '{}'), null, 2) } catch { return detail.details || '—' } })()}
+                </pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="grid grid-cols-[120px_1fr] gap-2">
+      <div className="text-slate-500 text-xs">{k}</div>
+      <div className="text-slate-900 text-sm break-all">{v}</div>
     </div>
   )
 }

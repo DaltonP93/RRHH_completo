@@ -36,6 +36,9 @@ const auditRoutes           = require('./routes/audit');
 const holidayRoutes         = require('./routes/holidays');
 const branchRoutes          = require('./routes/branches');
 const justificationsBulk    = require('./routes/justificationsBulk');
+const executiveRoutes       = require('./routes/executive');
+const selfCheckinRoutes     = require('./routes/selfCheckin');
+const payrollRoutes         = require('./routes/payroll');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -118,6 +121,9 @@ app.use('/api/audit',          auditRoutes);
 app.use('/api/holidays',       holidayRoutes);
 app.use('/api/branches',       branchRoutes);
 app.use('/api/justifications', justificationsBulk);
+app.use('/api/executive',      executiveRoutes);
+app.use('/api/self-checkin',   selfCheckinRoutes);
+app.use('/api/payroll',        payrollRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
