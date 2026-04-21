@@ -185,26 +185,11 @@ function SistemaTab() {
             <input value={settings.system_company} onChange={setField('system_company')} placeholder="Mi Empresa S.A." className={inputCls} />
           </div>
         </div>
-        <div>
-          <label className={labelCls}>URL del logo (PNG/SVG)</label>
-          <input value={settings.system_logo_url} onChange={setField('system_logo_url')} placeholder="https://miempresa.com/logo.png" className={inputCls} />
-          {settings.system_logo_url && (
-            <img src={settings.system_logo_url} alt="preview" className="mt-2 h-10 object-contain rounded border border-slate-100 p-1"
-              onError={e => { (e.target as HTMLImageElement).style.display='none' }} />
-          )}
-        </div>
-        <div>
-          <label className={labelCls}>URL del favicon (.ico o .png pequeño)</label>
-          <input value={settings.system_favicon_url} onChange={setField('system_favicon_url')} placeholder="https://miempresa.com/favicon.ico" className={inputCls} />
-        </div>
-        <div>
-          <label className={labelCls}>Color principal</label>
-          <div className="flex items-center gap-3">
-            <input type="color" value={settings.system_primary_color} onChange={setField('system_primary_color')}
-              className="h-10 w-20 rounded-lg border border-slate-200 cursor-pointer p-0.5" />
-            <input value={settings.system_primary_color} onChange={setField('system_primary_color')}
-              className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
-          </div>
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-600">
+          Logo, favicon, colores y pantalla de login se configuran ahora en{' '}
+          <a href="/configuracion/apariencia" className="text-blue-600 hover:underline font-medium">
+            Personalizar apariencia →
+          </a>
         </div>
       </div>
 

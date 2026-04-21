@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar,
   LogOut, Shield, Server, Building2, CheckSquare, UserCircle2,
-  Menu, X, FileText, TrendingUp, QrCode, DollarSign,
+  Menu, X, FileText, TrendingUp, QrCode, DollarSign, ChevronDown,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -64,6 +64,17 @@ export default function Sidebar() {
   const user = useCurrentUser()
   const [open, setOpen] = useState(false)
   const [theme, setTheme] = useState<SidebarSettings>({})
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {}
+    try { return JSON.parse(localStorage.getItem('sidebar_collapsed') || '{}') } catch { return {} }
+  })
+  function toggleSection(sec: string) {
+    setCollapsed(prev => {
+      const next = { ...prev, [sec]: !prev[sec] }
+      try { localStorage.setItem('sidebar_collapsed', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
 
   // Carga settings de tema (sin bloquear render)
   useEffect(() => {
@@ -136,19 +147,29 @@ export default function Sidebar() {
         {(['portal','gestion','admin'] as const).map(sec => {
           const list = sections[sec]
           if (!list?.length) return null
+          const sectionActive = list.some(it => pathname === it.href || pathname.startsWith(it.href + '/'))
+          const isCollapsed = collapsed[sec] ?? false
           return (
             <div key={sec} className="space-y-1">
-              <p className="px-3 text-[10px] uppercase tracking-widest font-semibold"
-                 style={{ color: textColor, opacity: 0.6 }}>
-                {SECTION_LABEL[sec]}
-              </p>
-              {list.map(({ href, icon: Icon, label }) => {
+              <button
+                type="button"
+                onClick={() => toggleSection(sec)}
+                aria-expanded={!isCollapsed}
+                className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                style={{ color: textColor }}
+              >
+                <span className="text-[10px] uppercase tracking-widest font-semibold opacity-60">
+                  {SECTION_LABEL[sec]}
+                </span>
+                <ChevronDown size={14} className={clsx('transition-transform', isCollapsed && '-rotate-90')} />
+              </button>
+              {!isCollapsed && list.map(({ href, icon: Icon, label }) => {
                 const active = pathname === href || pathname.startsWith(href + '/')
                 return (
                   <Link key={href} href={href}
                     aria-current={active ? 'page' : undefined}
                     className={clsx(
-                      'flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all',
+                      'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all',
                       'hover:text-white focus-visible:outline-2 focus-visible:outline focus-visible:outline-white focus-visible:outline-offset-2'
                     )}
                     style={active
@@ -160,6 +181,9 @@ export default function Sidebar() {
                   </Link>
                 )
               })}
+              {isCollapsed && sectionActive && (
+                <div className="h-0.5 mx-3 rounded" style={{ backgroundColor: activeBg, opacity: 0.5 }} />
+              )}
             </div>
           )
         })}

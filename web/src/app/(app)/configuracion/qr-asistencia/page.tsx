@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { RefreshCw, QrCode } from 'lucide-react'
+import { RefreshCw, QrCode, ArrowLeft } from 'lucide-react'
 import { api } from '@/lib/api'
 
 export default function QRAsistenciaPage() {
@@ -58,6 +58,9 @@ export default function QRAsistenciaPage() {
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
+      <a href="/configuracion" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700">
+        <ArrowLeft size={16} /> Volver
+      </a>
       <div>
         <h1 className="text-2xl font-bold text-slate-900">QR de marcación</h1>
         <p className="text-sm text-slate-500">Genera y muestra el código QR rotativo para que los empleados marquen en esta sede.</p>
