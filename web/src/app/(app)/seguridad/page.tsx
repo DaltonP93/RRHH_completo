@@ -203,11 +203,19 @@ function Setup2faModal({ onClose, onDone, setError }: { onClose: () => void; onD
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="setup2fa-title"
+      onKeyDown={e => { if (e.key === 'Escape') onClose() }}
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+    >
       <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-slate-900">Habilitar 2FA {step === 'verify' && '(paso 2/2)'}</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X size={18} /></button>
+          <h3 id="setup2fa-title" className="font-bold text-slate-900">Habilitar 2FA {step === 'verify' && '(paso 2/2)'}</h3>
+          <button aria-label="Cerrar" onClick={onClose} className="p-1 rounded hover:bg-slate-100">
+            <X size={18} aria-hidden="true" />
+          </button>
         </div>
 
         {step === 'qr' && (
@@ -289,11 +297,19 @@ function Disable2faModal({ onClose, onDone, setError }: { onClose: () => void; o
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="disable2fa-title"
+      onKeyDown={e => { if (e.key === 'Escape') onClose() }}
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+    >
       <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-slate-900">Deshabilitar 2FA</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X size={18} /></button>
+          <h3 id="disable2fa-title" className="font-bold text-slate-900">Deshabilitar 2FA</h3>
+          <button aria-label="Cerrar" onClick={onClose} className="p-1 rounded hover:bg-slate-100">
+            <X size={18} aria-hidden="true" />
+          </button>
         </div>
         <p className="text-sm text-slate-500">Ingresá tu contraseña y el código 2FA actual para confirmar.</p>
         <div>

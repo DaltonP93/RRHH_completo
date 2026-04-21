@@ -49,14 +49,16 @@ export default function ForgotPasswordPage() {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-              <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
+              <label htmlFor="fp-email" className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+              <input id="fp-email" type="email" required value={email} onChange={e => setEmail(e.target.value)}
+                aria-invalid={!!error}
                 className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="tu@email.com" autoFocus />
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">{error}</div>
+              <div role="alert" aria-live="assertive"
+                   className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">{error}</div>
             )}
 
             <button type="submit" disabled={loading}

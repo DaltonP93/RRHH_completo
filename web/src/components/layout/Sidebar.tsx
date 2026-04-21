@@ -118,8 +118,12 @@ export default function Sidebar() {
               </p>
             </div>
           </div>
-          <button className="md:hidden text-white/80 hover:text-white" onClick={() => setOpen(false)}>
-            <X size={20} />
+          <button
+            aria-label="Cerrar menú"
+            className="md:hidden text-white/80 hover:text-white focus-visible:ring-2 focus-visible:ring-white rounded-lg p-1"
+            onClick={() => setOpen(false)}
+          >
+            <X size={20} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -139,16 +143,16 @@ export default function Sidebar() {
                 const active = pathname === href || pathname.startsWith(href + '/')
                 return (
                   <Link key={href} href={href}
+                    aria-current={active ? 'page' : undefined}
                     className={clsx(
-                      'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all'
+                      'flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all',
+                      'hover:text-white focus-visible:outline-2 focus-visible:outline focus-visible:outline-white focus-visible:outline-offset-2'
                     )}
                     style={active
                       ? { backgroundColor: activeBg, color: '#fff' }
                       : { color: textColor }}
-                    onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.color = '#fff' }}
-                    onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.color = textColor }}
                   >
-                    <Icon size={18} />
+                    <Icon size={18} aria-hidden="true" />
                     {label}
                   </Link>
                 )
@@ -191,7 +195,11 @@ export default function Sidebar() {
       {/* Overlay mobile */}
       {open && (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Cerrar menú"
           onClick={() => setOpen(false)}
+          onKeyDown={e => { if (e.key === 'Escape' || e.key === 'Enter') setOpen(false) }}
           className="md:hidden fixed inset-0 bg-black/60 z-40"
         />
       )}

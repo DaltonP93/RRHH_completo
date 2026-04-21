@@ -59,21 +59,24 @@ function ResetInner() {
         ) : token && (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Nueva contraseña</label>
-              <input type="password" required value={pwd} onChange={e => setPwd(e.target.value)}
+              <label htmlFor="rp-pwd" className="block text-sm font-medium text-slate-700 mb-1">Nueva contraseña</label>
+              <input id="rp-pwd" type="password" required value={pwd} onChange={e => setPwd(e.target.value)}
+                aria-describedby="rp-pwd-hint" aria-invalid={!!error}
                 className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="••••••••" autoFocus />
-              <p className="text-xs text-slate-400 mt-1">Mínimo 8 caracteres, con letras y números.</p>
+              <p id="rp-pwd-hint" className="text-xs text-slate-500 mt-1">Mínimo 8 caracteres, con letras y números.</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Confirmar contraseña</label>
-              <input type="password" required value={confirm} onChange={e => setConfirm(e.target.value)}
+              <label htmlFor="rp-confirm" className="block text-sm font-medium text-slate-700 mb-1">Confirmar contraseña</label>
+              <input id="rp-confirm" type="password" required value={confirm} onChange={e => setConfirm(e.target.value)}
+                aria-invalid={!!error}
                 className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="••••••••" />
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">{error}</div>
+              <div role="alert" aria-live="assertive"
+                   className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">{error}</div>
             )}
 
             <button type="submit" disabled={loading}

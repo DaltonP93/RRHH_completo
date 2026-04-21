@@ -183,14 +183,16 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Usuario</label>
+            <label htmlFor="login-username" className="block text-sm font-medium text-slate-700 mb-1">Usuario</label>
             <div className="relative">
-              <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <User size={16} aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
               <input
+                id="login-username"
                 type="text"
                 required
                 value={form.username}
                 onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
+                aria-invalid={!!error}
                 className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2"
                 style={{ '--tw-ring-color': settings.system_primary_color } as any}
                 placeholder="usuario o email"
@@ -199,14 +201,16 @@ export default function LoginPage() {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña</label>
+            <label htmlFor="login-password" className="block text-sm font-medium text-slate-700 mb-1">Contraseña</label>
             <div className="relative">
-              <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Lock size={16} aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
               <input
+                id="login-password"
                 type="password"
                 required
                 value={form.password}
                 onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                aria-invalid={!!error}
                 className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2"
                 style={{ '--tw-ring-color': settings.system_primary_color } as any}
                 placeholder="••••••••"
@@ -217,15 +221,18 @@ export default function LoginPage() {
 
           {needsOtp && (
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
-                <Shield size={14} /> Código de autenticación 2FA
+              <label htmlFor="login-otp" className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+                <Shield size={14} aria-hidden="true" /> Código de autenticación 2FA
               </label>
               <div className="relative">
                 <input
+                  id="login-otp"
                   type="text"
                   required
                   value={otp}
                   onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  aria-describedby="otp-hint"
+                  aria-invalid={!!error}
                   className="w-full border border-slate-200 rounded-xl px-4 py-3 text-lg tracking-[0.4em] text-center font-mono focus:outline-none focus:ring-2"
                   style={{ '--tw-ring-color': settings.system_primary_color } as any}
                   placeholder="000000"
@@ -234,14 +241,15 @@ export default function LoginPage() {
                   autoFocus
                 />
               </div>
-              <p className="text-xs text-slate-500">
+              <p id="otp-hint" className="text-xs text-slate-500">
                 Ingresá el código de 6 dígitos de tu app (Google Authenticator / Authy).
               </p>
             </div>
           )}
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+            <div role="alert" aria-live="assertive"
+                 className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
               {error}
             </div>
           )}
