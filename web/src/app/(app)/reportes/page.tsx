@@ -277,10 +277,28 @@ function TabMensual() {
           </select>
         </div>
         {(data?.data?.length > 0) && (
-          <button onClick={exportMonthlyCSV}
-            className="flex items-center gap-2 border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors">
-            <Download size={14} /> Exportar CSV
-          </button>
+          <>
+            <button onClick={exportMonthlyCSV}
+              className="flex items-center gap-2 border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors">
+              <Download size={14} /> CSV
+            </button>
+            <button
+              onClick={() => {
+                const q = new URLSearchParams({ year: String(year), month: String(month), format: 'xlsx', ...(deptId ? { dept: deptId } : {}) });
+                window.open(`/api/reports/monthly/export?${q.toString()}`, '_blank');
+              }}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+              <Download size={14} /> Planilla Excel
+            </button>
+            <button
+              onClick={() => {
+                const q = new URLSearchParams({ year: String(year), month: String(month), format: 'pdf', ...(deptId ? { dept: deptId } : {}) });
+                window.open(`/api/reports/monthly/export?${q.toString()}`, '_blank');
+              }}
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+              <Download size={14} /> Planilla PDF
+            </button>
+          </>
         )}
       </div>
 

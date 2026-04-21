@@ -33,6 +33,7 @@ const departmentRoutes      = require('./routes/departments');
 const approvalRulesRoutes   = require('./routes/approvalRules');
 const meRoutes              = require('./routes/me');
 const auditRoutes           = require('./routes/audit');
+const holidayRoutes         = require('./routes/holidays');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -112,6 +113,7 @@ app.use('/api/departments',    departmentRoutes);
 app.use('/api/approval-rules', approvalRulesRoutes);
 app.use('/api/me',             meRoutes);
 app.use('/api/audit',          auditRoutes);
+app.use('/api/holidays',       holidayRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
@@ -149,9 +151,10 @@ async function start() {
     logger.info('✅ Redis conectado');
 
     // Inicializar scheduler de reportes automáticos
-    const { loadSchedules, startAtt2000PullCron } = require('./services/scheduler');
+    const { loadSchedules, startAtt2000PullCron, startDailyAlertsCron } = require('./services/scheduler');
     setTimeout(() => loadSchedules().catch(() => {}), 5000);
     startAtt2000PullCron();
+    startDailyAlertsCron();
 
     // Reconciliación nocturna att2000 vs MySQL
     const { startReconciliationCron } = require('./services/reconciliation');

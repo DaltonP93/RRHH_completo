@@ -282,6 +282,38 @@ function startAtt2000PullCron() {
   }
 }
 
+// ─── Cron alertas diarias de atrasos/ausencias ───────────────────
+let _lateJob = null;
+let _absentJob = null;
+function startDailyAlertsCron() {
+  try {
+    const { sendDailyLateAlerts, sendDailyAbsenceAlerts } = require('./notifications');
+    const lateExpr   = process.env.DAILY_LATE_CRON   || '30 9 * * 1-6';
+    const absentExpr = process.env.DAILY_ABSENT_CRON || '0 10 * * 1-6';
+    const tz         = process.env.CRON_TZ || 'America/Asuncion';
+
+    if (_lateJob) _lateJob.stop();
+    if (cron.validate(lateExpr)) {
+      _lateJob = cron.schedule(lateExpr, async () => {
+        const r = await sendDailyLateAlerts();
+        logger.info(`📧 Alertas atrasos: ${JSON.stringify(r)}`);
+      }, { timezone: tz });
+      logger.info(`📅 Cron alertas atrasos activo: ${lateExpr} (${tz})`);
+    }
+
+    if (_absentJob) _absentJob.stop();
+    if (cron.validate(absentExpr)) {
+      _absentJob = cron.schedule(absentExpr, async () => {
+        const r = await sendDailyAbsenceAlerts();
+        logger.info(`📧 Alertas ausencias: ${JSON.stringify(r)}`);
+      }, { timezone: tz });
+      logger.info(`📅 Cron alertas ausencias activo: ${absentExpr} (${tz})`);
+    }
+  } catch (err) {
+    logger.error('No se pudieron registrar crons de alertas:', err.message);
+  }
+}
+
 module.exports = {
   loadSchedules,
   registerJob,
@@ -291,4 +323,5 @@ module.exports = {
   minsToHM,
   fmtTime,
   startAtt2000PullCron,
+  startDailyAlertsCron,
 };

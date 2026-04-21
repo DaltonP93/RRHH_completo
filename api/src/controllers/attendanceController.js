@@ -107,7 +107,26 @@ async function recalcDailySummary(employeeId, timestamp) {
     ORDER BY timestamp ASC
   `, { replacements: [employeeId, date] });
 
-  if (!logs.length) return;
+  // ¿Es feriado o fin de semana? Marcar estado aunque no haya marcajes
+  const [[holiday]] = await sequelize.query(
+    'SELECT id, name FROM holidays WHERE date = ? AND active = 1 LIMIT 1',
+    { replacements: [date] }
+  );
+  const dow = new Date(date + 'T12:00:00Z').getUTCDay(); // 0=Dom, 6=Sáb
+  const isWeekend = (dow === 0 || dow === 6);
+
+  if (!logs.length) {
+    // Sin marcajes: si es feriado o fin de semana, registrar como tal (no absent)
+    if (holiday || isWeekend) {
+      const fallbackStatus = holiday ? 'holiday' : 'weekend';
+      await sequelize.query(`
+        INSERT INTO daily_summary (employee_id, date, worked_minutes, late_minutes, status)
+        VALUES (?, ?, 0, 0, ?)
+        ON DUPLICATE KEY UPDATE status = VALUES(status)
+      `, { replacements: [employeeId, date, fallbackStatus] });
+    }
+    return;
+  }
 
   const firstIn  = logs.find(l => l.type === 'in');
   const lastOut  = logs.slice().reverse().find(l => l.type === 'out');

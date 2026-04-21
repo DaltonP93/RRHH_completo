@@ -4,11 +4,39 @@
  * Transiciones controladas por permissionWorkflow.js.
  */
 const router = require('express').Router();
+const path = require('path');
+const fs   = require('fs');
+const multer = require('multer');
 const { authenticate, authorize } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 const wf = require('../services/permissionWorkflow');
+const notif = require('../services/notifications');
 
 router.use(authenticate);
+
+// ─── Uploads de justificativos de permisos ─────────────────────
+const PERM_UPLOAD_DIR = path.resolve(
+  process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads'),
+  'permissions'
+);
+if (!fs.existsSync(PERM_UPLOAD_DIR)) fs.mkdirSync(PERM_UPLOAD_DIR, { recursive: true });
+
+const permStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, PERM_UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const ts = Date.now();
+    const safe = file.originalname.replace(/[^\w.\-]/g, '_').slice(-80);
+    cb(null, `perm_${ts}_${safe}`);
+  },
+});
+const permUpload = multer({
+  storage: permStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    const ok = /^(application\/pdf|image\/(jpeg|png|webp))$/.test(file.mimetype);
+    cb(ok ? null : new Error('Tipo de archivo no permitido (PDF/JPG/PNG/WebP)'), ok);
+  },
+});
 
 // ─── GET /api/permissions ──────────────────────────────────────
 // Listado filtrable por estado / empleado / departamento
@@ -120,6 +148,7 @@ router.post('/', async (req, res) => {
       note: `Solicitud creada (tipo=${type})`,
     });
 
+    notif.notifyPermissionCreated(r.insertId).catch(() => {});
     res.status(201).json({ id: r.insertId, message: 'Permiso solicitado' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -187,6 +216,7 @@ async function approveHandler(req, res) {
       from_state: fromState, to_state: nextState, note,
     });
 
+    notif.notifyPermissionAdvanced(perm.id, fromState, nextState, note).catch(() => {});
     res.json({ message: 'Permiso aprobado', state: nextState });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -230,6 +260,7 @@ async function rejectHandler(req, res) {
       note: rejReason,
     });
 
+    notif.notifyPermissionRejected(perm.id, rejReason).catch(() => {});
     res.json({ message: 'Permiso rechazado' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -267,6 +298,92 @@ router.post('/:id/cancel', async (req, res) => {
       from_state: perm.approval_state, to_state: 'cancelled',
     });
     res.json({ message: 'Cancelado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/permissions/:id/attachment ─────────────────────
+// Subir justificativo (PDF / imagen). Solo el dueño o admin/hr/gth.
+router.post('/:id/attachment', permUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Archivo requerido (field "file")' });
+
+    const [[perm]] = await sequelize.query(
+      `SELECT p.id, p.employee_id, e.code AS employee_code
+         FROM permissions p
+         JOIN employees e ON p.employee_id = e.id
+        WHERE p.id = ?`,
+      { replacements: [req.params.id] }
+    );
+    if (!perm) return res.status(404).json({ error: 'Permiso no encontrado' });
+
+    // Autorización: dueño del permiso o roles privilegiados
+    const user = req.user;
+    const isPrivileged = ['admin', 'hr', 'gth', 'coordinator', 'manager'].includes(user.role);
+    const isOwner = user.employee_code && user.employee_code === perm.employee_code;
+    if (!isPrivileged && !isOwner) {
+      return res.status(403).json({ error: 'No autorizado para adjuntar en este permiso' });
+    }
+
+    const url = `/uploads/permissions/${req.file.filename}`;
+    await sequelize.query(
+      `UPDATE permissions SET
+         attachment_url      = ?,
+         attachment_filename = ?,
+         attachment_size     = ?,
+         attachment_mime     = ?
+       WHERE id = ?`,
+      { replacements: [
+        url, req.file.originalname, req.file.size, req.file.mimetype, req.params.id
+      ]}
+    );
+
+    await wf.logEvent({
+      permission_id: perm.id, actor_id: user.id,
+      from_state: 'attachment', to_state: 'attachment',
+      note: `Adjunto subido: ${req.file.originalname} (${(req.file.size/1024).toFixed(1)} KB)`,
+    });
+
+    res.status(201).json({
+      ok: true,
+      url,
+      filename: req.file.originalname,
+      size:     req.file.size,
+      mime:     req.file.mimetype,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── DELETE /api/permissions/:id/attachment ───────────────────
+router.delete('/:id/attachment', authorize('admin', 'hr', 'gth'), async (req, res) => {
+  try {
+    const [[perm]] = await sequelize.query(
+      'SELECT attachment_url FROM permissions WHERE id = ?',
+      { replacements: [req.params.id] }
+    );
+    if (!perm) return res.status(404).json({ error: 'Permiso no encontrado' });
+
+    if (perm.attachment_url) {
+      const filePath = path.join(
+        path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads')),
+        perm.attachment_url.replace(/^\/uploads\//, '')
+      );
+      fs.promises.unlink(filePath).catch(() => {});
+    }
+
+    await sequelize.query(
+      `UPDATE permissions SET
+         attachment_url      = NULL,
+         attachment_filename = NULL,
+         attachment_size     = NULL,
+         attachment_mime     = NULL
+       WHERE id = ?`,
+      { replacements: [req.params.id] }
+    );
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

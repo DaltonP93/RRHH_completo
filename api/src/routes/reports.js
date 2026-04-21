@@ -256,4 +256,207 @@ router.get('/employee/:id/analytics', async (req, res) => {
   }
 });
 
+// ─── GET /api/reports/monthly/export?format=xlsx|pdf&year=&month=&dept= ──
+// Exportación mensual imprimible (planilla por empleado)
+router.get('/monthly/export', async (req, res) => {
+  const {
+    year = new Date().getFullYear(),
+    month = new Date().getMonth() + 1,
+    dept,
+    format = 'xlsx',
+  } = req.query;
+
+  const dateFrom = `${year}-${String(month).padStart(2,'0')}-01`;
+  const dateTo   = new Date(year, month, 0).toISOString().split('T')[0];
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  let deptFilter = '';
+  const params = [dateFrom, dateTo];
+  if (dept) { deptFilter = 'AND e.department_id = ?'; params.push(dept); }
+
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT
+        e.id, e.code, CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+        d.name AS department,
+        ds.date, ds.status, ds.first_in, ds.last_out,
+        ds.worked_minutes, ds.late_minutes, ds.overtime_minutes,
+        ds.justification
+      FROM employees e
+      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN daily_summary ds ON e.id = ds.employee_id AND ds.date BETWEEN ? AND ?
+      WHERE e.status = 'active' ${deptFilter}
+      ORDER BY d.name, e.last_name, ds.date
+    `, { replacements: params });
+
+    // Agrupar por empleado
+    const byEmp = new Map();
+    for (const r of rows) {
+      if (!byEmp.has(r.id)) {
+        byEmp.set(r.id, {
+          id: r.id, code: r.code, name: r.employee_name,
+          department: r.department, days: {},
+          totals: { worked: 0, late: 0, overtime: 0, present: 0, absent: 0, latedays: 0 },
+        });
+      }
+      if (r.date) {
+        const dayKey = String(new Date(r.date).getDate());
+        byEmp.get(r.id).days[dayKey] = r;
+        const t = byEmp.get(r.id).totals;
+        t.worked   += r.worked_minutes   || 0;
+        t.late     += r.late_minutes     || 0;
+        t.overtime += r.overtime_minutes || 0;
+        if (['present','late'].includes(r.status)) t.present++;
+        if (r.status === 'late')    t.latedays++;
+        if (r.status === 'absent')  t.absent++;
+      }
+    }
+
+    const employees = Array.from(byEmp.values());
+    const period = `${String(month).padStart(2,'0')}/${year}`;
+
+    if (format === 'pdf') {
+      const PDFDocument = require('pdfkit');
+      const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 30 });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="planilla_${year}_${String(month).padStart(2,'0')}.pdf"`);
+      doc.pipe(res);
+
+      for (let ei = 0; ei < employees.length; ei++) {
+        const emp = employees[ei];
+        if (ei > 0) doc.addPage();
+        doc.fontSize(14).fillColor('#1e40af').text(`Planilla Mensual — ${period}`, { align: 'center' });
+        doc.moveDown(0.3);
+        doc.fontSize(10).fillColor('#000').text(`Empleado: ${emp.name} [${emp.code}]`);
+        doc.text(`Departamento: ${emp.department || '—'}`);
+        doc.moveDown(0.5);
+
+        const headers = ['Día', 'Estado', 'Entrada', 'Salida', 'Trab.', 'Atraso', 'Extra'];
+        const colW = [35, 60, 55, 55, 60, 55, 55];
+        const startX = doc.x;
+        let y = doc.y;
+
+        doc.fontSize(9).fillColor('#475569');
+        headers.forEach((h, i) => {
+          doc.text(h, startX + colW.slice(0, i).reduce((a,b)=>a+b,0), y, { width: colW[i] });
+        });
+        y += 14;
+        doc.moveTo(startX, y - 2).lineTo(startX + colW.reduce((a,b)=>a+b,0), y - 2).stroke();
+
+        doc.fillColor('#111');
+        for (let d = 1; d <= daysInMonth; d++) {
+          const rec = emp.days[d] || {};
+          const row = [
+            String(d).padStart(2,'0'),
+            rec.status || '—',
+            rec.first_in ? String(rec.first_in).slice(11,16) : '',
+            rec.last_out ? String(rec.last_out).slice(11,16) : '',
+            minsToHM(rec.worked_minutes || 0),
+            rec.late_minutes || 0,
+            minsToHM(rec.overtime_minutes || 0),
+          ];
+          row.forEach((v, i) => {
+            doc.text(String(v), startX + colW.slice(0, i).reduce((a,b)=>a+b,0), y, { width: colW[i] });
+          });
+          y += 12;
+          if (y > doc.page.height - 60) { doc.addPage(); y = 40; }
+        }
+
+        y += 6;
+        doc.fontSize(10).fillColor('#1e40af').text(
+          `Totales → Trabajado: ${minsToHM(emp.totals.worked)} · Atrasos: ${emp.totals.late} min · Extras: ${minsToHM(emp.totals.overtime)} · Presente: ${emp.totals.present} · Ausente: ${emp.totals.absent}`,
+          startX, y
+        );
+      }
+      doc.end();
+      return;
+    }
+
+    // ─── Excel ─────
+    const ExcelJS = require('exceljs');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'SisHoras';
+    wb.created = new Date();
+
+    // Hoja resumen
+    const sum = wb.addWorksheet('Resumen');
+    sum.columns = [
+      { header: 'Código',       key: 'code',      width: 10 },
+      { header: 'Empleado',     key: 'name',      width: 30 },
+      { header: 'Departamento', key: 'dept',      width: 22 },
+      { header: 'Presentes',    key: 'present',   width: 11 },
+      { header: 'Tarde',        key: 'late',      width: 8 },
+      { header: 'Ausente',      key: 'absent',    width: 10 },
+      { header: 'Trabajado',    key: 'worked',    width: 12 },
+      { header: 'Atraso (min)', key: 'latemin',   width: 12 },
+      { header: 'Extra',        key: 'overtime',  width: 10 },
+    ];
+    sum.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sum.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+
+    for (const emp of employees) {
+      sum.addRow({
+        code: emp.code, name: emp.name, dept: emp.department || '',
+        present: emp.totals.present, late: emp.totals.latedays, absent: emp.totals.absent,
+        worked: minsToHM(emp.totals.worked),
+        latemin: emp.totals.late,
+        overtime: minsToHM(emp.totals.overtime),
+      });
+    }
+
+    // Una hoja por empleado (planilla imprimible)
+    for (const emp of employees) {
+      const safe = String(emp.code || emp.id).replace(/[^\w]/g, '').slice(0, 30);
+      const ws = wb.addWorksheet(`${safe}`.slice(0, 31));
+      ws.mergeCells('A1:G1');
+      ws.getCell('A1').value = `Planilla Mensual — ${period}`;
+      ws.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF1E40AF' } };
+      ws.getCell('A1').alignment = { horizontal: 'center' };
+
+      ws.getCell('A2').value = `${emp.name} [${emp.code}] — ${emp.department || ''}`;
+      ws.getCell('A2').font = { bold: true };
+
+      const header = ['Día', 'Estado', 'Entrada', 'Salida', 'Trabajado', 'Atraso (min)', 'Extra'];
+      ws.addRow([]);
+      const hr = ws.addRow(header);
+      hr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      hr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF475569' } };
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const rec = emp.days[d] || {};
+        ws.addRow([
+          d,
+          rec.status || '',
+          rec.first_in ? String(rec.first_in).slice(11,16) : '',
+          rec.last_out ? String(rec.last_out).slice(11,16) : '',
+          minsToHM(rec.worked_minutes || 0),
+          rec.late_minutes || 0,
+          minsToHM(rec.overtime_minutes || 0),
+        ]);
+      }
+
+      ws.addRow([]);
+      const tot = ws.addRow(['TOTAL', '',
+        '', '',
+        minsToHM(emp.totals.worked),
+        emp.totals.late,
+        minsToHM(emp.totals.overtime),
+      ]);
+      tot.font = { bold: true, color: { argb: 'FF1E40AF' } };
+
+      ws.columns = [
+        { width: 6 }, { width: 12 }, { width: 10 }, { width: 10 },
+        { width: 12 }, { width: 14 }, { width: 10 },
+      ];
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="planilla_${year}_${String(month).padStart(2,'0')}.xlsx"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

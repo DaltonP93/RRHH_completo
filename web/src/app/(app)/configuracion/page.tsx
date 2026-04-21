@@ -84,6 +84,10 @@ function ConfiguracionPageInner() {
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium shadow-sm hover:bg-blue-700 transition-colors">
             🕐 Turnos y horarios
           </a>
+          <a href="/configuracion/feriados"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-medium shadow-sm hover:bg-red-700 transition-colors">
+            📅 Feriados
+          </a>
           <a href="/configuracion/apariencia"
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-medium shadow-sm hover:shadow-md transition-shadow">
             🎨 Personalizar apariencia
