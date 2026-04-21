@@ -74,7 +74,12 @@
       "Bash(node -c api/src/routes/settings.js)",
       "Bash(xargs grep *)",
       "Bash(ls deploy/)",
-      "Bash(ls *.conf)"
+      "Bash(ls *.conf)",
+      "Bash(npx tsc *)",
+      "Bash(git reset *)",
+      "Bash(npx next *)",
+      "Bash(node -e \"const b=require\\('fs'\\).readFileSync\\('web/src/app/\\(app\\)/configuracion/apariencia/page.tsx'\\);const s=b.toString\\(\\);console.log\\('bytes:',b.length\\);console.log\\('BOM:',b[0]===0xEF&&b[1]===0xBB&&b[2]===0xBF\\);console.log\\('has-CR:',s.includes\\('\\\\r'\\)\\);for\\(let i=0;i<s.length;i++\\){const c=s.charCodeAt\\(i\\);if\\(c>127&&c!==0xD&&c!==0xA\\){/* non-ascii ok in strings */}if\\(c===0||c===0x0B||c===0x0C||c===0x0E\\){console.log\\('weird char at',i,'code',c\\)}}\")",
+      "Bash(npx --yes @swc/cli@latest --version)"
     ]
   }
 }

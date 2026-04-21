@@ -79,10 +79,16 @@ function ConfiguracionPageInner() {
     <div className="p-6 space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <h1 className="text-2xl font-bold text-slate-900">Configuración</h1>
-        <a href="/configuracion/apariencia"
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-medium shadow-sm hover:shadow-md transition-shadow">
-          🎨 Personalizar apariencia
-        </a>
+        <div className="flex gap-2 flex-wrap">
+          <a href="/configuracion/turnos"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium shadow-sm hover:bg-blue-700 transition-colors">
+            🕐 Turnos y horarios
+          </a>
+          <a href="/configuracion/apariencia"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-medium shadow-sm hover:shadow-md transition-shadow">
+            🎨 Personalizar apariencia
+          </a>
+        </div>
       </div>
       <div className="flex gap-1 border-b border-slate-200 flex-wrap">
         {tabs.map(t => (

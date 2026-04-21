@@ -27,7 +27,11 @@ const PIE_COLORS = ['#22c55e', '#f59e0b', '#ef4444', '#8b5cf6']
 
 export default function DashboardPage() {
   const [liveEvents, setLiveEvents] = useState<AttendanceEvent[]>([])
-  const today = format(new Date(), "EEEE d 'de' MMMM yyyy", { locale: es })
+  const [today, setToday] = useState('')
+  // Render fecha solo en cliente para evitar hydration mismatch (React #418/#423/#425)
+  useEffect(() => {
+    setToday(format(new Date(), "EEEE d 'de' MMMM yyyy", { locale: es }))
+  }, [])
 
   // Datos iniciales via API
   const { data, refetch } = useQuery({
@@ -64,7 +68,7 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-slate-500 capitalize">{today}</p>
+          <p className="text-slate-500 capitalize" suppressHydrationWarning>{today || '\u00a0'}</p>
         </div>
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-1.5 rounded-full">
           <div className="w-2 h-2 rounded-full bg-green-500 pulse-live" />
