@@ -10,29 +10,34 @@ Conecta a relojes biométricos ZKTeco y genera reportes de asistencia por emplea
 - **Analytics:** FastAPI Python 3.12, puerto 5000
 - **Bridge:** Node.js ZKTeco bridge, puerto 8081 (API) / 8080 (PUSH relojes)
 - **BD principal:** MySQL 8 → base de datos `asistencia`
-- **BD fuente:** SQL Server `att2000` en servidor ADVENTISTA (IP: 10.81.28.8) — SOLO LECTURA
+- **BD fuente:** SQL Server `att2000` en entorno ADVENTISTA — SOLO LECTURA
 - **Cache/RT:** Redis puerto 6379
 
 ## Producción
-- **Servidor:** Ubuntu 22.04, hostname `antigravity`, IP interna `10.81.28.20`
-- **Dominio:** http://sishoras.saa.com.py
-- **Directorio:** `/var/www/html/Gestion_Horas/`
-- **Gestor de procesos:** PM2 (sishoras-api, sishoras-web, sishoras-bridge, sishoras-analytics)
+- **Entorno:** Ubuntu 22.04
+- **Dominio:** configurado por variables/infraestructura del despliegue
+- **Directorio:** definido en el servidor de despliegue
+- **Gestor de procesos:** PM2 (api, web, bridge, analytics)
 - **Repo GitHub:** https://github.com/DaltonP93/Gestion_Horas.git
 
-## Credenciales del sistema
-- **Admin login:** usuario `admin` / contraseña `Admin1234!`
-- **MySQL user:** sishoras / SisHoras2026!
-- **MySQL root:** sin contraseña (auth_socket en Ubuntu)
-- **att2000 SQL Server:** sa / nma.d.nh4
+## Seguridad y credenciales
+> **Importante:** No almacenar credenciales, contraseñas, hosts internos, IPs privadas ni datos sensibles en el repositorio.
+>
+> Configurar todo mediante variables de entorno locales o secretos del servidor:
+>- `DB_HOST`
+>- `DB_PORT`
+>- `DB_NAME`
+>- `DB_USER`
+>- `DB_PASSWORD`
+>- `ATT2000_HOST`
+>- `ATT2000_PORT`
+>- `ATT2000_USER`
+>- `ATT2000_PASSWORD`
+>- `JWT_SECRET`
+>- `REDIS_URL`
 
 ## Relojes ZKTeco
-| Reloj | IP | SensorID |
-|---|---|---|
-| Comedor | 172.16.20.160 | 101 |
-| Lavadero | 172.16.20.161 | 103 |
-| Gerencia | 172.16.20.162 | 1 |
-Puerto ZKTeco: 4370
+La configuración de relojes biométricos debe mantenerse fuera del repositorio, usando base de datos, archivo `.env` o secretos del entorno.
 
 ## Estructura del proyecto
 ```
@@ -65,20 +70,20 @@ Puerto ZKTeco: 4370
 pm2 status
 
 # Ver logs en tiempo real
-pm2 logs sishoras-api
-pm2 logs sishoras-web
+pm2 logs api
+pm2 logs web
 
 # Recargar tras cambio de código
-pm2 reload sishoras-api
-pm2 reload sishoras-web
+pm2 reload api
+pm2 reload web
 
 # Actualizar desde GitHub
-cd /var/www/html/Gestion_Horas && git pull origin main
+git pull origin main
 cd web && npm run build && cd ..
 pm2 reload all
 
 # Base de datos
-sudo mysql asistencia
+# usar las credenciales del entorno, no hardcodeadas
 
 # Reiniciar Nginx
 systemctl reload nginx
@@ -93,6 +98,6 @@ systemctl reload nginx
 ## Notas importantes
 - Las páginas con sidebar van en `web/src/app/(app)/` (route group)
 - El alias `@/*` → `src/*` está en `tsconfig.json`
-- La API usa `process.env.DB_PASSWORD ?? ''` (no `||`) para permitir password vacío
+- La API debe leer secretos desde `process.env`
 - El bridge tiene DOS puertos: 8080 (PUSH ZKTeco) y 8081 (API bridge)
-- Analytics Python usa venv en `/var/www/html/Gestion_Horas/analytics/.venv/`
+- Analytics Python debe ejecutarse con su entorno virtual local
