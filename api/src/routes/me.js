@@ -192,4 +192,47 @@ router.post('/permissions/:id/cancel', async (req, res) => {
   }
 });
 
+// ─── Notificaciones in-app ───────────────────────────────────────
+
+router.get('/notifications', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+    const [rows] = await sequelize.query(
+      `SELECT id, type, title, body, link, read_at, created_at
+         FROM user_notifications
+         WHERE user_id = ?
+         ORDER BY id DESC
+         LIMIT ?`,
+      { replacements: [req.user.id, limit] }
+    );
+    const [[{ unread }]] = await sequelize.query(
+      'SELECT COUNT(*) AS unread FROM user_notifications WHERE user_id = ? AND read_at IS NULL',
+      { replacements: [req.user.id] }
+    );
+    res.json({ items: rows, unread });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/notifications/:id/read', async (req, res) => {
+  try {
+    await sequelize.query(
+      'UPDATE user_notifications SET read_at = NOW() WHERE id = ? AND user_id = ? AND read_at IS NULL',
+      { replacements: [req.params.id, req.user.id] }
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/notifications/read-all', async (req, res) => {
+  try {
+    await sequelize.query(
+      'UPDATE user_notifications SET read_at = NOW() WHERE user_id = ? AND read_at IS NULL',
+      { replacements: [req.user.id] }
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;

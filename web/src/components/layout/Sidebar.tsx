@@ -34,6 +34,7 @@ const NAV: NavItem[] = [
   { href: '/asistencia',    icon: Clock,           label: 'Asistencia',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/permisos',      icon: Calendar,        label: 'Permisos',      section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
   { href: '/aprobaciones',  icon: CheckSquare,     label: 'Aprobaciones',  section: 'gestion', roles: ['admin','gth','hr','coordinator','manager'] },
+  { href: '/supervisor',    icon: Users,           label: 'Mi equipo',     section: 'gestion', roles: ['coordinator','manager','supervisor','gestor'] },
   { href: '/reportes',      icon: BarChart2,       label: 'Reportes',      section: 'gestion', roles: ['admin','gth','hr','manager','gestor'] },
   { href: '/ejecutivo',     icon: TrendingUp,      label: 'Ejecutivo',     section: 'gestion', roles: ['admin','gth','hr','manager'] },
   { href: '/nomina',        icon: DollarSign,      label: 'Nómina SAA',    section: 'gestion', roles: ['admin','gth','hr'] },

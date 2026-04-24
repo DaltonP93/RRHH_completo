@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Clock, Calendar, TrendingUp, AlertCircle } from 'lucide-react'
+import { Clock, Calendar, TrendingUp, AlertCircle, Download, QrCode } from 'lucide-react'
 import { api } from '@/lib/api'
 
 interface Log { id: number; timestamp: string; type: 'in' | 'out'; source: string | null; device_id: number | null }
@@ -57,13 +57,25 @@ export default function MiAsistenciaPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
-      <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl bg-emerald-500 flex items-center justify-center">
-          <Clock className="text-white" size={22} />
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-emerald-500 flex items-center justify-center">
+            <Clock className="text-white" size={22} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Mi asistencia</h1>
+            <p className="text-slate-500 text-sm">Tus marcajes y resumen diario.</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Mi asistencia</h1>
-          <p className="text-slate-500 text-sm">Tus marcajes y resumen diario.</p>
+        <div className="flex items-center gap-2">
+          <a href="/marcar" className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm">
+            <QrCode size={14} /> Marcar ahora
+          </a>
+          <button
+            onClick={() => exportCsv(summary, logs, from, to)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm">
+            <Download size={14} /> Exportar
+          </button>
         </div>
       </div>
 
@@ -178,6 +190,30 @@ export default function MiAsistenciaPage() {
       </div>
     </div>
   )
+}
+
+function exportCsv(summary: Summary[], logs: Log[], from: string, to: string) {
+  const esc = (v: any) => { const s = String(v ?? ''); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+  const sumHeaders = ['fecha','entrada','salida','trabajado_min','atraso_min','estado']
+  const sumRows = summary.map(d => [d.date, d.first_in || '', d.last_out || '', d.worked_minutes || 0, d.late_minutes || 0, d.status])
+  const logHeaders = ['marcaje','tipo','origen']
+  const logRows = logs.map(l => [new Date(l.timestamp).toLocaleString(), l.type, l.source || ''])
+  const out = [
+    `# Mi asistencia ${from} → ${to}`,
+    '',
+    '## Resumen diario',
+    sumHeaders.join(';'),
+    ...sumRows.map(r => r.map(esc).join(';')),
+    '',
+    '## Marcajes',
+    logHeaders.join(';'),
+    ...logRows.map(r => r.map(esc).join(';')),
+  ].join('\r\n')
+  const blob = new Blob(['\uFEFF' + out], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `mi_asistencia_${from}_${to}.csv`; a.click()
+  URL.revokeObjectURL(url)
 }
 
 function Kpi({ label, value, icon: Icon, color }: { label: string; value: string; icon: any; color: string }) {
