@@ -161,4 +161,65 @@ router.delete('/:id', authorize('admin'), async (req, res) => {
   res.json({ message: 'Usuario desactivado' });
 });
 
+// ─── Permisos granulares por usuario ──────────────────────────
+
+const { MODULES, defaultsForRole } = require('../services/permissionMatrix');
+
+// GET /api/users/:id/permissions → matriz efectiva (override o default-del-rol)
+router.get('/:id/permissions', authorize('admin', 'gth'), async (req, res) => {
+  try {
+    const [[u]] = await sequelize.query('SELECT id, role FROM users WHERE id = ?', { replacements: [req.params.id] });
+    if (!u) return res.status(404).json({ error: 'Usuario no encontrado' });
+    const [rows] = await sequelize.query(
+      'SELECT module, can_view, can_create, can_update, can_delete FROM user_permissions WHERE user_id = ?',
+      { replacements: [u.id] }
+    );
+    const overrides = Object.fromEntries(rows.map(r => [r.module, r]));
+    const defaults = defaultsForRole(u.role);
+    const effective = {};
+    for (const m of MODULES) {
+      effective[m.key] = overrides[m.key] || { module: m.key, ...defaults[m.key] };
+    }
+    res.json({
+      user: u,
+      modules: MODULES,
+      has_overrides: rows.length > 0,
+      effective,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /api/users/:id/permissions → reemplaza el set de overrides
+router.put('/:id/permissions', authorize('admin'), async (req, res) => {
+  try {
+    const { permissions } = req.body; // { module: {can_view, can_create, can_update, can_delete}, ... }
+    if (!permissions || typeof permissions !== 'object')
+      return res.status(400).json({ error: 'permissions requerido' });
+
+    await sequelize.query('DELETE FROM user_permissions WHERE user_id = ?', { replacements: [req.params.id] });
+    const valid = new Set(MODULES.map(m => m.key));
+    for (const [mod, flags] of Object.entries(permissions)) {
+      if (!valid.has(mod)) continue;
+      await sequelize.query(
+        `INSERT INTO user_permissions (user_id, module, can_view, can_create, can_update, can_delete)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        { replacements: [
+          req.params.id, mod,
+          flags.can_view ? 1 : 0, flags.can_create ? 1 : 0,
+          flags.can_update ? 1 : 0, flags.can_delete ? 1 : 0,
+        ]}
+      );
+    }
+    res.json({ message: 'Permisos actualizados' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/users/:id/permissions → limpia overrides (vuelve a defaults del rol)
+router.delete('/:id/permissions', authorize('admin'), async (req, res) => {
+  try {
+    await sequelize.query('DELETE FROM user_permissions WHERE user_id = ?', { replacements: [req.params.id] });
+    res.json({ message: 'Permisos restaurados al rol' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;

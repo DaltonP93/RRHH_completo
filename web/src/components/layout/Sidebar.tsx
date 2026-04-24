@@ -18,33 +18,34 @@ type NavItem = {
   roles?: Role[]
   superOnly?: boolean
   section?: 'portal' | 'gestion' | 'admin'
+  module?: string   // clave de user_permissions (si se define, la flag can_view manda)
 }
 
 const NAV: NavItem[] = [
-  // Portal del empleado
-  { href: '/mi-perfil',     icon: UserCircle2,     label: 'Mi perfil',     section: 'portal', roles: ['employee','admin','gth','hr','coordinator','manager','gestor','supervisor'] },
-  { href: '/mi-asistencia', icon: Clock,           label: 'Mi asistencia', section: 'portal', roles: ['employee'] },
-  { href: '/marcar',        icon: QrCode,          label: 'Marcar (QR/GPS)', section: 'portal', roles: ['employee'] },
-  { href: '/mis-permisos',  icon: Calendar,        label: 'Mis permisos',  section: 'portal', roles: ['employee'] },
+  // Portal del empleado — solo roles de empleado; admin/gth/hr no lo ven
+  { href: '/mi-perfil',     icon: UserCircle2,     label: 'Mi perfil',     section: 'portal', roles: ['employee'], module: 'mi_perfil' },
+  { href: '/mi-asistencia', icon: Clock,           label: 'Mi asistencia', section: 'portal', roles: ['employee'], module: 'mi_asistencia' },
+  { href: '/marcar',        icon: QrCode,          label: 'Marcar (QR/GPS)', section: 'portal', roles: ['employee'], module: 'marcar' },
+  { href: '/mis-permisos',  icon: Calendar,        label: 'Mis permisos',  section: 'portal', roles: ['employee'], module: 'mis_permisos' },
   { href: '/seguridad',     icon: Shield,          label: 'Seguridad',     section: 'portal' },
 
   // Gestión
-  { href: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard',     section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
-  { href: '/empleados',     icon: Users,           label: 'Empleados',     section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
-  { href: '/asistencia',    icon: Clock,           label: 'Asistencia',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
-  { href: '/permisos',      icon: Calendar,        label: 'Permisos',      section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'] },
-  { href: '/aprobaciones',  icon: CheckSquare,     label: 'Aprobaciones',  section: 'gestion', roles: ['admin','gth','hr','coordinator','manager'] },
-  { href: '/supervisor',    icon: Users,           label: 'Mi equipo',     section: 'gestion', roles: ['coordinator','manager','supervisor','gestor'] },
-  { href: '/reportes',      icon: BarChart2,       label: 'Reportes',      section: 'gestion', roles: ['admin','gth','hr','manager','gestor'] },
-  { href: '/ejecutivo',     icon: TrendingUp,      label: 'Ejecutivo',     section: 'gestion', roles: ['admin','gth','hr','manager'] },
-  { href: '/nomina',        icon: DollarSign,      label: 'Nómina SAA',    section: 'gestion', roles: ['admin','gth','hr'] },
+  { href: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard',     section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'dashboard' },
+  { href: '/empleados',     icon: Users,           label: 'Empleados',     section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'empleados' },
+  { href: '/asistencia',    icon: Clock,           label: 'Asistencia',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'asistencia' },
+  { href: '/permisos',      icon: Calendar,        label: 'Permisos',      section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'permisos' },
+  { href: '/aprobaciones',  icon: CheckSquare,     label: 'Aprobaciones',  section: 'gestion', roles: ['admin','gth','hr','coordinator','manager'], module: 'aprobaciones' },
+  { href: '/supervisor',    icon: Users,           label: 'Mi equipo',     section: 'gestion', roles: ['coordinator','manager','supervisor','gestor'], module: 'supervisor' },
+  { href: '/reportes',      icon: BarChart2,       label: 'Reportes',      section: 'gestion', roles: ['admin','gth','hr','manager','gestor'], module: 'reportes' },
+  { href: '/ejecutivo',     icon: TrendingUp,      label: 'Ejecutivo',     section: 'gestion', roles: ['admin','gth','hr','manager'], module: 'ejecutivo' },
+  { href: '/nomina',        icon: DollarSign,      label: 'Nómina SAA',    section: 'gestion', roles: ['admin','gth','hr'], module: 'nomina' },
 
   // Admin
-  { href: '/departamentos', icon: Building2,       label: 'Departamentos', section: 'admin', roles: ['admin','gth'] },
-  { href: '/usuarios',      icon: Shield,          label: 'Usuarios',      section: 'admin', roles: ['admin','gth'] },
-  { href: '/auditoria',     icon: FileText,        label: 'Auditoría',     section: 'admin', roles: ['admin','gth'] },
-  { href: '/configuracion', icon: Settings,        label: 'Configuración', section: 'admin', roles: ['admin','gth'] },
-  { href: '/sistema',       icon: Server,          label: 'Sistema',       section: 'admin', superOnly: true },
+  { href: '/departamentos', icon: Building2,       label: 'Departamentos', section: 'admin', roles: ['admin','gth'], module: 'departamentos' },
+  { href: '/usuarios',      icon: Shield,          label: 'Usuarios',      section: 'admin', roles: ['admin','gth'], module: 'usuarios' },
+  { href: '/auditoria',     icon: FileText,        label: 'Auditoría',     section: 'admin', roles: ['admin','gth'], module: 'auditoria' },
+  { href: '/configuracion', icon: Settings,        label: 'Configuración', section: 'admin', roles: ['admin','gth'], module: 'configuracion' },
+  { href: '/sistema',       icon: Server,          label: 'Sistema',       section: 'admin', superOnly: true, module: 'sistema' },
 ]
 
 const SECTION_LABEL: Record<string, string> = {
@@ -60,11 +61,14 @@ interface SidebarSettings {
   system_name?: string
 }
 
+type EffectivePerms = Record<string, { can_view: boolean; can_create: boolean; can_update: boolean; can_delete: boolean }>
+
 export default function Sidebar() {
   const pathname = usePathname()
   const user = useCurrentUser()
   const [open, setOpen] = useState(false)
   const [theme, setTheme] = useState<SidebarSettings>({})
+  const [perms, setPerms] = useState<EffectivePerms | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') return {}
     try { return JSON.parse(localStorage.getItem('sidebar_collapsed') || '{}') } catch { return {} }
@@ -86,11 +90,28 @@ export default function Sidebar() {
       .catch(() => {})
   }, [])
 
+  // Carga permisos granulares del usuario logueado
+  useEffect(() => {
+    if (!user) return
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    if (!token) return
+    fetch(`${apiUrl}/api/me/permissions`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.effective) setPerms(d.effective) })
+      .catch(() => {})
+  }, [user?.id])
+
   // Cerrar drawer al navegar (mobile)
   useEffect(() => { setOpen(false) }, [pathname])
 
+  const isAdminLike = user?.role === 'admin' || user?.role === 'super_admin'
   const items = NAV.filter(item => {
     if (item.superOnly) return isSuperAdmin(user)
+    // admin/super_admin siempre ven todo (salvo portal del empleado, que no es su espacio)
+    if (isAdminLike) return item.section !== 'portal' || item.href === '/seguridad'
+    // Si hay permisos granulares, mandan sobre el rol
+    if (perms && item.module && perms[item.module]) return perms[item.module].can_view
     if (!item.roles) return true
     return hasRole(user, ...item.roles)
   })

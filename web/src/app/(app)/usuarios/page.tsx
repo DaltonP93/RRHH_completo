@@ -302,6 +302,10 @@ export default function UsuariosPage() {
                           className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar">
                           <Edit2 size={14} />
                         </button>
+                        <a href={`/usuarios/${u.id}/permisos`}
+                          className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors inline-block" title="Permisos granulares">
+                          <Shield size={14} />
+                        </a>
                         <button onClick={() => setPwModal(u.id)}
                           className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Contraseña">
                           <Key size={14} />

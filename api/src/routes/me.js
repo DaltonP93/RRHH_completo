@@ -192,6 +192,31 @@ router.post('/permissions/:id/cancel', async (req, res) => {
   }
 });
 
+// ─── Permisos efectivos del usuario logueado ─────────────────────
+const { MODULES, defaultsForRole } = require('../services/permissionMatrix');
+
+router.get('/permissions', async (req, res) => {
+  try {
+    const [rows] = await sequelize.query(
+      'SELECT module, can_view, can_create, can_update, can_delete FROM user_permissions WHERE user_id = ?',
+      { replacements: [req.user.id] }
+    );
+    const overrides = Object.fromEntries(rows.map(r => [r.module, r]));
+    const defaults = defaultsForRole(req.user.role);
+    const effective = {};
+    for (const m of MODULES) {
+      const src = overrides[m.key] || defaults[m.key];
+      effective[m.key] = {
+        can_view:   !!src.can_view,
+        can_create: !!src.can_create,
+        can_update: !!src.can_update,
+        can_delete: !!src.can_delete,
+      };
+    }
+    res.json({ role: req.user.role, has_overrides: rows.length > 0, effective });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Notificaciones in-app ───────────────────────────────────────
 
 router.get('/notifications', async (req, res) => {
