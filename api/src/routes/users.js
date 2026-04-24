@@ -6,14 +6,14 @@
 
 const router  = require('express').Router();
 const bcrypt  = require('bcrypt');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, requirePermission } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 const logger  = require('../config/logger');
 
 router.use(authenticate);
 
 // GET /api/users — listar todos
-router.get('/', authorize('admin', 'hr'), async (req, res) => {
+router.get('/', authorize('admin', 'hr'), requirePermission('usuarios', 'view'), async (req, res) => {
   const { role, active = '1', search } = req.query;
   let where = 'WHERE 1=1';
   const params = [];
@@ -64,7 +64,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/users — crear usuario
-router.post('/', authorize('admin'), async (req, res) => {
+router.post('/', authorize('admin'), requirePermission('usuarios', 'create'), async (req, res) => {
   const { username, email, password, full_name, role = 'hr', employee_id } = req.body;
 
   if (!username || !email || !password) {
@@ -92,7 +92,7 @@ router.post('/', authorize('admin'), async (req, res) => {
 });
 
 // PUT /api/users/:id — actualizar
-router.put('/:id', authorize('admin'), async (req, res) => {
+router.put('/:id', authorize('admin'), requirePermission('usuarios', 'update'), async (req, res) => {
   const { full_name, email, role, active, employee_id } = req.body;
   try {
     await sequelize.query(
@@ -150,7 +150,7 @@ router.put('/:id/password', async (req, res) => {
 });
 
 // DELETE /api/users/:id — desactivar (nunca borrar)
-router.delete('/:id', authorize('admin'), async (req, res) => {
+router.delete('/:id', authorize('admin'), requirePermission('usuarios', 'delete'), async (req, res) => {
   if (+req.params.id === req.user.id) {
     return res.status(400).json({ error: 'No puedes desactivar tu propia cuenta' });
   }

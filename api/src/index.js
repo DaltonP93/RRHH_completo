@@ -40,6 +40,7 @@ const executiveRoutes       = require('./routes/executive');
 const selfCheckinRoutes     = require('./routes/selfCheckin');
 const payrollRoutes         = require('./routes/payroll');
 const supervisorRoutes      = require('./routes/supervisor');
+const healthRoutes          = require('./routes/health');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -126,6 +127,7 @@ app.use('/api/executive',      executiveRoutes);
 app.use('/api/self-checkin',   selfCheckinRoutes);
 app.use('/api/payroll',        payrollRoutes);
 app.use('/api/supervisor',     supervisorRoutes);
+app.use('/api/health',         healthRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

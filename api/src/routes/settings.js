@@ -8,7 +8,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, requirePermission } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 const audit = require('../services/audit');
 
@@ -111,7 +111,7 @@ router.get('/', async (req, res) => {
 });
 
 // ─── PUT /api/settings ──────────────────────────────────────────
-router.put('/', authenticate, authorize('admin', 'gth', 'gestor'), async (req, res) => {
+router.put('/', authenticate, authorize('admin', 'gth', 'gestor'), requirePermission('configuracion', 'update'), async (req, res) => {
   try {
     const updates = req.body || {};
     let count = 0;
@@ -133,7 +133,7 @@ router.put('/', authenticate, authorize('admin', 'gth', 'gestor'), async (req, r
 });
 
 // ─── POST /api/settings/reset ───────────────────────────────────
-router.post('/reset', authenticate, authorize('admin', 'gth'), async (req, res) => {
+router.post('/reset', authenticate, authorize('admin', 'gth'), requirePermission('configuracion', 'update'), async (req, res) => {
   try {
     await sequelize.query(
       `DELETE FROM notification_settings WHERE setting_key IN (${SETTING_KEYS.map(() => '?').join(',')})`,
@@ -176,7 +176,7 @@ const upload = multer({
 });
 
 // POST /api/settings/upload?kind=logo|favicon|login_bg
-router.post('/upload', authenticate, authorize('admin', 'gth'), (req, res, next) => {
+router.post('/upload', authenticate, authorize('admin', 'gth'), requirePermission('configuracion', 'update'), (req, res, next) => {
   upload.single('file')(req, res, err => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'Archivo requerido (campo "file")' });

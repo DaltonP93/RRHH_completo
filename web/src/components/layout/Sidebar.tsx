@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar,
   LogOut, Shield, Server, Building2, CheckSquare, UserCircle2,
-  Menu, X, FileText, TrendingUp, QrCode, DollarSign, ChevronDown,
+  Menu, X, FileText, TrendingUp, QrCode, DollarSign, ChevronDown, Activity,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -46,6 +46,7 @@ const NAV: NavItem[] = [
   { href: '/auditoria',     icon: FileText,        label: 'Auditoría',     section: 'admin', roles: ['admin','gth'], module: 'auditoria' },
   { href: '/configuracion', icon: Settings,        label: 'Configuración', section: 'admin', roles: ['admin','gth'], module: 'configuracion' },
   { href: '/sistema',       icon: Server,          label: 'Sistema',       section: 'admin', superOnly: true, module: 'sistema' },
+  { href: '/sistema/salud',  icon: Activity,        label: 'Salud sistema', section: 'admin', roles: ['admin','gth'], module: 'sistema' },
 ]
 
 const SECTION_LABEL: Record<string, string> = {

@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, requirePermission } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 const {
   getAll, getById, create, update, deactivate, getAttendanceHistory
@@ -15,12 +15,12 @@ router.get('/departments', async (req, res) => {
   res.json(rows);
 });
 
-router.get('/',                    getAll);
-router.get('/:id',                 getById);
-router.post('/',                   authorize('admin','hr'), create);
-router.put('/:id',                 authorize('admin','hr'), update);
-router.delete('/:id',              authorize('admin'), deactivate);
-router.get('/:id/attendance',      getAttendanceHistory);
+router.get('/',                    requirePermission('empleados', 'view'), getAll);
+router.get('/:id',                 requirePermission('empleados', 'view'), getById);
+router.post('/',                   authorize('admin','hr'), requirePermission('empleados', 'create'), create);
+router.put('/:id',                 authorize('admin','hr'), requirePermission('empleados', 'update'), update);
+router.delete('/:id',              authorize('admin'), requirePermission('empleados', 'delete'), deactivate);
+router.get('/:id/attendance',      requirePermission('empleados', 'view'), getAttendanceHistory);
 
 // Helper: normalizar fecha de hire_date aceptando "DD/MM/YYYY", "YYYY-MM-DD", etc.
 function parseDate(v) {
@@ -49,7 +49,7 @@ function parseStatus(v) {
 }
 
 // POST /api/employees/import — importar lote de empleados (CSV/Excel)
-router.post('/import', authorize('admin','hr'), async (req, res) => {
+router.post('/import', authorize('admin','hr'), requirePermission('empleados', 'create'), async (req, res) => {
   const { employees } = req.body;
   if (!Array.isArray(employees) || !employees.length) {
     return res.status(400).json({ error: 'Se requiere un array de empleados' });
@@ -139,7 +139,7 @@ router.post('/import', authorize('admin','hr'), async (req, res) => {
 
 // PATCH /api/employees/bulk — actualizar varios empleados a la vez
 // Body: { ids: [1,2,3], changes: { department_id, status, position, schedule_id } }
-router.patch('/bulk', authorize('admin','hr'), async (req, res) => {
+router.patch('/bulk', authorize('admin','hr'), requirePermission('empleados', 'update'), async (req, res) => {
   const { ids, changes } = req.body || {};
   if (!Array.isArray(ids) || !ids.length) {
     return res.status(400).json({ error: 'ids requerido (array)' });
@@ -170,7 +170,7 @@ router.patch('/bulk', authorize('admin','hr'), async (req, res) => {
 });
 
 // PATCH /api/employees/:id/quick — edición inline rápida (nombre, apellido, etc.)
-router.patch('/:id/quick', authorize('admin','hr'), async (req, res) => {
+router.patch('/:id/quick', authorize('admin','hr'), requirePermission('empleados', 'update'), async (req, res) => {
   const id = parseInt(req.params.id);
   const { field, value } = req.body || {};
   const allowed = ['first_name', 'last_name', 'employee_number', 'email', 'phone', 'position'];

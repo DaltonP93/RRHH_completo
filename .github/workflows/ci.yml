@@ -39,6 +39,8 @@ jobs:
       - run: npm ci || npm install
       - name: Syntax check
         run: node --check src/index.js
+      - name: Unit tests
+        run: npm test
 
   web-build:
     name: Web — build Next.js

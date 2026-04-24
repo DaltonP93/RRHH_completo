@@ -9,11 +9,12 @@
  */
 const router = require('express').Router();
 const ExcelJS = require('exceljs');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, requirePermission } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 
 router.use(authenticate);
 router.use(authorize('admin', 'hr', 'gth', 'super_admin'));
+router.use(requirePermission('nomina', 'view'));
 
 function monthRange(year, month) {
   const from = `${year}-${String(month).padStart(2, '0')}-01`;

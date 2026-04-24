@@ -4,7 +4,7 @@
  * Escritura: admin / gth / super_admin.
  */
 const router = require('express').Router();
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, requirePermission } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 
 router.use(authenticate);
@@ -39,7 +39,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/departments
-router.post('/', authorize('admin','gth'), async (req, res) => {
+router.post('/', authorize('admin','gth'), requirePermission('departamentos', 'create'), async (req, res) => {
   const { name, code, coordinator_id, manager_id } = req.body;
   if (!name) return res.status(400).json({ error: 'Nombre requerido' });
   try {
@@ -52,7 +52,7 @@ router.post('/', authorize('admin','gth'), async (req, res) => {
 });
 
 // PATCH /api/departments/:id
-router.patch('/:id', authorize('admin','gth'), async (req, res) => {
+router.patch('/:id', authorize('admin','gth'), requirePermission('departamentos', 'update'), async (req, res) => {
   const { name, code, coordinator_id, manager_id, active } = req.body;
   try {
     await sequelize.query(
@@ -75,7 +75,7 @@ router.patch('/:id', authorize('admin','gth'), async (req, res) => {
 });
 
 // DELETE /api/departments/:id — soft delete: marcar inactive
-router.delete('/:id', authorize('admin','gth'), async (req, res) => {
+router.delete('/:id', authorize('admin','gth'), requirePermission('departamentos', 'delete'), async (req, res) => {
   try {
     await sequelize.query('UPDATE departments SET active = 0 WHERE id = ?',
       { replacements: [req.params.id] });

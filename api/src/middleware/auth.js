@@ -1,4 +1,6 @@
 const jwt = require('jsonwebtoken');
+const { sequelize } = require('../config/database');
+const { defaultsForRole } = require('../services/permissionMatrix');
 
 // Verificar token JWT
 function authenticate(req, res, next) {
@@ -48,4 +50,47 @@ function authenticateServiceKey(req, res, next) {
   next();
 }
 
-module.exports = { authenticate, authorize, requireSuperAdmin, authenticateServiceKey };
+/**
+ * requirePermission(module, action)
+ *
+ * Valida permisos granulares sobre user_permissions. Si el usuario no tiene
+ * overrides, aplica los defaults del rol (services/permissionMatrix.js).
+ *
+ *  - super_admin/admin: bypass total.
+ *  - action: 'view' | 'create' | 'update' | 'delete'.
+ *  - Respeta la ruta: si falla, 403.
+ */
+function requirePermission(moduleKey, action) {
+  const field = {
+    view:   'can_view',
+    create: 'can_create',
+    update: 'can_update',
+    delete: 'can_delete',
+  }[action];
+  if (!field) throw new Error(`Acción inválida: ${action}`);
+
+  return async (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+    if (req.user.role === 'super_admin' || req.user.role === 'admin') return next();
+
+    try {
+      const [rows] = await sequelize.query(
+        'SELECT can_view, can_create, can_update, can_delete FROM user_permissions WHERE user_id = ? AND module = ? LIMIT 1',
+        { replacements: [req.user.id, moduleKey] }
+      );
+      const flags = rows.length
+        ? rows[0]
+        : defaultsForRole(req.user.role)[moduleKey];
+      if (!flags || !flags[field]) {
+        return res.status(403).json({
+          error: `Sin permisos (${action}) sobre módulo '${moduleKey}'`,
+        });
+      }
+      next();
+    } catch (err) {
+      return res.status(500).json({ error: 'Error verificando permisos' });
+    }
+  };
+}
+
+module.exports = { authenticate, authorize, requireSuperAdmin, authenticateServiceKey, requirePermission };

@@ -3,10 +3,10 @@
  * Sólo admin / gth / super_admin pueden leer.
  */
 const router = require('express').Router();
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, requirePermission } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 
-router.use(authenticate, authorize('admin', 'gth'));
+router.use(authenticate, authorize('admin', 'gth'), requirePermission('auditoria', 'view'));
 
 function buildFilter(q) {
   const { action, user_id, entity, q: search, from, to } = q;
