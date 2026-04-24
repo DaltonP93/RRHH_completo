@@ -228,11 +228,10 @@ function TabMarcadas() {
   )
 }
 
-// ─── Tab: Resumen mensual ────────────────────────────────────────
+// ─── Tab: Resumen mensual (vista PDFs por mes) ─────────────────────
 function TabMensual() {
   const now = new Date()
-  const [year, setYear]   = useState(now.getFullYear())
-  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [year, setYear]     = useState(now.getFullYear())
   const [deptId, setDeptId] = useState('')
 
   const { data: deptsData } = useQuery({
@@ -241,44 +240,26 @@ function TabMensual() {
     staleTime: 300_000,
   })
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['report-monthly', year, month, deptId],
-    queryFn: () => api.get('/api/reports/monthly', { params: { year, month, department_id: deptId || undefined } }).then(r => r.data),
-  })
-
-  function exportMonthlyCSV() {
-    const rows = data?.data || []
-    const header = ['Empleado','Departamento','Presentes','Retardos','Ausencias','Horas Trabajadas','Min. Tardanza']
-    const lines = rows.map((emp: any) => [
-      `"${emp.employee_name}"`, `"${emp.department || ''}"`,
-      emp.days_present, emp.days_late, emp.days_absent,
-      minsToHM(emp.total_worked_minutes), emp.total_late_minutes || 0
-    ].join(','))
-    const csv = [header.join(','), ...lines].join('\n')
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = `resumen_${year}_${String(month).padStart(2,'0')}.csv`
-    a.click(); URL.revokeObjectURL(url)
-  }
-
   const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+  const currentYear  = now.getFullYear()
+  const currentMonth = now.getMonth() + 1
+
+  function openMonthly(month: number, format: 'pdf' | 'xlsx') {
+    const q = new URLSearchParams({
+      year: String(year), month: String(month), format,
+      ...(deptId ? { dept: deptId } : {}),
+    })
+    window.open(`/api/reports/monthly/export?${q.toString()}`, '_blank')
+  }
 
   return (
     <div className="space-y-5">
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-wrap gap-3 items-end">
         <div>
-          <label className="block text-xs text-slate-500 mb-1 font-medium">Mes</label>
-          <select value={month} onChange={e => setMonth(+e.target.value)}
-            className="border border-slate-200 rounded-xl px-3 py-2 text-sm">
-            {MESES.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
-          </select>
-        </div>
-        <div>
           <label className="block text-xs text-slate-500 mb-1 font-medium">Año</label>
           <select value={year} onChange={e => setYear(+e.target.value)}
             className="border border-slate-200 rounded-xl px-3 py-2 text-sm">
-            {[2024,2025,2026].map(y => <option key={y} value={y}>{y}</option>)}
+            {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div>
@@ -289,83 +270,54 @@ function TabMensual() {
             {(deptsData || []).map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </div>
-        {(data?.data?.length > 0) && (
-          <>
-            <button onClick={exportMonthlyCSV}
-              className="flex items-center gap-2 border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors">
-              <Download size={14} /> CSV
-            </button>
-            <button
-              onClick={() => {
-                const q = new URLSearchParams({ year: String(year), month: String(month), format: 'xlsx', ...(deptId ? { dept: deptId } : {}) });
-                window.open(`/api/reports/monthly/export?${q.toString()}`, '_blank');
-              }}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
-              <Download size={14} /> Planilla Excel
-            </button>
-            <button
-              onClick={() => {
-                const q = new URLSearchParams({ year: String(year), month: String(month), format: 'pdf', ...(deptId ? { dept: deptId } : {}) });
-                window.open(`/api/reports/monthly/export?${q.toString()}`, '_blank');
-              }}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
-              <Download size={14} /> Planilla PDF
-            </button>
-          </>
-        )}
+        <p className="text-xs text-slate-400 ml-auto flex items-center gap-1">
+          <Calendar size={13} /> Click en un mes para generar la planilla en PDF o Excel.
+        </p>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
-        {isLoading ? (
-          <div className="text-center py-12 text-slate-400">
-            <RefreshCw size={24} className="mx-auto mb-3 animate-spin opacity-40" />
-            Cargando...
-          </div>
-        ) : (
-          <table className="w-full text-sm whitespace-nowrap">
-            <thead className="bg-slate-50 border-b border-slate-100">
-              <tr>
-                {['Empleado','Depto.','Presentes','Retardos','Ausencias','Horas','Min. Tardanza'].map(h => (
-                  <th key={h} className={`px-4 py-3 text-slate-500 font-medium text-xs ${
-                    h === 'Empleado' || h === 'Depto.' ? 'text-left' : 'text-center'
-                  }`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {(data?.data || []).map((emp: any, i: number) => (
-                <tr key={i} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 font-medium text-slate-900">{emp.employee_name}</td>
-                  <td className="px-4 py-3 text-slate-500 text-xs">{emp.department || '—'}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className="font-semibold text-green-700 bg-green-50 px-2.5 py-0.5 rounded-full text-xs">
-                      {emp.days_present}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className="font-semibold text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-full text-xs">
-                      {emp.days_late}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className="font-semibold text-red-600 bg-red-50 px-2.5 py-0.5 rounded-full text-xs">
-                      {emp.days_absent}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center font-mono font-semibold text-slate-700">
-                    {minsToHM(emp.total_worked_minutes)}
-                  </td>
-                  <td className="px-4 py-3 text-center text-amber-600 font-medium text-xs">
-                    {emp.total_late_minutes ? `${emp.total_late_minutes} min` : '—'}
-                  </td>
-                </tr>
-              ))}
-              {!(data?.data?.length) && (
-                <tr><td colSpan={7} className="text-center py-12 text-slate-400">Sin datos para este período</td></tr>
-              )}
-            </tbody>
-          </table>
-        )}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        {MESES.map((name, idx) => {
+          const month = idx + 1
+          const isFuture = year > currentYear || (year === currentYear && month > currentMonth)
+          const isCurrent = year === currentYear && month === currentMonth
+          return (
+            <div key={month}
+              className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all ${
+                isFuture ? 'border-slate-100 opacity-50' :
+                isCurrent ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-100 hover:shadow-md'
+              }`}>
+              <div className={`px-5 py-4 flex items-center justify-between ${
+                isCurrent ? 'bg-gradient-to-br from-blue-50 to-blue-100' : 'bg-slate-50'
+              }`}>
+                <div>
+                  <p className={`text-xs uppercase tracking-wide font-medium ${isCurrent ? 'text-blue-600' : 'text-slate-400'}`}>
+                    {String(month).padStart(2,'0')} / {year}
+                  </p>
+                  <p className="text-lg font-bold text-slate-800">{name}</p>
+                </div>
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                  isCurrent ? 'bg-blue-500 text-white' : 'bg-white text-slate-400 border border-slate-200'
+                }`}>
+                  <Calendar size={18} />
+                </div>
+              </div>
+              <div className="p-3 flex gap-2">
+                <button
+                  disabled={isFuture}
+                  onClick={() => openMonthly(month, 'pdf')}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-2 rounded-xl text-xs font-medium transition-colors">
+                  <Download size={12} /> PDF
+                </button>
+                <button
+                  disabled={isFuture}
+                  onClick={() => openMonthly(month, 'xlsx')}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-2 rounded-xl text-xs font-medium transition-colors">
+                  <Download size={12} /> Excel
+                </button>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

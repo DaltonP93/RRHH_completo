@@ -30,7 +30,7 @@ async function fetchRows(year, month, branchId) {
   const [rows] = await sequelize.query(`
     SELECT
       e.code                 AS codigo,
-      e.full_name            AS nombre,
+      CONCAT(e.first_name, ' ', e.last_name) AS nombre,
       COALESCE(e.document_number, '') AS cedula,
       COALESCE(d.name, '')   AS departamento,
       COALESCE(b.name, '')   AS sede,
@@ -48,7 +48,7 @@ async function fetchRows(year, month, branchId) {
     LEFT JOIN daily_summary ds ON ds.employee_id = e.id AND ds.date BETWEEN ? AND ?
     WHERE e.status = 'active' ${bFilter}
     GROUP BY e.id
-    ORDER BY sede, departamento, e.full_name
+    ORDER BY sede, departamento, e.last_name, e.first_name
   `, { replacements: params });
   return rows;
 }

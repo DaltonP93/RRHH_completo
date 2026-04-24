@@ -38,8 +38,9 @@ async function generateMarcadasReport({ dateFrom, dateTo, employeeId, deptId } =
     ORDER BY e.last_name, al.timestamp
   `, { replacements: params });
 
-  // Agrupar por empleado y fecha
+  // Agrupar por empleado y fecha (fecha "laboral": marcas 00:00-04:59 se asignan al día anterior)
   const byEmp = {};
+  const SHIFT_CUTOFF_HOUR = 5; // marcas antes de las 05:00 pertenecen al turno del día anterior
   for (const log of logs) {
     if (!byEmp[log.employee_id]) {
       byEmp[log.employee_id] = {
@@ -50,11 +51,16 @@ async function generateMarcadasReport({ dateFrom, dateTo, employeeId, deptId } =
         days: {},
       };
     }
-    const date = new Date(log.timestamp).toISOString().split('T')[0];
+    const ts = new Date(log.timestamp);
+    const workDate = new Date(ts);
+    if (ts.getHours() < SHIFT_CUTOFF_HOUR) {
+      workDate.setDate(workDate.getDate() - 1);
+    }
+    const date = workDate.toISOString().split('T')[0];
     if (!byEmp[log.employee_id].days[date]) {
       byEmp[log.employee_id].days[date] = [];
     }
-    byEmp[log.employee_id].days[date].push(new Date(log.timestamp));
+    byEmp[log.employee_id].days[date].push(ts);
   }
 
   // Construir filas tipo "Marcadas" — pares entrada/salida
@@ -71,17 +77,23 @@ async function generateMarcadasReport({ dateFrom, dateTo, employeeId, deptId } =
       const dayName = DAY_NAMES[d.getDay()];
       const formatted = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
 
-      // Ordenar marcas
+      // Ordenar marcas y deduplicar las que caen dentro del mismo minuto
+      // (algunos relojes registran el mismo fichaje 2 veces por segundo)
       marks.sort((a, b) => a - b);
+      const deduped = [];
+      for (const m of marks) {
+        const last = deduped[deduped.length - 1];
+        if (!last || Math.abs(m - last) > 60 * 1000) deduped.push(m);
+      }
 
       // Emparejar (par = entrada, impar = salida) y sumar sólo pares completos.
       // Así se excluye el tiempo de almuerzo entre pares (in/out/in/out).
       // Si el día queda con un marcaje impar sin par, se ignora la última entrada.
       const pairs = [];
       let dayMinutes = 0;
-      for (let i = 0; i < marks.length; i += 2) {
-        const entrada = marks[i];
-        const salida  = marks[i + 1];
+      for (let i = 0; i < deduped.length; i += 2) {
+        const entrada = deduped[i];
+        const salida  = deduped[i + 1];
         pairs.push({
           entrada: entrada ? fmtTime(entrada) : '',
           salida:  salida  ? fmtTime(salida)  : '',
