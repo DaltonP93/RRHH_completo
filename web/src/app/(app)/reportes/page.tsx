@@ -126,10 +126,23 @@ function TabMarcadas() {
             <RefreshCw size={14} /> Generar reporte
           </button>
           {employees.length > 0 && (
-            <button onClick={() => exportMarcadasCSV(employees, from, to)}
-              className="flex items-center gap-2 border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors">
-              <Download size={14} /> Exportar CSV
-            </button>
+            <>
+              <button onClick={() => exportMarcadasCSV(employees, from, to)}
+                className="flex items-center gap-2 border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors">
+                <Download size={14} /> Exportar CSV
+              </button>
+              <button
+                onClick={() => {
+                  const q = new URLSearchParams({ from, to,
+                    ...(empId  ? { employeeId: empId }  : {}),
+                    ...(deptId ? { deptId }             : {}),
+                  })
+                  window.open(`/api/reports/marcadas/pdf?${q.toString()}`, '_blank')
+                }}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+                <Download size={14} /> PDF para imprimir
+              </button>
+            </>
           )}
         </div>
 

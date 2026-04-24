@@ -74,23 +74,20 @@ async function generateMarcadasReport({ dateFrom, dateTo, employeeId, deptId } =
       // Ordenar marcas
       marks.sort((a, b) => a - b);
 
-      // Emparejar (par = entrada, impar = salida)
+      // Emparejar (par = entrada, impar = salida) y sumar sólo pares completos.
+      // Así se excluye el tiempo de almuerzo entre pares (in/out/in/out).
+      // Si el día queda con un marcaje impar sin par, se ignora la última entrada.
       const pairs = [];
-      for (let i = 0; i < marks.length; i += 2) {
-        pairs.push({
-          entrada: marks[i]   ? fmtTime(marks[i])   : '',
-          salida:  marks[i+1] ? fmtTime(marks[i+1]) : '',
-        });
-      }
-
-      // Total del día (primer entrada → última salida)
       let dayMinutes = 0;
-      if (marks.length >= 2) {
-        const first = marks[0];
-        const last  = marks[marks.length - 1];
-        // Solo si hay al menos 1 par completo
-        if (marks.length % 2 === 0) {
-          dayMinutes = Math.round((last - first) / 60000);
+      for (let i = 0; i < marks.length; i += 2) {
+        const entrada = marks[i];
+        const salida  = marks[i + 1];
+        pairs.push({
+          entrada: entrada ? fmtTime(entrada) : '',
+          salida:  salida  ? fmtTime(salida)  : '',
+        });
+        if (entrada && salida && salida > entrada) {
+          dayMinutes += Math.round((salida - entrada) / 60000);
         }
       }
       totalMinutes += dayMinutes;
