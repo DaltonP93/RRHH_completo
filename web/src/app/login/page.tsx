@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Lock, User, Clock as ClockIcon, Shield } from 'lucide-react'
 import Link from 'next/link'
-import { authApi } from '@/lib/api'
+import { authApi, apiUrl } from '@/lib/api'
 import { landingFor } from '@/lib/useCurrentUser'
 
 interface SiteSettings {
@@ -42,9 +42,12 @@ const DEFAULT: SiteSettings = {
   system_time_format: '24h',
 }
 
-function useNow(enabled: boolean) {
-  const [now, setNow] = useState(() => new Date())
+// Inicializa null en SSR para evitar hydration mismatch (React #418/#423/#425).
+// Se setea recién al montar en cliente.
+function useNow(enabled: boolean): Date | null {
+  const [now, setNow] = useState<Date | null>(null)
   useEffect(() => {
+    setNow(new Date())
     if (!enabled) return
     const t = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(t)
@@ -62,8 +65,7 @@ export default function LoginPage() {
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT)
 
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
-    fetch(`${apiUrl}/api/settings`)
+    fetch(apiUrl('/api/settings'))
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setSettings(s => ({ ...s, ...data })) })
       .catch(() => {})
@@ -74,6 +76,7 @@ export default function LoginPage() {
   const now       = useNow(showClock)
 
   const datetimeStr = useMemo(() => {
+    if (!now) return ''
     try {
       const opts: Intl.DateTimeFormatOptions = {
         dateStyle: 'full',
@@ -116,11 +119,10 @@ export default function LoginPage() {
   }
 
   // Fondo: imagen local > gradient class
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
   const bgImage = settings.system_login_bg_image
     ? (settings.system_login_bg_image.startsWith('http')
         ? settings.system_login_bg_image
-        : `${apiUrl}${settings.system_login_bg_image}`)
+        : apiUrl(settings.system_login_bg_image))
     : ''
 
   const cardClass = glass
@@ -152,7 +154,7 @@ export default function LoginPage() {
         <div className="hidden md:flex absolute top-6 right-8 items-center gap-2 text-white bg-black/60 backdrop-blur px-4 py-2 rounded-xl z-10"
              aria-live="off">
           <ClockIcon size={16} aria-hidden="true" />
-          <span className="text-sm font-medium tracking-wide">{datetimeStr}</span>
+          <span className="text-sm font-medium tracking-wide" suppressHydrationWarning>{datetimeStr || ' '}</span>
         </div>
       )}
 
@@ -160,7 +162,7 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           {settings.system_logo_url ? (
             <img
-              src={settings.system_logo_url.startsWith('http') ? settings.system_logo_url : `${apiUrl}${settings.system_logo_url}`}
+              src={settings.system_logo_url.startsWith('http') ? settings.system_logo_url : apiUrl(settings.system_logo_url)}
               alt={settings.system_name}
               className="h-16 mx-auto mb-4 object-contain"
               onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
@@ -178,7 +180,7 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-slate-900">{settings.system_login_title}</h1>
           <p className="text-slate-500 text-sm mt-1">{settings.system_login_subtitle}</p>
           {showClock && (
-            <p className="md:hidden text-xs text-slate-400 mt-3">{datetimeStr}</p>
+            <p className="md:hidden text-xs text-slate-400 mt-3" suppressHydrationWarning>{datetimeStr || ' '}</p>
           )}
         </div>
 

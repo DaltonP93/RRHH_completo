@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { Bell, Check, X } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 import { io, Socket } from 'socket.io-client'
 
 interface Notif {
@@ -9,7 +9,15 @@ interface Notif {
   link: string | null; read_at: string | null; created_at: string
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
+// Si NEXT_PUBLIC_API_URL es relativo/vacío, usá el origin actual para Socket.io
+function socketTarget() {
+  const u = apiUrl('/')
+  if (u.startsWith('/')) {
+    if (typeof window !== 'undefined') return window.location.origin
+    return 'http://localhost:4000'
+  }
+  return u.replace(/\/$/, '')
+}
 
 export default function NotificationBell() {
   const [open, setOpen] = useState(false)
@@ -29,9 +37,11 @@ export default function NotificationBell() {
   useEffect(() => { load() }, [])
 
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    const token = typeof window !== 'undefined'
+      ? (localStorage.getItem('access_token') || localStorage.getItem('token'))
+      : null
     if (!token) return
-    const s = io(API_URL, { auth: { token }, transports: ['websocket', 'polling'] })
+    const s = io(socketTarget(), { auth: { token }, transports: ['websocket', 'polling'] })
     socketRef.current = s
     s.on('notification', (n: Notif) => {
       setItems(prev => [n, ...prev].slice(0, 20))

@@ -8,10 +8,11 @@ export default function KioskPage({ params }: { params: { branchId: string } }) 
   const [token, setToken] = useState<string | null>(null)
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const [branch, setBranch] = useState<any>(null)
-  const [now, setNow] = useState(new Date())
+  const [now, setNow] = useState<Date | null>(null)
   const [err, setErr] = useState('')
 
   useEffect(() => {
+    setNow(new Date())
     const id = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(id)
   }, [])
@@ -45,7 +46,7 @@ export default function KioskPage({ params }: { params: { branchId: string } }) 
   }, [branchId])
 
   const qrSrc = token ? `https://api.qrserver.com/v1/create-qr-code/?size=480x480&margin=0&data=${encodeURIComponent(token)}` : ''
-  const left = expiresAt ? Math.max(0, Math.floor((new Date(expiresAt).getTime() - now.getTime()) / 1000)) : 0
+  const left = expiresAt && now ? Math.max(0, Math.floor((new Date(expiresAt).getTime() - now.getTime()) / 1000)) : 0
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 text-white flex flex-col">
@@ -55,11 +56,11 @@ export default function KioskPage({ params }: { params: { branchId: string } }) 
           <p className="text-blue-200 text-sm">Marcación de asistencia</p>
         </div>
         <div className="text-right">
-          <div className="text-5xl font-mono font-bold tabular-nums">
-            {now.toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          <div className="text-5xl font-mono font-bold tabular-nums" suppressHydrationWarning>
+            {now ? now.toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--:--'}
           </div>
-          <div className="text-blue-200 text-sm capitalize">
-            {now.toLocaleDateString('es-PY', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          <div className="text-blue-200 text-sm capitalize" suppressHydrationWarning>
+            {now ? now.toLocaleDateString('es-PY', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : ' '}
           </div>
         </div>
       </div>

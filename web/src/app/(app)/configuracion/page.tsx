@@ -1429,7 +1429,16 @@ function WebhooksTab() {
 
 // ─── Tab: API ─────────────────────────────────────────────────
 function ApiTab() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
+  const baseUrl = (() => {
+    const raw = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '').replace(/\/api$/i, '')
+    if (raw) {
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:' && raw.startsWith('http://')) {
+        return 'https://' + raw.slice('http://'.length)
+      }
+      return raw
+    }
+    return typeof window !== 'undefined' ? window.location.origin : ''
+  })()
   const endpoints = [
     { method: 'GET',  path: '/api/integration/attendance/today', desc: 'Asistencia del día actual' },
     { method: 'GET',  path: '/api/integration/attendance/range', desc: 'Rango de fechas (para nómina)' },
@@ -1443,12 +1452,12 @@ function ApiTab() {
         <h2 className="font-semibold text-slate-800">API & Documentación</h2>
         <p className="text-sm text-slate-500 mt-0.5">Integra con Oracle APEX, ERP, nómina y cualquier sistema</p>
       </div>
-      <a href={`${apiUrl}/api/docs`} target="_blank"
+      <a href={`${baseUrl}/api/docs`} target="_blank"
         className="flex items-center gap-4 p-4 rounded-xl border border-blue-100 bg-blue-50 hover:bg-blue-100 transition-colors">
         <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-sm">API</div>
         <div>
           <p className="font-semibold text-blue-800">Swagger UI — Documentación Interactiva</p>
-          <p className="text-sm text-blue-600">{apiUrl}/api/docs</p>
+          <p className="text-sm text-blue-600">{baseUrl}/api/docs</p>
         </div>
       </a>
       <div className="space-y-2">

@@ -1,7 +1,28 @@
 import axios from 'axios'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
-const ANALYTICS_URL = process.env.NEXT_PUBLIC_ANALYTICS_URL || 'http://localhost:5000'
+// Normaliza la URL del API:
+// - quita trailing slash y trailing /api (las rutas ya empiezan con /api)
+// - si la página corre en https, fuerza https en la base (evita mixed-content)
+// - en producción detrás de nginx, dejá NEXT_PUBLIC_API_URL='' y se usa el mismo origen
+function normalizeApiUrl(raw?: string): string {
+  let u = (raw || '').trim()
+  if (!u) return '' // mismo origen — funciona con nginx proxy /api/* → :4000
+  u = u.replace(/\/+$/, '').replace(/\/api$/i, '')
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && u.startsWith('http://')) {
+    u = 'https://' + u.slice('http://'.length)
+  }
+  return u
+}
+
+const API_URL       = normalizeApiUrl(process.env.NEXT_PUBLIC_API_URL)
+const ANALYTICS_URL = normalizeApiUrl(process.env.NEXT_PUBLIC_ANALYTICS_URL) || 'http://localhost:5000'
+
+// Helper para componentes que usan fetch() crudo en lugar de axios.
+// Devuelve la URL absoluta correctamente formada para un path tipo "/api/...".
+export function apiUrl(path: string = ''): string {
+  const p = path.startsWith('/') ? path : '/' + path
+  return `${API_URL}${p}`
+}
 
 export const api = axios.create({ baseURL: API_URL })
 export const analyticsApi = axios.create({ baseURL: ANALYTICS_URL })
@@ -23,7 +44,7 @@ api.interceptors.response.use(
       const refreshToken = localStorage.getItem('refresh_token')
       if (refreshToken) {
         try {
-          const { data } = await axios.post(`${API_URL}/api/auth/refresh`, { refreshToken })
+          const { data } = await api.post('/api/auth/refresh', { refreshToken })
           localStorage.setItem('access_token', data.accessToken)
           localStorage.setItem('refresh_token', data.refreshToken)
           original.headers.Authorization = `Bearer ${data.accessToken}`

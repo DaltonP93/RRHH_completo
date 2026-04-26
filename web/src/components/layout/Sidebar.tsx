@@ -12,6 +12,7 @@ import {
 import clsx from 'clsx'
 import { useCurrentUser, hasRole, isSuperAdmin, type Role } from '@/lib/useCurrentUser'
 import { useI18n } from '@/i18n/I18nProvider'
+import { apiUrl } from '@/lib/api'
 
 type NavItem = {
   href: string
@@ -88,8 +89,7 @@ export default function Sidebar() {
 
   // Carga settings de tema (sin bloquear render)
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
-    fetch(`${apiUrl}/api/settings`)
+    fetch(apiUrl('/api/settings'))
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setTheme(d) })
       .catch(() => {})
@@ -98,10 +98,11 @@ export default function Sidebar() {
   // Carga permisos granulares del usuario logueado
   useEffect(() => {
     if (!user) return
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    const token = typeof window !== 'undefined'
+      ? (localStorage.getItem('access_token') || localStorage.getItem('token'))
+      : null
     if (!token) return
-    fetch(`${apiUrl}/api/me/permissions`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl('/api/me/permissions'), { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.effective) setPerms(d.effective) })
       .catch(() => {})
