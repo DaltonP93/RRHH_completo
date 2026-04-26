@@ -41,6 +41,8 @@ const selfCheckinRoutes     = require('./routes/selfCheckin');
 const payrollRoutes         = require('./routes/payroll');
 const supervisorRoutes      = require('./routes/supervisor');
 const healthRoutes          = require('./routes/health');
+const backupRoutes          = require('./routes/backups');
+const milestoneRoutes       = require('./routes/milestones');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -128,6 +130,8 @@ app.use('/api/self-checkin',   selfCheckinRoutes);
 app.use('/api/payroll',        payrollRoutes);
 app.use('/api/supervisor',     supervisorRoutes);
 app.use('/api/health',         healthRoutes);
+app.use('/api/backups',        backupRoutes);
+app.use('/api/milestones',     milestoneRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
@@ -177,6 +181,10 @@ async function start() {
     // Schedules de sincronización HR externa
     const { loadHrSchedules } = require('./services/hrSourceSync');
     setTimeout(() => loadHrSchedules().catch(() => {}), 6000);
+
+    // Cron de backups automáticos de MySQL
+    const { startBackupCron } = require('./services/backups');
+    startBackupCron();
 
     // Conectar MySQL
     await sequelize.authenticate();

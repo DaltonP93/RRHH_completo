@@ -6,6 +6,7 @@ import {
   LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar,
   LogOut, Shield, Server, Building2, CheckSquare, UserCircle2,
   Menu, X, FileText, TrendingUp, QrCode, DollarSign, ChevronDown, Activity,
+  Cake,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -39,6 +40,7 @@ const NAV: NavItem[] = [
   { href: '/reportes',      icon: BarChart2,       label: 'Reportes',      section: 'gestion', roles: ['admin','gth','hr','manager','gestor'], module: 'reportes' },
   { href: '/ejecutivo',     icon: TrendingUp,      label: 'Ejecutivo',     section: 'gestion', roles: ['admin','gth','hr','manager'], module: 'ejecutivo' },
   { href: '/nomina',        icon: DollarSign,      label: 'Nómina SAA',    section: 'gestion', roles: ['admin','gth','hr'], module: 'nomina' },
+  { href: '/calendario',    icon: Cake,            label: 'Calendario',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'calendario' },
 
   // Admin
   { href: '/departamentos', icon: Building2,       label: 'Departamentos', section: 'admin', roles: ['admin','gth'], module: 'departamentos' },

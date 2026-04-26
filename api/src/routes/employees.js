@@ -173,7 +173,7 @@ router.patch('/bulk', authorize('admin','hr'), requirePermission('empleados', 'u
 router.patch('/:id/quick', authorize('admin','hr'), requirePermission('empleados', 'update'), async (req, res) => {
   const id = parseInt(req.params.id);
   const { field, value } = req.body || {};
-  const allowed = ['first_name', 'last_name', 'employee_number', 'email', 'phone', 'position'];
+  const allowed = ['first_name', 'last_name', 'employee_number', 'email', 'phone', 'position', 'birth_date', 'hire_date'];
   if (!allowed.includes(field)) {
     return res.status(400).json({ error: 'Campo no permitido para edición rápida' });
   }

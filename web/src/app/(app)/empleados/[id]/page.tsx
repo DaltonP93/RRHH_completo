@@ -195,6 +195,7 @@ export default function EmpleadoDetallePage() {
             <EditField label="Teléfono"    value={emp.phone || ''}   name="phone"         type="tel" onSave={onSaveField} />
             <EditField label="Cargo"       value={emp.position || ''} name="position"      onSave={onSaveField} />
             <EditField label="Ingreso"     value={emp.hire_date ? emp.hire_date.split('T')[0] : ''} name="hire_date" type="date" onSave={onSaveField} />
+            <EditField label="Nacimiento"  value={emp.birth_date ? emp.birth_date.split('T')[0] : ''} name="birth_date" type="date" onSave={onSaveField} />
             <EditField
               label="Horario"
               value={emp.schedule_name || ''}

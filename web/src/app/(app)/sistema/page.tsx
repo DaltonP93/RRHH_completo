@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { Server, HardDrive, Database, Calculator, AlertTriangle, FileCog } from 'lucide-react'
+import { Server, HardDrive, Database, Calculator, AlertTriangle, FileCog, Archive, Activity } from 'lucide-react'
 
 const cards = [
   {
@@ -30,6 +30,20 @@ const cards = [
     title: 'Reglas de Permisos',
     desc: 'Configurar qué niveles (coordinador, gerente, GTH) son requeridos por departamento y tipo de permiso.',
     color: 'bg-amber-500',
+  },
+  {
+    href: '/sistema/backups',
+    icon: Archive,
+    title: 'Backups de BD',
+    desc: 'Backups automáticos y manuales de MySQL. Listado, descarga, retención configurable.',
+    color: 'bg-rose-500',
+  },
+  {
+    href: '/sistema/salud',
+    icon: Activity,
+    title: 'Estado del sistema',
+    desc: 'Salud en tiempo real de MySQL, Redis, Bridge, att2000. Auto-refresco cada 15s.',
+    color: 'bg-cyan-500',
   },
 ]
 

@@ -105,7 +105,7 @@ async function create(req, res) {
 // PUT /api/employees/:id
 async function update(req, res) {
   const { first_name, last_name, email, phone, department_id,
-          schedule_id, position, hire_date, status } = req.body;
+          schedule_id, position, hire_date, birth_date, status } = req.body;
   try {
     await sequelize.query(`
       UPDATE employees SET
@@ -117,10 +117,11 @@ async function update(req, res) {
         schedule_id   = COALESCE(?, schedule_id),
         position   = COALESCE(?, position),
         hire_date  = COALESCE(?, hire_date),
+        birth_date = COALESCE(?, birth_date),
         status     = COALESCE(?, status)
       WHERE id = ?
     `, { replacements: [first_name, last_name, email, phone, department_id,
-        schedule_id, position, hire_date, status, req.params.id] });
+        schedule_id, position, hire_date, birth_date, status, req.params.id] });
 
     res.json({ message: 'Empleado actualizado' });
   } catch (err) {
