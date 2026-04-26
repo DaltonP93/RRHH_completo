@@ -1,8 +1,9 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { PenLine, Upload, Stamp, Save, Trash2 } from 'lucide-react'
+import { PenLine, Upload, Stamp, Save, Trash2, Pencil, Image as ImageIcon } from 'lucide-react'
 import { api, apiUrl } from '@/lib/api'
+import SignaturePad, { type SignaturePadHandle } from '@/components/SignaturePad'
 
 export default function FirmaDigitalPage() {
   const qc = useQueryClient()
@@ -29,6 +30,21 @@ export default function FirmaDigitalPage() {
 
   const sigInputRef  = useRef<HTMLInputElement>(null)
   const sealInputRef = useRef<HTMLInputElement>(null)
+  const padRef       = useRef<SignaturePadHandle>(null)
+  const [sigMode, setSigMode] = useState<'upload' | 'draw'>('upload')
+
+  async function saveDrawnSignature() {
+    const dataUrl = padRef.current?.toDataUrl()
+    if (!dataUrl) return alert('Dibujá la firma antes de guardar')
+    try {
+      const r = await api.post('/api/settings/signature-canvas', { dataUrl, kind: 'signature' })
+      setSignatureUrl(r.data.url)
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      alert('Firma guardada ✅')
+    } catch (err: any) {
+      alert(err?.response?.data?.error || 'Error al guardar firma')
+    }
+  }
 
   async function uploadFile(file: File, kind: 'signature' | 'seal') {
     const fd = new FormData()
@@ -150,12 +166,40 @@ export default function FirmaDigitalPage() {
           </div>
         )}
 
-        <input ref={sigInputRef} type="file" accept="image/png,image/jpeg" className="hidden"
-          onChange={e => { const f = e.target.files?.[0]; if (f) uploadFile(f, 'signature') }} />
-        <button onClick={() => sigInputRef.current?.click()}
-          className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium transition-colors">
-          <Upload size={14} /> Subir imagen de firma
-        </button>
+        {/* Tabs subir / dibujar */}
+        <div className="flex bg-slate-100 rounded-xl p-1 w-fit">
+          <button onClick={() => setSigMode('upload')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              sigMode === 'upload' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'
+            }`}>
+            <ImageIcon size={14} /> Subir imagen
+          </button>
+          <button onClick={() => setSigMode('draw')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              sigMode === 'draw' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'
+            }`}>
+            <Pencil size={14} /> Dibujar firma
+          </button>
+        </div>
+
+        {sigMode === 'upload' ? (
+          <>
+            <input ref={sigInputRef} type="file" accept="image/png,image/jpeg" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) uploadFile(f, 'signature') }} />
+            <button onClick={() => sigInputRef.current?.click()}
+              className="flex items-center gap-2 border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+              <Upload size={14} /> Subir imagen de firma
+            </button>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <SignaturePad ref={padRef} width={500} height={180} />
+            <button onClick={saveDrawnSignature}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
+              <Save size={14} /> Guardar firma dibujada
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Sello */}

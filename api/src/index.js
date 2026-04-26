@@ -45,6 +45,7 @@ const backupRoutes          = require('./routes/backups');
 const milestoneRoutes       = require('./routes/milestones');
 const vacationsRoutes       = require('./routes/vacations');
 const reportsBuilderRoutes  = require('./routes/reportsBuilder');
+const kpiGoalsRoutes        = require('./routes/kpiGoals');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -136,6 +137,7 @@ app.use('/api/backups',        backupRoutes);
 app.use('/api/milestones',     milestoneRoutes);
 app.use('/api/vacations',      vacationsRoutes);
 app.use('/api/reports-builder', reportsBuilderRoutes);
+app.use('/api/kpi-goals',      kpiGoalsRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

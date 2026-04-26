@@ -104,6 +104,10 @@ function ConfiguracionPageInner() {
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium shadow-sm transition-colors">
             ✒️ Firma digital
           </a>
+          <a href="/configuracion/metas"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium shadow-sm transition-colors">
+            🎯 Metas KPI
+          </a>
         </div>
       </div>
       <div className="flex gap-1 border-b border-slate-200 flex-wrap">

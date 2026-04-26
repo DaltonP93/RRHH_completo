@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { TrendingUp, TrendingDown, Users, Clock, AlertTriangle, Calendar } from 'lucide-react'
 import { api } from '@/lib/api'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import KpiGoalsWidget from '@/components/KpiGoalsWidget'
 
 interface Overview {
   period: { year: number; month: number; from: string; to: string; branch_id: number | null }
@@ -96,6 +97,9 @@ export default function EjecutivoPage() {
             <Kpi label="Minutos de atraso" value={kpi.late_minutes || 0} prev={prev.late_minutes || 0} delta={delta(kpi.late_minutes, prev.late_minutes)} icon={<Clock size={20} />} color="amber" invert />
             <Kpi label="Ausencias" value={kpi.absent_days || 0} prev={prev.absent_days || 0} delta={delta(kpi.absent_days, prev.absent_days)} icon={<AlertTriangle size={20} />} color="red" invert />
           </div>
+
+          {/* Metas KPI */}
+          <KpiGoalsWidget year={year} month={month} deptId={undefined} />
 
           {/* Tendencia 6 meses */}
           <div className="bg-white rounded-2xl shadow border border-slate-100 p-6">

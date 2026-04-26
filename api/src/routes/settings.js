@@ -185,6 +185,42 @@ const upload = multer({
   },
 });
 
+// POST /api/settings/signature-canvas — guarda PNG dataURL como /uploads/firma_*.png
+router.post('/signature-canvas',
+  authenticate, authorize('admin', 'gth'),
+  requirePermission('configuracion', 'update'),
+  async (req, res) => {
+    try {
+      const { dataUrl, kind = 'signature' } = req.body || {};
+      if (!dataUrl || !/^data:image\/png;base64,/.test(dataUrl)) {
+        return res.status(400).json({ error: 'dataUrl PNG requerido' });
+      }
+      if (kind !== 'signature' && kind !== 'seal') {
+        return res.status(400).json({ error: 'kind inválido (signature|seal)' });
+      }
+      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+      const buffer = Buffer.from(base64, 'base64');
+      if (buffer.length > 1024 * 1024) {
+        return res.status(413).json({ error: 'Imagen demasiado grande (>1 MB)' });
+      }
+      const filename = `${kind}_${Date.now()}.png`;
+      const fs = require('fs');
+      const fp = path.join(UPLOAD_DIR, filename);
+      fs.writeFileSync(fp, buffer);
+      const publicUrl = `/uploads/${filename}`;
+      const key = kind === 'signature' ? 'system_signature_url' : 'system_seal_url';
+      await sequelize.query(
+        `INSERT INTO notification_settings (setting_key, setting_value) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+        { replacements: [key, publicUrl] }
+      );
+      res.json({ ok: true, url: publicUrl, key });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
 // POST /api/settings/upload?kind=logo|favicon|login_bg
 router.post('/upload', authenticate, authorize('admin', 'gth'), requirePermission('configuracion', 'update'), (req, res, next) => {
   upload.single('file')(req, res, err => {
