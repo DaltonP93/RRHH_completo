@@ -759,6 +759,13 @@ export default function ReportesPage() {
     { id: 'smtp'        as const, label: '📧 Email SMTP'            },
   ]
 
+  const linkToCustom = (
+    <a href="/reportes/personalizado"
+      className="ml-auto flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-xl text-sm font-medium transition-colors">
+      🔧 Constructor a medida
+    </a>
+  )
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center gap-3">
@@ -771,7 +778,7 @@ export default function ReportesPage() {
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-slate-200">
+      <div className="flex gap-1 border-b border-slate-200 items-center">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`px-4 py-2.5 text-sm font-medium rounded-t-xl transition-colors ${
@@ -782,6 +789,7 @@ export default function ReportesPage() {
             {t.label}
           </button>
         ))}
+        {linkToCustom}
       </div>
 
       {tab === 'marcadas'    && <TabMarcadas />}

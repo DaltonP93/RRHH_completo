@@ -9,6 +9,7 @@ import {
 import { Users, Clock, AlertTriangle, UserCheck, Activity } from 'lucide-react'
 import { attendanceApi } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
+import { useI18n } from '@/i18n/I18nProvider'
 
 interface AttendanceEvent {
   employeeId: number
@@ -19,19 +20,24 @@ interface AttendanceEvent {
   deviceId?: number
 }
 
-const TYPE_LABELS = { in: 'Entrada', out: 'Salida', unknown: 'Marcaje' }
 const TYPE_COLORS = { in: 'bg-green-100 text-green-800', out: 'bg-blue-100 text-blue-800', unknown: 'bg-gray-100 text-gray-700' }
 const SOURCE_ICONS = { device: '🖐️', mobile: '📱', manual: '✏️' }
 
 const PIE_COLORS = ['#22c55e', '#f59e0b', '#ef4444', '#8b5cf6']
 
 export default function DashboardPage() {
+  const { t, locale } = useI18n()
   const [liveEvents, setLiveEvents] = useState<AttendanceEvent[]>([])
   const [today, setToday] = useState('')
+  const TYPE_LABELS: Record<string, string> = {
+    in: t('attendance.in'),
+    out: t('attendance.out'),
+    unknown: t('attendance.manual_punch'),
+  }
   // Render fecha solo en cliente para evitar hydration mismatch (React #418/#423/#425)
   useEffect(() => {
     setToday(format(new Date(), "EEEE d 'de' MMMM yyyy", { locale: es }))
-  }, [])
+  }, [locale])
 
   // Datos iniciales via API
   const { data, refetch } = useQuery({
@@ -56,10 +62,10 @@ export default function DashboardPage() {
   const recentLogs = [...liveEvents, ...(data?.recentLogs || [])].slice(0, 20)
 
   const pieData = [
-    { name: 'Presentes',  value: stats.present     || 0 },
-    { name: 'Retardos',   value: stats.late         || 0 },
-    { name: 'Ausentes',   value: stats.absent       || 0 },
-    { name: 'Permiso',    value: stats.on_permission || 0 },
+    { name: t('dashboard.present'),     value: stats.present     || 0 },
+    { name: t('dashboard.late'),        value: stats.late         || 0 },
+    { name: t('dashboard.absent'),      value: stats.absent       || 0 },
+    { name: t('dashboard.permissions'), value: stats.on_permission || 0 },
   ]
 
   return (
@@ -67,12 +73,12 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-slate-900">{t('nav.dashboard')}</h1>
           <p className="text-slate-500 capitalize" suppressHydrationWarning>{today || '\u00a0'}</p>
         </div>
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-1.5 rounded-full">
           <div className="w-2 h-2 rounded-full bg-green-500 pulse-live" />
-          <span className="text-sm font-medium text-green-700">En vivo</span>
+          <span className="text-sm font-medium text-green-700">{t('dashboard.live_feed')}</span>
         </div>
       </div>
 
@@ -80,26 +86,26 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           icon={<Users size={22} />}
-          label="Total Empleados"
+          label={t('nav.employees')}
           value={stats.total_employees || 0}
           color="blue"
         />
         <KpiCard
           icon={<UserCheck size={22} />}
-          label="Presentes"
+          label={t('dashboard.present')}
           value={(stats.present || 0) + (stats.late || 0)}
           color="green"
-          sub={`${Math.round(((stats.present || 0) + (stats.late || 0)) / (stats.total_employees || 1) * 100)}% asistencia`}
+          sub={`${Math.round(((stats.present || 0) + (stats.late || 0)) / (stats.total_employees || 1) * 100)}%`}
         />
         <KpiCard
           icon={<Clock size={22} />}
-          label="Retardos"
+          label={t('dashboard.late')}
           value={stats.late || 0}
           color="amber"
         />
         <KpiCard
           icon={<AlertTriangle size={22} />}
-          label="Ausentes"
+          label={t('dashboard.absent')}
           value={stats.absent || 0}
           color="red"
         />
@@ -109,7 +115,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Pie Chart */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-          <h2 className="font-semibold text-slate-700 mb-4">Distribución del día</h2>
+          <h2 className="font-semibold text-slate-700 mb-4">{t('dashboard.today_attendance')}</h2>
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, value }) => `${name}: ${value}`}>
@@ -124,11 +130,11 @@ export default function DashboardPage() {
         <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
           <div className="flex items-center gap-2 mb-4">
             <Activity size={18} className="text-blue-500" />
-            <h2 className="font-semibold text-slate-700">Marcajes recientes</h2>
+            <h2 className="font-semibold text-slate-700">{t('dashboard.live_feed')}</h2>
           </div>
           <div className="space-y-2 max-h-72 overflow-y-auto">
             {recentLogs.length === 0 && (
-              <p className="text-slate-400 text-sm text-center py-8">Sin marcajes aún hoy</p>
+              <p className="text-slate-400 text-sm text-center py-8">{t('dashboard.no_marks_today')}</p>
             )}
             {recentLogs.map((log, i) => (
               <div key={i} className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50 slide-in">

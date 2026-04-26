@@ -6,16 +6,17 @@ import {
   LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar,
   LogOut, Shield, Server, Building2, CheckSquare, UserCircle2,
   Menu, X, FileText, TrendingUp, QrCode, DollarSign, ChevronDown, Activity,
-  Cake,
+  Cake, Plane,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useCurrentUser, hasRole, isSuperAdmin, type Role } from '@/lib/useCurrentUser'
+import { useI18n } from '@/i18n/I18nProvider'
 
 type NavItem = {
   href: string
   icon: LucideIcon
-  label: string
+  i18nKey: string  // clave en el dictionary (nav.*)
   roles?: Role[]
   superOnly?: boolean
   section?: 'portal' | 'gestion' | 'admin'
@@ -24,38 +25,33 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   // Portal del empleado — solo roles de empleado; admin/gth/hr no lo ven
-  { href: '/mi-perfil',     icon: UserCircle2,     label: 'Mi perfil',     section: 'portal', roles: ['employee'], module: 'mi_perfil' },
-  { href: '/mi-asistencia', icon: Clock,           label: 'Mi asistencia', section: 'portal', roles: ['employee'], module: 'mi_asistencia' },
-  { href: '/marcar',        icon: QrCode,          label: 'Marcar (QR/GPS)', section: 'portal', roles: ['employee'], module: 'marcar' },
-  { href: '/mis-permisos',  icon: Calendar,        label: 'Mis permisos',  section: 'portal', roles: ['employee'], module: 'mis_permisos' },
-  { href: '/seguridad',     icon: Shield,          label: 'Seguridad',     section: 'portal' },
+  { href: '/mi-perfil',     icon: UserCircle2,     i18nKey: 'nav.my_profile',    section: 'portal', roles: ['employee'], module: 'mi_perfil' },
+  { href: '/mi-asistencia', icon: Clock,           i18nKey: 'nav.my_attendance', section: 'portal', roles: ['employee'], module: 'mi_asistencia' },
+  { href: '/marcar',        icon: QrCode,          i18nKey: 'nav.punch_qr_gps',  section: 'portal', roles: ['employee'], module: 'marcar' },
+  { href: '/mis-permisos',  icon: Calendar,        i18nKey: 'nav.my_permissions',section: 'portal', roles: ['employee'], module: 'mis_permisos' },
+  { href: '/seguridad',     icon: Shield,          i18nKey: 'nav.security',      section: 'portal' },
 
   // Gestión
-  { href: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard',     section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'dashboard' },
-  { href: '/empleados',     icon: Users,           label: 'Empleados',     section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'empleados' },
-  { href: '/asistencia',    icon: Clock,           label: 'Asistencia',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'asistencia' },
-  { href: '/permisos',      icon: Calendar,        label: 'Permisos',      section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'permisos' },
-  { href: '/aprobaciones',  icon: CheckSquare,     label: 'Aprobaciones',  section: 'gestion', roles: ['admin','gth','hr','coordinator','manager'], module: 'aprobaciones' },
-  { href: '/supervisor',    icon: Users,           label: 'Mi equipo',     section: 'gestion', roles: ['coordinator','manager','supervisor','gestor'], module: 'supervisor' },
-  { href: '/reportes',      icon: BarChart2,       label: 'Reportes',      section: 'gestion', roles: ['admin','gth','hr','manager','gestor'], module: 'reportes' },
-  { href: '/ejecutivo',     icon: TrendingUp,      label: 'Ejecutivo',     section: 'gestion', roles: ['admin','gth','hr','manager'], module: 'ejecutivo' },
-  { href: '/nomina',        icon: DollarSign,      label: 'Nómina SAA',    section: 'gestion', roles: ['admin','gth','hr'], module: 'nomina' },
-  { href: '/calendario',    icon: Cake,            label: 'Calendario',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'calendario' },
+  { href: '/dashboard',     icon: LayoutDashboard, i18nKey: 'nav.dashboard',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'dashboard' },
+  { href: '/empleados',     icon: Users,           i18nKey: 'nav.employees',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'empleados' },
+  { href: '/asistencia',    icon: Clock,           i18nKey: 'nav.attendance',   section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'asistencia' },
+  { href: '/permisos',      icon: Calendar,        i18nKey: 'nav.permissions',  section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'permisos' },
+  { href: '/aprobaciones',  icon: CheckSquare,     i18nKey: 'nav.approvals',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager'], module: 'aprobaciones' },
+  { href: '/supervisor',    icon: Users,           i18nKey: 'nav.my_team',      section: 'gestion', roles: ['coordinator','manager','supervisor','gestor'], module: 'supervisor' },
+  { href: '/reportes',      icon: BarChart2,       i18nKey: 'nav.reports',      section: 'gestion', roles: ['admin','gth','hr','manager','gestor'], module: 'reportes' },
+  { href: '/ejecutivo',     icon: TrendingUp,      i18nKey: 'nav.executive',    section: 'gestion', roles: ['admin','gth','hr','manager'], module: 'ejecutivo' },
+  { href: '/nomina',        icon: DollarSign,      i18nKey: 'nav.payroll',      section: 'gestion', roles: ['admin','gth','hr'], module: 'nomina' },
+  { href: '/calendario',    icon: Cake,            i18nKey: 'nav.calendar',     section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'calendario' },
+  { href: '/vacaciones',    icon: Plane,           i18nKey: 'nav.vacations',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'vacaciones' },
 
   // Admin
-  { href: '/departamentos', icon: Building2,       label: 'Departamentos', section: 'admin', roles: ['admin','gth'], module: 'departamentos' },
-  { href: '/usuarios',      icon: Shield,          label: 'Usuarios',      section: 'admin', roles: ['admin','gth'], module: 'usuarios' },
-  { href: '/auditoria',     icon: FileText,        label: 'Auditoría',     section: 'admin', roles: ['admin','gth'], module: 'auditoria' },
-  { href: '/configuracion', icon: Settings,        label: 'Configuración', section: 'admin', roles: ['admin','gth'], module: 'configuracion' },
-  { href: '/sistema',       icon: Server,          label: 'Sistema',       section: 'admin', superOnly: true, module: 'sistema' },
-  { href: '/sistema/salud',  icon: Activity,        label: 'Salud sistema', section: 'admin', roles: ['admin','gth'], module: 'sistema' },
+  { href: '/departamentos', icon: Building2,       i18nKey: 'nav.departments',  section: 'admin', roles: ['admin','gth'], module: 'departamentos' },
+  { href: '/usuarios',      icon: Shield,          i18nKey: 'nav.users',        section: 'admin', roles: ['admin','gth'], module: 'usuarios' },
+  { href: '/auditoria',     icon: FileText,        i18nKey: 'nav.audit',        section: 'admin', roles: ['admin','gth'], module: 'auditoria' },
+  { href: '/configuracion', icon: Settings,        i18nKey: 'nav.settings',     section: 'admin', roles: ['admin','gth'], module: 'configuracion' },
+  { href: '/sistema',       icon: Server,          i18nKey: 'nav.system',       section: 'admin', superOnly: true, module: 'sistema' },
+  { href: '/sistema/salud', icon: Activity,        i18nKey: 'nav.system_health',section: 'admin', roles: ['admin','gth'], module: 'sistema' },
 ]
-
-const SECTION_LABEL: Record<string, string> = {
-  portal:  'Mi área',
-  gestion: 'Gestión',
-  admin:   'Administración',
-}
 
 interface SidebarSettings {
   system_sidebar_bg?: string
@@ -69,6 +65,12 @@ type EffectivePerms = Record<string, { can_view: boolean; can_create: boolean; c
 export default function Sidebar() {
   const pathname = usePathname()
   const user = useCurrentUser()
+  const { t } = useI18n()
+  const SECTION_LABEL: Record<string, string> = {
+    portal:  t('nav.section_portal'),
+    gestion: t('nav.section_management'),
+    admin:   t('nav.section_admin'),
+  }
   const [open, setOpen] = useState(false)
   const [theme, setTheme] = useState<SidebarSettings>({})
   const [perms, setPerms] = useState<EffectivePerms | null>(null)
@@ -188,7 +190,7 @@ export default function Sidebar() {
                 </span>
                 <ChevronDown size={14} className={clsx('transition-transform', isCollapsed && '-rotate-90')} />
               </button>
-              {!isCollapsed && list.map(({ href, icon: Icon, label }) => {
+              {!isCollapsed && list.map(({ href, icon: Icon, i18nKey }) => {
                 const active = pathname === href || pathname.startsWith(href + '/')
                 return (
                   <Link key={href} href={href}
@@ -202,7 +204,7 @@ export default function Sidebar() {
                       : { color: textColor }}
                   >
                     <Icon size={18} aria-hidden="true" />
-                    {label}
+                    {t(i18nKey)}
                   </Link>
                 )
               })}
@@ -227,7 +229,7 @@ export default function Sidebar() {
           style={{ color: textColor }}
         >
           <LogOut size={18} />
-          Cerrar sesión
+          {t('nav.logout')}
         </button>
       </div>
     </>
