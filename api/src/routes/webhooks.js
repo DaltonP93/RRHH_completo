@@ -38,6 +38,8 @@ async function ensureWebhookTable() {
       url         VARCHAR(500) NOT NULL,
       secret      VARCHAR(100),
       events      JSON NOT NULL DEFAULT ('["attendance.checkin","attendance.checkout","alert.late"]'),
+      format      ENUM('json','slack','telegram','whatsapp','discord') NOT NULL DEFAULT 'json',
+      channel     VARCHAR(100),
       active      TINYINT(1) DEFAULT 1,
       last_called DATETIME,
       last_status INT,
@@ -46,6 +48,54 @@ async function ensureWebhookTable() {
   `);
 }
 ensureWebhookTable().catch(err => logger.warn('Webhook table:', err.message));
+
+// ─── Plantillas para distintas plataformas de mensajería ─────────
+// Recibe un evento + datos y devuelve el body que cada plataforma espera
+function formatPayload(format, event, data, channel) {
+  // Texto humano del evento
+  let title = '';
+  let body  = '';
+  if (event === 'attendance.checkin' || event === 'attendance.checkout') {
+    title = `🕐 ${data.employeeName || data.employeeCode || 'Empleado'}`;
+    body  = `${event.endsWith('checkin') ? 'Entrada' : 'Salida'} a las ${new Date(data.timestamp || Date.now()).toLocaleTimeString('es-PY')}`;
+    if (data.lateMinutes) body += ` · atraso ${data.lateMinutes} min`;
+  } else if (event === 'alert.late') {
+    title = '⚠️ Atrasos detectados';
+    body  = data.message || `${data.count || 0} empleado(s) con atraso hoy`;
+  } else if (event === 'alert.absent') {
+    title = '🚨 Ausencias detectadas';
+    body  = data.message || `${data.count || 0} empleado(s) ausentes hoy`;
+  } else if (event === 'webhook.test') {
+    title = '🧪 Prueba de webhook';
+    body  = data.message || 'Mensaje de prueba desde SisHoras';
+  } else if (event === 'custom.message') {
+    title = data.title || 'SisHoras';
+    body  = data.message || '';
+  } else {
+    title = event;
+    body  = JSON.stringify(data).slice(0, 200);
+  }
+
+  const text = `*${title}*\n${body}`;
+
+  switch (format) {
+    case 'slack':
+      return { text, blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text } },
+      ]};
+    case 'discord':
+      return { content: text };
+    case 'telegram':
+      // url debe ser https://api.telegram.org/bot<TOKEN>/sendMessage
+      return { chat_id: channel || data.chat_id, text, parse_mode: 'Markdown' };
+    case 'whatsapp':
+      // Compatible con CallMeBot / Twilio "{number, body}" — channel es el número/destino
+      return { phone: channel, body: text.replace(/\*/g, '*') };
+    case 'json':
+    default:
+      return { event, timestamp: new Date().toISOString(), data };
+  }
+}
 
 // ─── Enviar webhook a todos los destinos registrados ─────────────
 async function fireWebhooks(event, data) {
@@ -58,11 +108,12 @@ async function fireWebhooks(event, data) {
       const events = Array.isArray(wh.events) ? wh.events : JSON.parse(wh.events || '[]');
       if (!events.includes(event) && !events.includes('*')) continue;
 
-      const payload = { event, timestamp: new Date().toISOString(), data };
+      const fmt = wh.format || 'json';
+      const payload = formatPayload(fmt, event, data, wh.channel);
       const body    = JSON.stringify(payload);
 
       // Firma HMAC-SHA256 para verificar autenticidad en el receptor
-      const signature = wh.secret
+      const signature = wh.secret && fmt === 'json'
         ? 'sha256=' + crypto.createHmac('sha256', wh.secret).update(body).digest('hex')
         : null;
 
@@ -110,7 +161,7 @@ router.use(authenticate, authorize('admin', 'hr'));
  */
 router.get('/', async (req, res) => {
   const [rows] = await sequelize.query(
-    'SELECT id, name, url, events, active, last_called, last_status, created_at FROM webhooks ORDER BY id'
+    'SELECT id, name, url, events, format, channel, active, last_called, last_status, created_at FROM webhooks ORDER BY id'
   );
   res.json(rows);
 });
@@ -135,14 +186,22 @@ router.get('/', async (req, res) => {
  *               events: { type: array, items: { type: string }, example: ["attendance.checkin","attendance.checkout","alert.late"] }
  */
 router.post('/', async (req, res) => {
-  const { name, url, secret, events = ['attendance.checkin', 'attendance.checkout', 'alert.late'] } = req.body;
+  const { name, url, secret, events = ['attendance.checkin', 'attendance.checkout', 'alert.late'], format = 'json', channel } = req.body;
   if (!name || !url) return res.status(400).json({ error: 'name y url son requeridos' });
 
   const [result] = await sequelize.query(
-    'INSERT INTO webhooks (name, url, secret, events) VALUES (?, ?, ?, ?)',
-    { replacements: [name, url, secret || null, JSON.stringify(events)] }
+    'INSERT INTO webhooks (name, url, secret, events, format, channel) VALUES (?, ?, ?, ?, ?, ?)',
+    { replacements: [name, url, secret || null, JSON.stringify(events), format, channel || null] }
   );
   res.status(201).json({ id: result.insertId, message: 'Webhook registrado' });
+});
+
+// POST /api/webhooks/broadcast — enviar mensaje custom a todos los webhooks que escuchan custom.message
+router.post('/broadcast', async (req, res) => {
+  const { title, message } = req.body || {};
+  if (!message) return res.status(400).json({ error: 'message es requerido' });
+  await fireWebhooks('custom.message', { title: title || 'SisHoras', message });
+  res.json({ ok: true });
 });
 
 /**
@@ -164,10 +223,18 @@ router.post('/:id/test', async (req, res) => {
 });
 
 router.put('/:id', async (req, res) => {
-  const { name, url, secret, events, active } = req.body;
+  const { name, url, secret, events, active, format, channel } = req.body;
   await sequelize.query(
-    'UPDATE webhooks SET name=COALESCE(?,name), url=COALESCE(?,url), secret=COALESCE(?,secret), events=COALESCE(?,events), active=COALESCE(?,active) WHERE id=?',
-    { replacements: [name, url, secret, events ? JSON.stringify(events) : null, active, req.params.id] }
+    `UPDATE webhooks SET
+       name = COALESCE(?, name),
+       url = COALESCE(?, url),
+       secret = COALESCE(?, secret),
+       events = COALESCE(?, events),
+       active = COALESCE(?, active),
+       format = COALESCE(?, format),
+       channel = COALESCE(?, channel)
+     WHERE id = ?`,
+    { replacements: [name, url, secret, events ? JSON.stringify(events) : null, active, format, channel, req.params.id] }
   );
   res.json({ message: 'Webhook actualizado' });
 });

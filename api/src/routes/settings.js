@@ -44,6 +44,15 @@ const LOGIN_KEYS = [
   'system_login_footer',             // texto pie de página
 ];
 
+// Firma digital de planillas
+const SIGNATURE_KEYS = [
+  'system_signature_url',          // /uploads/firma.png
+  'system_signer_name',            // Juan Pérez
+  'system_signer_position',        // Gerente de RRHH
+  'system_signer_doc_id',          // C.I. 1234567
+  'system_seal_url',               // /uploads/sello.png (opcional)
+];
+
 // Empleados / display
 const DISPLAY_KEYS = [
   'employee_display_mode',           // 'full_name' | 'code_name' | 'code_only'
@@ -58,6 +67,7 @@ const SETTING_KEYS = [
   ...THEME_KEYS,
   ...LOGIN_KEYS,
   ...DISPLAY_KEYS,
+  ...SIGNATURE_KEYS,
 ];
 
 // ─── Defaults ───────────────────────────────────────────────────
@@ -187,6 +197,8 @@ router.post('/upload', authenticate, authorize('admin', 'gth'), requirePermissio
       logo:       'system_logo_url',
       favicon:    'system_favicon_url',
       login_bg:   'system_login_bg_image',
+      signature:  'system_signature_url',
+      seal:       'system_seal_url',
     };
     const key = kindToKey[kind];
 

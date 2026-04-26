@@ -5,6 +5,7 @@ import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { BarChart2, RefreshCw, Plus, Trash2, Mail, Clock, Download, CheckCircle, XCircle, Calendar } from 'lucide-react'
 import { api } from '@/lib/api'
+import { useI18n } from '@/i18n/I18nProvider'
 
 // ─── Helpers ─────────────────────────────────────────────────────
 function minsToHM(mins: number | null) {
@@ -750,13 +751,14 @@ function TabSMTP() {
 
 // ─── Página principal ─────────────────────────────────────────────
 export default function ReportesPage() {
+  const { t } = useI18n()
   const [tab, setTab] = useState<'marcadas' | 'mensual' | 'programados' | 'smtp'>('marcadas')
 
   const TABS = [
-    { id: 'marcadas'    as const, label: '📋 Marcadas por empleado' },
-    { id: 'mensual'     as const, label: '📊 Resumen mensual'       },
-    { id: 'programados' as const, label: '🕐 Reportes automáticos'  },
-    { id: 'smtp'        as const, label: '📧 Email SMTP'            },
+    { id: 'marcadas'    as const, label: '📋 ' + t('reports.marcadas') },
+    { id: 'mensual'     as const, label: '📊 ' + t('reports.monthly')  },
+    { id: 'programados' as const, label: '🕐 ' + t('reports.scheduled') },
+    { id: 'smtp'        as const, label: '📧 ' + t('reports.smtp')     },
   ]
 
   const linkToCustom = (
@@ -773,8 +775,8 @@ export default function ReportesPage() {
           <BarChart2 className="text-blue-600" size={22} />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Reportes</h1>
-          <p className="text-sm text-slate-500">Reportes de asistencia, marcadas y programación de envíos automáticos</p>
+          <h1 className="text-2xl font-bold text-slate-900">{t('nav.reports')}</h1>
+          <p className="text-sm text-slate-500">{t('reports.marcadas')} · {t('reports.monthly')} · {t('reports.scheduled')}</p>
         </div>
       </div>
 

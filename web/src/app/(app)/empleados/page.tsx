@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { format } from 'date-fns'
 import { useDisplayMode } from '@/lib/useSettings'
 import { formatEmployee, formatEmployeeInitials } from '@/lib/displayMode'
+import { useI18n } from '@/i18n/I18nProvider'
 
 // ─── Columnas esperadas y sus alias ──────────────────────────────
 const FIELD_MAP: Record<string, string[]> = {
@@ -536,6 +537,7 @@ function BulkActionsBar({
 // ─── Página principal ─────────────────────────────────────────────
 export default function EmpleadosPage() {
   const qc = useQueryClient()
+  const { t } = useI18n()
   const [search, setSearch]       = useState('')
   const [status, setStatus]       = useState('active')
   const [dept, setDept]           = useState('')
@@ -578,19 +580,19 @@ export default function EmpleadosPage() {
             <Users className="text-blue-600" size={22} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Empleados</h1>
-            <p className="text-sm text-slate-500">{data?.total || 0} empleados · {active} activos</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t('nav.employees')}</h1>
+            <p className="text-sm text-slate-500">{data?.total || 0} · {active} {t('common.active').toLowerCase()}</p>
           </div>
         </div>
         <div className="flex gap-2">
           <ExportDropdown employees={employees} />
           <button onClick={() => setImport(true)}
             className="flex items-center gap-2 border border-blue-200 text-blue-600 bg-blue-50 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-100 transition-colors">
-            <Upload size={15} /> Importar
+            <Upload size={15} /> {t('common.import')}
           </button>
           <Link href="/empleados/nuevo"
             className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors">
-            <Plus size={16} /> Nuevo empleado
+            <Plus size={16} /> {t('employees.new')}
           </Link>
         </div>
       </div>
@@ -598,15 +600,15 @@ export default function EmpleadosPage() {
       {/* Stats rápidas */}
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-white border border-slate-100 rounded-2xl px-5 py-4 shadow-sm">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Total</p>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{t('common.all')}</p>
           <p className="text-3xl font-bold text-slate-700 mt-1">{data?.total || 0}</p>
         </div>
         <div className="bg-green-50 border border-green-100 rounded-2xl px-5 py-4">
-          <p className="text-xs font-medium text-green-600 uppercase tracking-wide">Activos</p>
+          <p className="text-xs font-medium text-green-600 uppercase tracking-wide">{t('common.active')}</p>
           <p className="text-3xl font-bold text-green-700 mt-1">{active}</p>
         </div>
         <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Inactivos</p>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{t('common.inactive')}</p>
           <p className="text-3xl font-bold text-slate-500 mt-1">{inactive}</p>
         </div>
       </div>
@@ -616,21 +618,21 @@ export default function EmpleadosPage() {
         <div className="relative flex-1 min-w-[200px]">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar por nombre o código..."
+            placeholder={t('employees.search_placeholder')}
             className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         <select value={dept} onChange={e => setDept(e.target.value)}
           className="border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">Todos los departamentos</option>
+          <option value="">{t('common.all')} {t('employees.department').toLowerCase()}</option>
           {(deptsData || []).map((d: any) => (
             <option key={d.id} value={d.id}>{d.name}</option>
           ))}
         </select>
         <select value={status} onChange={e => setStatus(e.target.value)}
           className="border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          <option value="">Todos</option>
-          <option value="active">Activos</option>
-          <option value="inactive">Inactivos</option>
+          <option value="">{t('common.all')}</option>
+          <option value="active">{t('common.active')}</option>
+          <option value="inactive">{t('common.inactive')}</option>
         </select>
       </div>
 

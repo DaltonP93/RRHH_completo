@@ -100,6 +100,10 @@ function ConfiguracionPageInner() {
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-medium shadow-sm hover:shadow-md transition-shadow">
             🎨 Personalizar apariencia
           </a>
+          <a href="/configuracion/firma"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium shadow-sm transition-colors">
+            ✒️ Firma digital
+          </a>
         </div>
       </div>
       <div className="flex gap-1 border-b border-slate-200 flex-wrap">
@@ -1362,41 +1366,95 @@ function WebhooksTab() {
     queryFn: () => api.get('/api/webhooks').then(r => r.data)
   })
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: '', url: '', secret: '', events: ['attendance.checkin','attendance.checkout','alert.late'] })
+  const [broadcastMsg, setBroadcastMsg] = useState('')
+  const [form, setForm] = useState<any>({
+    name: '', url: '', secret: '', format: 'json', channel: '',
+    events: ['attendance.checkin','attendance.checkout','alert.late','custom.message'],
+  })
 
   async function createWebhook() {
     await api.post('/api/webhooks', form)
     qc.invalidateQueries({ queryKey: ['webhooks'] })
     setShowForm(false)
-    setForm({ name: '', url: '', secret: '', events: ['attendance.checkin','attendance.checkout','alert.late'] })
+    setForm({ name: '', url: '', secret: '', format: 'json', channel: '',
+      events: ['attendance.checkin','attendance.checkout','alert.late','custom.message'] })
   }
   async function deleteWebhook(id: number) {
     if (!confirm('¿Eliminar este webhook?')) return
     await api.delete(`/api/webhooks/${id}`)
     qc.invalidateQueries({ queryKey: ['webhooks'] })
   }
+  async function broadcast() {
+    if (!broadcastMsg.trim()) return
+    await api.post('/api/webhooks/broadcast', { title: 'Mensaje SisHoras', message: broadcastMsg })
+    setBroadcastMsg('')
+    alert('Mensaje enviado a todos los webhooks que escuchan custom.message ✅')
+  }
+
+  const FORMAT_HINTS: Record<string, { hint: string; channelLabel: string }> = {
+    json:     { hint: 'JSON estándar con event/data',                                    channelLabel: '' },
+    slack:    { hint: 'Slack Incoming Webhook — payload {text, blocks}',                 channelLabel: '' },
+    discord:  { hint: 'Discord Webhook — payload {content}',                             channelLabel: '' },
+    telegram: { hint: 'Bot API: URL https://api.telegram.org/bot<TOKEN>/sendMessage',     channelLabel: 'Chat ID destino' },
+    whatsapp: { hint: 'CallMeBot / similar. URL es el endpoint de envío',                 channelLabel: 'Número de teléfono' },
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-semibold text-slate-800">Webhooks</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Notifica a sistemas externos cuando ocurre un marcaje</p>
+          <h2 className="font-semibold text-slate-800">Webhooks y notificaciones externas</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Envía eventos a Slack, Telegram, WhatsApp, Discord o cualquier endpoint JSON</p>
         </div>
         <button onClick={() => setShowForm(true)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm hover:bg-blue-700">
           <Plus size={16}/> Agregar
         </button>
       </div>
+
+      {/* Broadcast custom */}
+      <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 space-y-2">
+        <h3 className="font-medium text-slate-700 text-sm">Enviar mensaje a todos los webhooks</h3>
+        <div className="flex gap-2">
+          <input value={broadcastMsg} onChange={e => setBroadcastMsg(e.target.value)}
+            placeholder="Escribe un mensaje para Slack/Telegram/WhatsApp..."
+            className="flex-1 border border-amber-200 rounded-xl px-3 py-2 text-sm bg-white" />
+          <button onClick={broadcast} disabled={!broadcastMsg.trim()}
+            className="bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-medium">
+            Difundir
+          </button>
+        </div>
+      </div>
+
       {showForm && (
         <div className="border border-blue-100 bg-blue-50 rounded-xl p-5 space-y-3">
           <h3 className="font-medium text-slate-700">Nuevo Webhook</h3>
-          {['name','url','secret'].map(field => (
-            <input key={field}
-              placeholder={field === 'name' ? 'Nombre' : field === 'url' ? 'URL del endpoint' : 'Secreto HMAC (opcional)'}
-              value={(form as any)[field]}
-              onChange={e => setForm(f => ({...f, [field]: e.target.value}))}
+          <input placeholder="Nombre (ej: Slack #recursos-humanos)" value={form.name}
+            onChange={e => setForm((f: any) => ({...f, name: e.target.value}))}
+            className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
+          <div className="grid grid-cols-2 gap-2">
+            <select value={form.format} onChange={e => setForm((f: any) => ({...f, format: e.target.value}))}
+              className="border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-white">
+              <option value="json">JSON estándar</option>
+              <option value="slack">Slack</option>
+              <option value="telegram">Telegram</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="discord">Discord</option>
+            </select>
+            {FORMAT_HINTS[form.format]?.channelLabel && (
+              <input placeholder={FORMAT_HINTS[form.format].channelLabel} value={form.channel}
+                onChange={e => setForm((f: any) => ({...f, channel: e.target.value}))}
+                className="border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
+            )}
+          </div>
+          <p className="text-xs text-slate-500">{FORMAT_HINTS[form.format]?.hint}</p>
+          <input placeholder="URL del endpoint" value={form.url}
+            onChange={e => setForm((f: any) => ({...f, url: e.target.value}))}
+            className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
+          {form.format === 'json' && (
+            <input placeholder="Secreto HMAC (opcional)" value={form.secret}
+              onChange={e => setForm((f: any) => ({...f, secret: e.target.value}))}
               className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
-          ))}
+          )}
           <div className="flex gap-3">
             <button onClick={createWebhook} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm hover:bg-blue-700">Guardar</button>
             <button onClick={() => setShowForm(false)} className="border border-slate-200 px-4 py-2 rounded-xl text-sm hover:bg-slate-50">Cancelar</button>

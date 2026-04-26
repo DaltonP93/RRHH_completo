@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Cake, Award, ChevronLeft, ChevronRight, Calendar, Mail } from 'lucide-react'
 import { api } from '@/lib/api'
+import { useI18n } from '@/i18n/I18nProvider'
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
@@ -13,6 +14,7 @@ function ordinal(n: number) {
 }
 
 export default function CalendarioPage() {
+  const { t } = useI18n()
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [tab, setTab] = useState<'birthdays' | 'anniversaries'>('birthdays')
@@ -50,15 +52,15 @@ export default function CalendarioPage() {
           <Calendar className="text-white" size={22} />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Calendario</h1>
-          <p className="text-sm text-slate-500">Cumpleaños y aniversarios laborales del equipo</p>
+          <h1 className="text-2xl font-bold text-slate-900">{t('calendar.title')}</h1>
+          <p className="text-sm text-slate-500">{t('calendar.subtitle')}</p>
         </div>
       </div>
 
       {/* Hoy */}
       {(today?.birthdays?.length > 0 || today?.anniversaries?.length > 0) && (
         <div className="bg-gradient-to-r from-pink-50 to-orange-50 border border-pink-100 rounded-2xl p-5">
-          <h3 className="text-sm font-bold text-pink-900 mb-3">🎉 Hoy celebramos</h3>
+          <h3 className="text-sm font-bold text-pink-900 mb-3">🎉 {t('calendar.today_celebrating')}</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {today?.birthdays?.map((p: any) => (
               <div key={`b${p.id}`} className="bg-white rounded-xl p-3 flex items-center gap-3">
@@ -124,14 +126,14 @@ export default function CalendarioPage() {
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
               tab === 'birthdays' ? 'bg-white text-pink-600 shadow-sm' : 'text-slate-500'
             }`}>
-            <Cake size={14} /> Cumpleaños
+            <Cake size={14} /> {t('calendar.birthdays')}
             <span className="bg-pink-100 text-pink-700 px-1.5 py-0.5 rounded text-xs">{birthData?.count ?? 0}</span>
           </button>
           <button onClick={() => setTab('anniversaries')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
               tab === 'anniversaries' ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500'
             }`}>
-            <Award size={14} /> Aniversarios
+            <Award size={14} /> {t('calendar.anniversaries')}
             <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-xs">{annivData?.count ?? 0}</span>
           </button>
         </div>

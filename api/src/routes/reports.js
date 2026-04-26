@@ -424,12 +424,59 @@ router.get('/monthly/export', async (req, res) => {
     const employees = Array.from(byEmp.values());
     const period = `${String(month).padStart(2,'0')}/${year}`;
 
+    // Cargar settings de firma para los PDFs
+    const [sigRows] = await sequelize.query(
+      "SELECT setting_key, setting_value FROM notification_settings WHERE setting_key IN ('system_signature_url','system_seal_url','system_signer_name','system_signer_position','system_signer_doc_id')"
+    );
+    const sig = Object.fromEntries(sigRows.map(r => [r.setting_key, r.setting_value]));
+
     if (format === 'pdf') {
       const PDFDocument = require('pdfkit');
+      const path = require('path');
+      const fs = require('fs');
       const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 30 });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="planilla_${year}_${String(month).padStart(2,'0')}.pdf"`);
       doc.pipe(res);
+
+      // Helper para resolver path local de archivo subido (/uploads/xxx.png)
+      const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads'));
+      function resolveUpload(url) {
+        if (!url) return null;
+        if (!url.startsWith('/uploads/')) return null;
+        const filename = url.replace('/uploads/', '');
+        const fp = path.join(UPLOAD_DIR, filename);
+        return fs.existsSync(fp) ? fp : null;
+      }
+      const signaturePath = resolveUpload(sig.system_signature_url);
+      const sealPath      = resolveUpload(sig.system_seal_url);
+
+      function drawSignatureBlock(yPos) {
+        const pageW = doc.page.width;
+        const blockY = Math.min(yPos, doc.page.height - 130);
+        const xLeft  = pageW / 2 - 200;
+        const xRight = pageW / 2 + 200;
+
+        // Linea de firma
+        doc.moveTo(xLeft + 30, blockY + 60).lineTo(xLeft + 230, blockY + 60).stroke('#94a3b8');
+        if (signaturePath) {
+          try { doc.image(signaturePath, xLeft + 50, blockY, { width: 160, height: 60 }); } catch {}
+        }
+        doc.fontSize(9).fillColor('#475569');
+        doc.text(sig.system_signer_name || '', xLeft + 30, blockY + 65, { width: 200, align: 'center' });
+        doc.fontSize(8).fillColor('#94a3b8');
+        doc.text(sig.system_signer_position || '', xLeft + 30, blockY + 78, { width: 200, align: 'center' });
+        if (sig.system_signer_doc_id) {
+          doc.text(sig.system_signer_doc_id, xLeft + 30, blockY + 90, { width: 200, align: 'center' });
+        }
+
+        // Sello a la derecha
+        if (sealPath) {
+          try { doc.image(sealPath, xRight - 90, blockY - 5, { width: 100, height: 100, fit: [100, 100] }); } catch {}
+        }
+      }
+      // exponer en closure para uso al final
+      doc._drawSignatureBlock = drawSignatureBlock;
 
       for (let ei = 0; ei < employees.length; ei++) {
         const emp = employees[ei];
@@ -476,6 +523,15 @@ router.get('/monthly/export', async (req, res) => {
           `Totales → Trabajado: ${minsToHM(emp.totals.worked)} · Atrasos: ${emp.totals.late} min · Extras: ${minsToHM(emp.totals.overtime)} · Presente: ${emp.totals.present} · Ausente: ${emp.totals.absent}`,
           startX, y
         );
+
+        // Firma al pie de cada planilla
+        const sigY = y + 40;
+        if (sigY < doc.page.height - 130) {
+          doc._drawSignatureBlock(sigY);
+        } else {
+          doc.addPage();
+          doc._drawSignatureBlock(80);
+        }
       }
       doc.end();
       return;
