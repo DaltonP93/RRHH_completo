@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { CheckSquare, Check, X, Clock, UserCircle2, Calendar, AlertCircle } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useCurrentUser } from '@/lib/useCurrentUser'
+import ApprovalsSlaWidget from '@/components/ApprovalsSlaWidget'
 
 interface Perm {
   id: number
@@ -101,6 +102,8 @@ export default function AprobacionesPage() {
           <div className="text-sm text-red-900">{error}</div>
         </div>
       )}
+
+      <ApprovalsSlaWidget />
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {loading ? (

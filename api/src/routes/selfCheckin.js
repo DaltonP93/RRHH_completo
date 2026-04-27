@@ -65,7 +65,7 @@ router.post('/mark', async (req, res) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'No autenticado' });
 
-    const { type, token, lat, lng } = req.body;
+    const { type, token, lat, lng, selfie } = req.body;
     if (!['in', 'out'].includes(type)) return res.status(400).json({ error: 'type debe ser in|out' });
 
     // Empleado asociado al usuario
@@ -112,19 +112,44 @@ router.post('/mark', async (req, res) => {
     if (!validated)
       return res.status(400).json({ error: 'Se requiere QR o geolocalización válida' });
 
+    // Guardar selfie si fue enviado (PNG dataURL)
+    let selfieUrl = null;
+    if (selfie && /^data:image\/(png|jpeg);base64,/.test(selfie)) {
+      try {
+        const path = require('path');
+        const fs = require('fs');
+        const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads'));
+        const SELFIE_DIR = path.join(UPLOAD_DIR, 'selfies');
+        if (!fs.existsSync(SELFIE_DIR)) fs.mkdirSync(SELFIE_DIR, { recursive: true });
+        const isPng = selfie.startsWith('data:image/png');
+        const ext = isPng ? 'png' : 'jpg';
+        const base64 = selfie.replace(/^data:image\/(png|jpeg);base64,/, '');
+        const buf = Buffer.from(base64, 'base64');
+        if (buf.length > 800 * 1024) {
+          return res.status(413).json({ error: 'Selfie demasiado grande (>800 KB)' });
+        }
+        const filename = `selfie_${emp.id}_${Date.now()}.${ext}`;
+        fs.writeFileSync(path.join(SELFIE_DIR, filename), buf);
+        selfieUrl = `/uploads/selfies/${filename}`;
+      } catch (e) {
+        // Si falla el guardado, continuamos sin selfie pero registramos el marcaje
+        selfieUrl = null;
+      }
+    }
+
     const ua = (req.headers['user-agent'] || '').slice(0, 255);
     await sequelize.query(`
-      INSERT INTO attendance_logs (employee_id, timestamp, type, source, lat, lng, user_agent, raw)
-      VALUES (?, NOW(), ?, ?, ?, ?, ?, ?)
+      INSERT INTO attendance_logs (employee_id, timestamp, type, source, selfie_url, lat, lng, user_agent, raw)
+      VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?)
     `, { replacements: [
-      emp.id, type, source,
+      emp.id, type, source, selfieUrl,
       lat != null ? +lat : null,
       lng != null ? +lng : null,
       ua,
-      JSON.stringify({ self_checkin: true, user_id: userId })
+      JSON.stringify({ self_checkin: true, user_id: userId, has_selfie: !!selfieUrl })
     ] });
 
-    res.json({ ok: true, source, type, employee_id: emp.id, code: emp.code });
+    res.json({ ok: true, source, type, employee_id: emp.id, code: emp.code, selfie_url: selfieUrl });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

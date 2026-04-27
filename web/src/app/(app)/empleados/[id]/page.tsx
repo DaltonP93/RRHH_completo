@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { employeesApi, api } from '@/lib/api'
+import EmployeeNotes from '@/components/EmployeeNotes'
 
 // ─── Helpers ──────────────────────────────────────────────────────
 function minsToHM(mins: number | null) {
@@ -276,6 +277,9 @@ export default function EmpleadoDetallePage() {
               })}
             </div>
           </div>
+
+          {/* Notas / observaciones */}
+          {emp?.id && <EmployeeNotes employeeId={emp.id} />}
         </div>
       </div>
     </div>

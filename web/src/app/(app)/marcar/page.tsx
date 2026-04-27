@@ -1,12 +1,15 @@
 'use client'
 import { useState } from 'react'
-import { MapPin, QrCode, LogIn, LogOut, CheckCircle2, AlertCircle } from 'lucide-react'
+import { MapPin, QrCode, LogIn, LogOut, CheckCircle2, AlertCircle, Camera } from 'lucide-react'
 import { api } from '@/lib/api'
+import SelfieCapture from '@/components/SelfieCapture'
 
 export default function MarcarPage() {
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [token, setToken] = useState('')
+  const [selfie, setSelfie] = useState<string | null>(null)
+  const [useSelfie, setUseSelfie] = useState(false)
 
   async function getGeo(): Promise<{ lat: number; lng: number } | null> {
     return new Promise(resolve => {
@@ -33,9 +36,11 @@ export default function MarcarPage() {
         const geo = await getGeo()
         if (geo) { body.lat = geo.lat; body.lng = geo.lng }
       }
+      if (selfie) body.selfie = selfie
       const res = await api.post('/api/self-checkin/mark', body)
-      setMsg({ type: 'ok', text: `Marcación registrada (${res.data.source} · ${type === 'in' ? 'entrada' : 'salida'})` })
+      setMsg({ type: 'ok', text: `Marcación registrada (${res.data.source} · ${type === 'in' ? 'entrada' : 'salida'})${selfie ? ' con selfie' : ''}` })
       setToken('')
+      setSelfie(null)
     } catch (e: any) {
       setMsg({ type: 'err', text: e?.response?.data?.error || 'Error al marcar' })
     } finally { setLoading(false) }
@@ -74,6 +79,20 @@ export default function MarcarPage() {
             <LogOut size={18} /> Salida
           </button>
         </div>
+      </div>
+
+      {/* Selfie de verificación (opcional) */}
+      <div className="bg-white rounded-2xl shadow border border-slate-100 p-6">
+        <label className="flex items-center gap-2 cursor-pointer mb-3">
+          <input type="checkbox" checked={useSelfie} onChange={e => { setUseSelfie(e.target.checked); if (!e.target.checked) setSelfie(null) }}
+            className="accent-blue-600 w-4 h-4" />
+          <Camera size={18} className="text-blue-600" />
+          <span className="font-semibold text-slate-900">Adjuntar selfie de verificación</span>
+        </label>
+        <p className="text-xs text-slate-500 mb-3">
+          Opcional. La foto queda asociada al marcaje para validación visual posterior.
+        </p>
+        {useSelfie && <SelfieCapture onCapture={setSelfie} />}
       </div>
 
       {/* Modo QR */}

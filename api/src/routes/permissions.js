@@ -129,16 +129,28 @@ router.post('/', async (req, res) => {
       department_id, permission_type: type,
     });
 
+    // Calcular sla_due_at sumando sla_hours de la regla (default 48h)
+    let slaHours = 48;
+    if (needs.applied_rule_id) {
+      const [[rule]] = await sequelize.query(
+        'SELECT sla_hours FROM permission_approval_rules WHERE id = ?',
+        { replacements: [needs.applied_rule_id] }
+      );
+      if (rule?.sla_hours) slaHours = rule.sla_hours;
+    }
+
     const [r] = await sequelize.query(
       `INSERT INTO permissions
          (employee_id, type, date_from, date_to, reason,
           approval_state, applied_rule_id,
-          needs_level1, needs_level2, needs_final)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+          needs_level1, needs_level2, needs_final,
+          sla_due_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR))`,
       { replacements: [
           employee_id, type, date_from, date_to, reason || null,
           needs.applied_rule_id,
           needs.needs_level1, needs.needs_level2, needs.needs_final,
+          slaHours,
       ]}
     );
 

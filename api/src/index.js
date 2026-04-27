@@ -46,6 +46,8 @@ const milestoneRoutes       = require('./routes/milestones');
 const vacationsRoutes       = require('./routes/vacations');
 const reportsBuilderRoutes  = require('./routes/reportsBuilder');
 const kpiGoalsRoutes        = require('./routes/kpiGoals');
+const employeeNotesRoutes   = require('./routes/employeeNotes');
+const approvalsSlaRoutes    = require('./routes/approvalsSla');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -138,6 +140,8 @@ app.use('/api/milestones',     milestoneRoutes);
 app.use('/api/vacations',      vacationsRoutes);
 app.use('/api/reports-builder', reportsBuilderRoutes);
 app.use('/api/kpi-goals',      kpiGoalsRoutes);
+app.use('/api/employee-notes', employeeNotesRoutes);
+app.use('/api/approvals-sla',  approvalsSlaRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
