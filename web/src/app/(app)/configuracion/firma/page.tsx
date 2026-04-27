@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PenLine, Upload, Stamp, Save, Trash2, Pencil, Image as ImageIcon } from 'lucide-react'
 import { api, apiUrl } from '@/lib/api'
 import SignaturePad, { type SignaturePadHandle } from '@/components/SignaturePad'
+import BackButton from '@/components/BackButton'
 
 export default function FirmaDigitalPage() {
   const qc = useQueryClient()
@@ -98,6 +99,7 @@ export default function FirmaDigitalPage() {
 
   return (
     <div className="p-6 max-w-3xl space-y-6">
+      <BackButton href="/configuracion" label="Configuración" />
       <div className="flex items-center gap-3">
         <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
           <PenLine className="text-white" size={22} />

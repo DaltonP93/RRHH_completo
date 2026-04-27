@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Target, Save, AlertTriangle, CheckCircle, TrendingUp, TrendingDown } from 'lucide-react'
 import { api } from '@/lib/api'
+import BackButton from '@/components/BackButton'
 
 const METRIC_LABELS: Record<string, string> = {
   attendance_rate: 'Tasa de presentismo',
@@ -56,6 +57,7 @@ export default function MetasPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
+      <BackButton href="/configuracion" label="Configuración" />
       <div className="flex items-center gap-3">
         <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
           <Target className="text-white" size={22} />

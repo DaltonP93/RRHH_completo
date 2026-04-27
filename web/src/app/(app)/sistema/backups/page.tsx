@@ -2,9 +2,10 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { Archive, RefreshCw, Download, Trash2, Plus, AlertTriangle, HardDrive } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, downloadUrl } from '@/lib/api'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
+import BackButton from '@/components/BackButton'
 
 function bytesToHuman(b: number) {
   if (b < 1024) return `${b} B`
@@ -61,6 +62,7 @@ export default function BackupsPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <BackButton href="/sistema" label="Sistema" />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl bg-rose-500 flex items-center justify-center">
@@ -151,7 +153,7 @@ export default function BackupsPage() {
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-slate-600">{bytesToHuman(b.size)}</td>
                   <td className="px-4 py-3 text-right">
-                    <a href={`/api/backups/${encodeURIComponent(b.filename)}`} download
+                    <a href={downloadUrl(`/api/backups/${encodeURIComponent(b.filename)}`)} download
                       className="inline-flex items-center gap-1 text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors">
                       <Download size={13} /> Descargar
                     </a>

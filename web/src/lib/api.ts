@@ -24,6 +24,23 @@ export function apiUrl(path: string = ''): string {
   return `${API_URL}${p}`
 }
 
+// Helper para descargas via window.open() o <a href>.
+// Como window.open no permite agregar headers, anexa el JWT como ?access_token=.
+// Combina con query params adicionales si se pasan.
+export function downloadUrl(path: string, params?: Record<string, string | number | undefined>): string {
+  const base = apiUrl(path)
+  const sp = new URLSearchParams()
+  if (params) for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '' && v !== null) sp.set(k, String(v))
+  }
+  if (typeof window !== 'undefined') {
+    const t = localStorage.getItem('access_token')
+    if (t) sp.set('access_token', t)
+  }
+  const qs = sp.toString()
+  return qs ? `${base}${base.includes('?') ? '&' : '?'}${qs}` : base
+}
+
 export const api = axios.create({ baseURL: API_URL })
 export const analyticsApi = axios.create({ baseURL: ANALYTICS_URL })
 

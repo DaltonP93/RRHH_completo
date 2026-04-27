@@ -2,14 +2,26 @@ const jwt = require('jsonwebtoken');
 const { sequelize } = require('../config/database');
 const { defaultsForRole } = require('../services/permissionMatrix');
 
-// Verificar token JWT
+// Verificar token JWT.
+// Acepta el token desde:
+//   1) Header: Authorization: Bearer <token>     (caso normal API/axios)
+//   2) Query : ?access_token=<token>             (descargas via window.open: PDFs, exports)
+//
+// La opción 2 es necesaria porque <a href> y window.open() no permiten
+// agregar headers personalizados. Se restringe implícitamente a GET, ya que
+// solo descargas usan ese flujo.
 function authenticate(req, res, next) {
+  let token = null;
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token requerido' });
+  if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.method === 'GET' && req.query.access_token) {
+    token = String(req.query.access_token);
   }
 
-  const token = authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ error: 'Token requerido' });
+  }
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
     next();

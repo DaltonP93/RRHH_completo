@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Plug, Plus, Play, Trash2, Edit3, CheckCircle2, AlertCircle, Clock, X, Zap } from 'lucide-react'
+import BackButton from '@/components/BackButton'
 
 type HrSource = {
   id: number
@@ -73,6 +74,7 @@ export default function IntegracionesHrPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
+      <BackButton href="/configuracion" label="Configuración" />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { BarChart2, RefreshCw, Plus, Trash2, Mail, Clock, Download, CheckCircle, XCircle, Calendar } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, downloadUrl } from '@/lib/api'
 import { useI18n } from '@/i18n/I18nProvider'
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -134,11 +134,11 @@ function TabMarcadas() {
               </button>
               <button
                 onClick={() => {
-                  const q = new URLSearchParams({ from, to,
+                  window.open(downloadUrl('/api/reports/marcadas/pdf', {
+                    from, to,
                     ...(empId  ? { employeeId: empId }  : {}),
                     ...(deptId ? { deptId }             : {}),
-                  })
-                  window.open(`/api/reports/marcadas/pdf?${q.toString()}`, '_blank')
+                  }), '_blank')
                 }}
                 className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
                 <Download size={14} /> PDF para imprimir
@@ -246,11 +246,10 @@ function TabMensual() {
   const currentMonth = now.getMonth() + 1
 
   function openMonthly(month: number, format: 'pdf' | 'xlsx') {
-    const q = new URLSearchParams({
-      year: String(year), month: String(month), format,
+    window.open(downloadUrl('/api/reports/monthly/export', {
+      year, month, format,
       ...(deptId ? { dept: deptId } : {}),
-    })
-    window.open(`/api/reports/monthly/export?${q.toString()}`, '_blank')
+    }), '_blank')
   }
 
   return (

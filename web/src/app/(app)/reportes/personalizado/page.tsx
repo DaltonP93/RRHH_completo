@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { Wrench, RefreshCw, Download, FileSpreadsheet, Layers, Filter, Sliders } from 'lucide-react'
 import { api } from '@/lib/api'
+import BackButton from '@/components/BackButton'
 
 const SOURCES_LABELS: Record<string, string> = {
   attendance:    'Marcadas (attendance_logs)',
@@ -87,6 +88,7 @@ export default function ReportePersonalizadoPage() {
 
   return (
     <div className="p-6 space-y-5">
+      <BackButton href="/reportes" label="Reportes" />
       <div className="flex items-center gap-3">
         <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center">
           <Wrench className="text-white" size={22} />

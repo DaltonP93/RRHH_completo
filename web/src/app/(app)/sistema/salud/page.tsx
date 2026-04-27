@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Activity, CheckCircle2, XCircle, RefreshCw, Server, Database, Network, Cpu } from 'lucide-react'
 import { api } from '@/lib/api'
+import BackButton from '@/components/BackButton'
 
 interface Check { ok: boolean; latency_ms?: number; error?: string; status?: number }
 interface Detailed {
@@ -50,6 +51,7 @@ export default function HealthPage() {
 
   return (
     <div className="p-6 max-w-6xl space-y-5">
+      <BackButton href="/sistema" label="Sistema" />
       <div className="flex items-center gap-3">
         <div className="w-11 h-11 rounded-xl bg-emerald-600 flex items-center justify-center">
           <Activity className="text-white" size={22} />
