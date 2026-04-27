@@ -1,8 +1,10 @@
 'use client'
-import { useState } from 'react'
-import { MapPin, QrCode, LogIn, LogOut, CheckCircle2, AlertCircle, Camera } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { MapPin, QrCode, LogIn, LogOut, CheckCircle2, AlertCircle, Camera, Scan, Wifi, WifiOff, RefreshCw } from 'lucide-react'
 import { api } from '@/lib/api'
 import SelfieCapture from '@/components/SelfieCapture'
+import QrScanner from '@/components/QrScanner'
+import { enqueue, listPending, flush, setupAutoRetry, type PendingPunch } from '@/lib/offlineQueue'
 
 export default function MarcarPage() {
   const [loading, setLoading] = useState(false)
@@ -10,6 +12,35 @@ export default function MarcarPage() {
   const [token, setToken] = useState('')
   const [selfie, setSelfie] = useState<string | null>(null)
   const [useSelfie, setUseSelfie] = useState(false)
+  const [showScanner, setShowScanner] = useState(false)
+  const [online, setOnline] = useState(true)
+  const [pending, setPending] = useState<PendingPunch[]>([])
+
+  useEffect(() => {
+    setOnline(navigator.onLine)
+    setPending(listPending())
+    setupAutoRetry()
+    const onOn  = () => setOnline(true)
+    const onOff = () => setOnline(false)
+    const onFlushed = () => setPending(listPending())
+    window.addEventListener('online',  onOn)
+    window.addEventListener('offline', onOff)
+    window.addEventListener('sishoras:queue-flushed', onFlushed as any)
+    return () => {
+      window.removeEventListener('online',  onOn)
+      window.removeEventListener('offline', onOff)
+      window.removeEventListener('sishoras:queue-flushed', onFlushed as any)
+    }
+  }, [])
+
+  async function flushQueue() {
+    const r = await flush()
+    setPending(listPending())
+    setMsg({
+      type: r.failed === 0 ? 'ok' : 'err',
+      text: `Cola sincronizada: ${r.sent} enviado(s), ${r.failed} fallido(s)`,
+    })
+  }
 
   async function getGeo(): Promise<{ lat: number; lng: number } | null> {
     return new Promise(resolve => {
@@ -37,8 +68,19 @@ export default function MarcarPage() {
         if (geo) { body.lat = geo.lat; body.lng = geo.lng }
       }
       if (selfie) body.selfie = selfie
-      const res = await api.post('/api/self-checkin/mark', body)
-      setMsg({ type: 'ok', text: `Marcación registrada (${res.data.source} · ${type === 'in' ? 'entrada' : 'salida'})${selfie ? ' con selfie' : ''}` })
+      try {
+        const res = await api.post('/api/self-checkin/mark', body)
+        setMsg({ type: 'ok', text: `Marcación registrada (${res.data.source} · ${type === 'in' ? 'entrada' : 'salida'})${selfie ? ' con selfie' : ''}` })
+      } catch (netErr: any) {
+        // Si parece error de red (sin response), guardar en cola offline
+        if (!netErr?.response) {
+          enqueue({ type, token: body.token, lat: body.lat, lng: body.lng, selfie })
+          setPending(listPending())
+          setMsg({ type: 'ok', text: 'Sin conexión — marcaje guardado y se enviará automáticamente al volver online' })
+        } else {
+          throw netErr
+        }
+      }
       setToken('')
       setSelfie(null)
     } catch (e: any) {
@@ -48,9 +90,28 @@ export default function MarcarPage() {
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Mi marcación</h1>
-        <p className="text-sm text-slate-500">Registra tu entrada o salida usando GPS o código QR de tu sede.</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Mi marcación</h1>
+          <p className="text-sm text-slate-500">Registra tu entrada o salida usando GPS o código QR de tu sede.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {online ? (
+            <span className="flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
+              <Wifi size={12} /> Conectado
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-xs text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-full">
+              <WifiOff size={12} /> Sin conexión
+            </span>
+          )}
+          {pending.length > 0 && (
+            <button onClick={flushQueue}
+              className="flex items-center gap-1 text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-full">
+              <RefreshCw size={12} /> {pending.length} pendiente{pending.length !== 1 ? 's' : ''}
+            </button>
+          )}
+        </div>
       </div>
 
       {msg && (
@@ -102,7 +163,22 @@ export default function MarcarPage() {
           <h2 className="font-semibold text-slate-900">Por código QR</h2>
         </div>
         <p className="text-xs text-slate-500 mb-3">Escanea el QR visible en tu sede (se renueva cada 5 min).</p>
-        <input value={token} onChange={e => setToken(e.target.value)} placeholder="Pega el token del QR aquí"
+
+        {showScanner ? (
+          <div className="mb-3">
+            <QrScanner
+              onScan={(text) => { setToken(text); setShowScanner(false); setMsg({ type: 'ok', text: 'QR detectado, presioná Entrada o Salida' }) }}
+              onClose={() => setShowScanner(false)}
+            />
+          </div>
+        ) : (
+          <button onClick={() => setShowScanner(true)}
+            className="w-full mb-3 flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors">
+            <Scan size={16} /> Escanear con la cámara
+          </button>
+        )}
+
+        <input value={token} onChange={e => setToken(e.target.value)} placeholder="O pegá el token del QR aquí"
           className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm mb-3" />
         <div className="flex gap-2">
           <button onClick={() => mark('in', 'qr')} disabled={loading}

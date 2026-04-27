@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { Server, HardDrive, Database, Calculator, AlertTriangle, FileCog, Archive, Activity } from 'lucide-react'
+import { Server, HardDrive, Database, Calculator, AlertTriangle, FileCog, Archive, Activity, Shield } from 'lucide-react'
 
 const cards = [
   {
@@ -44,6 +44,13 @@ const cards = [
     title: 'Estado del sistema',
     desc: 'Salud en tiempo real de MySQL, Redis, Bridge, att2000. Auto-refresco cada 15s.',
     color: 'bg-cyan-500',
+  },
+  {
+    href: '/sistema/gdpr',
+    icon: Shield,
+    title: 'Cumplimiento GDPR',
+    desc: 'Exportar datos personales de un empleado o anonimizar (right to be forgotten).',
+    color: 'bg-slate-700',
   },
 ]
 
