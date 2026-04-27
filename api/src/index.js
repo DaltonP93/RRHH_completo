@@ -49,6 +49,8 @@ const kpiGoalsRoutes        = require('./routes/kpiGoals');
 const employeeNotesRoutes   = require('./routes/employeeNotes');
 const approvalsSlaRoutes    = require('./routes/approvalsSla');
 const gdprRoutes            = require('./routes/gdpr');
+const overtimeBankRoutes    = require('./routes/overtimeBank');
+const announcementsRoutes   = require('./routes/announcements');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -144,6 +146,8 @@ app.use('/api/kpi-goals',      kpiGoalsRoutes);
 app.use('/api/employee-notes', employeeNotesRoutes);
 app.use('/api/approvals-sla',  approvalsSlaRoutes);
 app.use('/api/gdpr',           gdprRoutes);
+app.use('/api/overtime-bank',  overtimeBankRoutes);
+app.use('/api/announcements',  announcementsRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

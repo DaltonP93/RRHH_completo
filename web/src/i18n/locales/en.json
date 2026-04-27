@@ -55,6 +55,8 @@
     "calendar": "Calendar",
     "vacations": "Vacations",
     "custom_reports": "Custom reports",
+    "overtime_bank": "Overtime bank",
+    "announcements": "Announcements",
     "departments": "Departments",
     "users": "Users",
     "audit": "Audit log",
