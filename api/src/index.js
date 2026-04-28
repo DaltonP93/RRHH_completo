@@ -51,6 +51,8 @@ const approvalsSlaRoutes    = require('./routes/approvalsSla');
 const gdprRoutes            = require('./routes/gdpr');
 const overtimeBankRoutes    = require('./routes/overtimeBank');
 const announcementsRoutes   = require('./routes/announcements');
+const coursesRoutes         = require('./routes/courses');
+const surveysRoutes         = require('./routes/surveys');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -148,6 +150,8 @@ app.use('/api/approvals-sla',  approvalsSlaRoutes);
 app.use('/api/gdpr',           gdprRoutes);
 app.use('/api/overtime-bank',  overtimeBankRoutes);
 app.use('/api/announcements',  announcementsRoutes);
+app.use('/api/courses',        coursesRoutes);
+app.use('/api/surveys',        surveysRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
