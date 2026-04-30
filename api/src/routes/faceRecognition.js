@@ -14,7 +14,7 @@
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const { sequelize }               = require('../config/database');
-const { logAudit }                = require('../services/auditLogger');
+const audit                       = require('../services/audit');
 
 router.use(authenticate);
 
@@ -69,9 +69,7 @@ router.put('/:employeeId/enroll',
        WHERE id = ?`,
       { replacements: [JSON.stringify(face_descriptor), face_photo_url || null, req.user.id, req.params.employeeId] }
     );
-    await logAudit(req, 'face_enroll', 'employee', req.params.employeeId,
-      { name: emp[0].full_name }
-    );
+    await audit.log({ req, user: req.user, action: 'face_enroll', entity: 'employee', entity_id: req.params.employeeId, details: { name: emp[0].full_name } });
     res.json({ ok: true, message: 'Descriptor facial guardado' });
   }
 );
