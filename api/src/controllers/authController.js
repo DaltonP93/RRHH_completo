@@ -17,8 +17,8 @@ function generateTokens(user) {
     employee_id: user.employee_id ?? null,
   };
 
-  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
-  const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
+  const accessToken = jwt.sign(payload, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '1h' });
+  const refreshToken = jwt.sign(payload, process.env.JWT_REFRESH_SECRET, { algorithm: 'HS256', expiresIn: '7d' });
 
   return { accessToken, refreshToken };
 }

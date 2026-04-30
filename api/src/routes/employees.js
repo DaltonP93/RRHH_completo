@@ -170,16 +170,21 @@ router.patch('/bulk', authorize('admin','hr'), requirePermission('empleados', 'u
 });
 
 // PATCH /api/employees/:id/quick — edición inline rápida (nombre, apellido, etc.)
+// Map explícito: la clave recibida del cliente nunca toca el SQL directamente.
+const QUICK_EDIT_COLS = {
+  first_name: 'first_name', last_name: 'last_name',
+  employee_number: 'employee_number', email: 'email',
+  phone: 'phone', position: 'position',
+  birth_date: 'birth_date', hire_date: 'hire_date',
+};
 router.patch('/:id/quick', authorize('admin','hr'), requirePermission('empleados', 'update'), async (req, res) => {
   const id = parseInt(req.params.id);
   const { field, value } = req.body || {};
-  const allowed = ['first_name', 'last_name', 'employee_number', 'email', 'phone', 'position', 'birth_date', 'hire_date'];
-  if (!allowed.includes(field)) {
-    return res.status(400).json({ error: 'Campo no permitido para edición rápida' });
-  }
+  const col = QUICK_EDIT_COLS[field];
+  if (!col) return res.status(400).json({ error: 'Campo no permitido para edición rápida' });
   try {
     await sequelize.query(
-      `UPDATE employees SET ${field} = ? WHERE id = ?`,
+      `UPDATE employees SET \`${col}\` = ? WHERE id = ?`,
       { replacements: [value === '' ? null : value, id] }
     );
     res.json({ ok: true });

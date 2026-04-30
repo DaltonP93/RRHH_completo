@@ -42,9 +42,11 @@ router.post('/purge', async (_req, res) => {
 
 // GET /api/backups/:filename — descargar archivo
 router.get('/:filename', async (req, res) => {
-  const f = req.params.filename;
-  if (!/^asistencia_.*\.sql\.gz$/.test(f)) return res.status(400).json({ error: 'Nombre inválido' });
-  const fp = path.join(BACKUP_DIR, f);
+  const f = path.basename(req.params.filename); // evita path traversal
+  if (!/^asistencia_[\w\-]+\.sql\.gz$/.test(f)) return res.status(400).json({ error: 'Nombre inválido' });
+  const fp = path.resolve(BACKUP_DIR, f);
+  // Double-check que el archivo resuelto sigue dentro de BACKUP_DIR
+  if (!fp.startsWith(path.resolve(BACKUP_DIR) + path.sep)) return res.status(400).json({ error: 'Ruta inválida' });
   if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Backup no encontrado' });
   res.setHeader('Content-Type', 'application/gzip');
   res.setHeader('Content-Disposition', `attachment; filename="${f}"`);

@@ -221,11 +221,40 @@ router.post('/signature-canvas',
   }
 );
 
+// Magic bytes → tipo real de imagen (independiente del MIME del header)
+const IMAGE_SIGNATURES = [
+  { mime: 'image/png',  bytes: [0x89, 0x50, 0x4E, 0x47] },
+  { mime: 'image/jpeg', bytes: [0xFF, 0xD8, 0xFF] },
+  { mime: 'image/gif',  bytes: [0x47, 0x49, 0x46] },
+  { mime: 'image/webp', bytes: [0x52, 0x49, 0x46, 0x46] },
+  { mime: 'image/x-icon', bytes: [0x00, 0x00, 0x01, 0x00] },
+];
+function checkMagicBytes(filePath) {
+  const buf = Buffer.alloc(8);
+  const fd = fs.openSync(filePath, 'r');
+  fs.readSync(fd, buf, 0, 8, 0);
+  fs.closeSync(fd);
+  // SVG — texto, verificar que empiece con < sin ejecutables
+  const head = buf.toString('utf8', 0, 5);
+  if (head.startsWith('<?xml') || head.startsWith('<svg') || head.startsWith('<!DO')) return true;
+  return IMAGE_SIGNATURES.some(sig => sig.bytes.every((b, i) => buf[i] === b));
+}
+
 // POST /api/settings/upload?kind=logo|favicon|login_bg
 router.post('/upload', authenticate, authorize('admin', 'gth'), requirePermission('configuracion', 'update'), (req, res, next) => {
   upload.single('file')(req, res, err => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'Archivo requerido (campo "file")' });
+    // Validar magic bytes del archivo guardado (independiente del MIME declarado)
+    try {
+      if (!checkMagicBytes(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: 'El contenido del archivo no corresponde a una imagen válida' });
+      }
+    } catch {
+      try { fs.unlinkSync(req.file.path); } catch {}
+      return res.status(400).json({ error: 'No se pudo verificar el archivo' });
+    }
 
     const publicUrl = `/uploads/${req.file.filename}`;
     const kind = (req.query.kind || '').toString();
