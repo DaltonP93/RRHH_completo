@@ -5,7 +5,7 @@ const router = require('express').Router();
 const path = require('path');
 const fs = require('fs');
 const { authenticate, authorize } = require('../middleware/auth');
-const { BACKUP_DIR, runBackup, listBackups, purgeOldBackups } = require('../services/backups');
+const { BACKUP_DIR, runBackupWithUpload, listBackups, purgeOldBackups } = require('../services/backups');
 
 router.use(authenticate);
 router.use(authorize('admin', 'super_admin'));
@@ -20,10 +20,10 @@ router.get('/', async (_req, res) => {
   }
 });
 
-// POST /api/backups — generar backup manual
+// POST /api/backups — generar backup manual (+ upload off-site si está configurado)
 router.post('/', async (_req, res) => {
   try {
-    const result = await runBackup();
+    const result = await runBackupWithUpload();
     res.json({ ok: true, ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -50,6 +50,73 @@ router.get('/:filename', async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${f}"`);
   fs.createReadStream(fp).pipe(res);
 });
+
+// ── Backup off-site config ─────────────────────────────────────
+const OFFSITE_KEYS = [
+  'backup_upload_provider',
+  'backup_s3_endpoint','backup_s3_bucket','backup_s3_access_key',
+  'backup_s3_secret_key','backup_s3_region','backup_s3_path_prefix',
+  'backup_sftp_host','backup_sftp_port','backup_sftp_user',
+  'backup_sftp_password','backup_sftp_key','backup_sftp_remote_dir',
+];
+
+router.get('/offsite-config', async (_req, res) => {
+  try {
+    const { getUploadConfig } = require('../services/backupUpload');
+    const cfg = await getUploadConfig();
+    // Mask secrets
+    if (cfg.s3?.secretKey)   cfg.s3.secretKey   = cfg.s3.secretKey   ? '***' : '';
+    if (cfg.sftp?.password)  cfg.sftp.password  = cfg.sftp.password  ? '***' : '';
+    res.json({ ok: true, ...cfg });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/offsite-config', async (req, res) => {
+  const { sequelize } = require('../config/database');
+  const body = req.body || {};
+  const map = {
+    backup_upload_provider:   body.provider,
+    backup_s3_endpoint:       body.s3_endpoint,
+    backup_s3_bucket:         body.s3_bucket,
+    backup_s3_access_key:     body.s3_access_key,
+    backup_s3_region:         body.s3_region,
+    backup_s3_path_prefix:    body.s3_prefix,
+    backup_sftp_host:         body.sftp_host,
+    backup_sftp_port:         body.sftp_port,
+    backup_sftp_user:         body.sftp_user,
+    backup_sftp_remote_dir:   body.sftp_remote_dir,
+  };
+  // Only update secrets if not masked
+  if (body.s3_secret_key  && body.s3_secret_key  !== '***') map.backup_s3_secret_key  = body.s3_secret_key;
+  if (body.sftp_password  && body.sftp_password  !== '***') map.backup_sftp_password   = body.sftp_password;
+  if (body.sftp_key)                                          map.backup_sftp_key        = body.sftp_key;
+
+  for (const [k, v] of Object.entries(map)) {
+    if (v !== undefined && v !== null) {
+      await sequelize.query(
+        `INSERT INTO system_settings (key_name, value) VALUES (?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)`,
+        { replacements: [k, String(v)] }
+      );
+    }
+  }
+  res.json({ ok: true });
+});
+
+// POST /api/backups/offsite-test — test upload con el último backup
+router.post('/offsite-test', async (_req, res) => {
+  try {
+    const files = await listBackups();
+    if (!files.length) return res.status(400).json({ error: 'No hay backups para probar' });
+    const { uploadBackup } = require('../services/backupUpload');
+    const f = files[0];
+    const fp = require('path').join(BACKUP_DIR, f.filename);
+    const result = await uploadBackup(fp, f.filename);
+    res.json({ ok: true, result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/backups — generar backup manual (con upload off-site)
+// (override para usar runBackupWithUpload)
 
 // DELETE /api/backups/:filename
 router.delete('/:filename', async (req, res) => {

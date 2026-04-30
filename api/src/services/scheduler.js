@@ -306,6 +306,19 @@ function startDailyAlertsCron() {
       _lateJob = cron.schedule(lateExpr, async () => {
         const r = await sendDailyLateAlerts();
         logger.info(`📧 Alertas atrasos: ${JSON.stringify(r)}`);
+        // Webhook Slack/Teams
+        try {
+          const wh = require('./notificationWebhooks');
+          const [rows] = await require('../config/database').sequelize.query(
+            `SELECT ds.late_minutes, e.full_name, d.name AS department
+             FROM daily_summary ds
+             JOIN employees e ON e.id = ds.employee_id
+             LEFT JOIN departments d ON d.id = e.department_id
+             WHERE ds.date = CURDATE() AND ds.status = 'late' AND ds.late_minutes > 0
+             ORDER BY ds.late_minutes DESC LIMIT 20`
+          );
+          if (rows.length) await wh.notifyLateArrivals(rows).catch(() => {});
+        } catch {}
       }, { timezone: tz });
       logger.info(`📅 Cron alertas atrasos activo: ${lateExpr} (${tz})`);
     }
@@ -315,6 +328,19 @@ function startDailyAlertsCron() {
       _absentJob = cron.schedule(absentExpr, async () => {
         const r = await sendDailyAbsenceAlerts();
         logger.info(`📧 Alertas ausencias: ${JSON.stringify(r)}`);
+        // Webhook Slack/Teams
+        try {
+          const wh = require('./notificationWebhooks');
+          const [rows] = await require('../config/database').sequelize.query(
+            `SELECT e.full_name, d.name AS department
+             FROM daily_summary ds
+             JOIN employees e ON e.id = ds.employee_id
+             LEFT JOIN departments d ON d.id = e.department_id
+             WHERE ds.date = CURDATE() AND ds.status = 'absent'
+             ORDER BY e.full_name LIMIT 20`
+          );
+          if (rows.length) await wh.notifyAbsences(rows).catch(() => {});
+        } catch {}
       }, { timezone: tz });
       logger.info(`📅 Cron alertas ausencias activo: ${absentExpr} (${tz})`);
     }

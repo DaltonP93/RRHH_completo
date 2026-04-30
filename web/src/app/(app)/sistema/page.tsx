@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { Server, HardDrive, Database, Calculator, AlertTriangle, FileCog, Archive, Activity, Shield, Code2 } from 'lucide-react'
+import { Server, HardDrive, Database, Calculator, AlertTriangle, FileCog, Archive, Activity, Shield, Code2, Webhook, Radar } from 'lucide-react'
 
 const cards = [
   {
@@ -58,6 +58,20 @@ const cards = [
     title: 'Embed (dashboards públicos)',
     desc: 'Tokens read-only para insertar widgets en intranets, Oracle APEX o portales externos.',
     color: 'bg-violet-500',
+  },
+  {
+    href: '/configuracion/webhooks',
+    icon: Webhook,
+    title: 'Webhooks Slack / Teams',
+    desc: 'Notificaciones automáticas de ausencias, atrasos y alertas de relojes en Slack o Microsoft Teams.',
+    color: 'bg-[#4A154B]',
+  },
+  {
+    href: '/configuracion/discovery',
+    icon: Radar,
+    title: 'Descubrimiento de Relojes',
+    desc: 'Escanea la LAN en busca de relojes ZKTeco respondiendo en el puerto 4370.',
+    color: 'bg-blue-600',
   },
 ]
 

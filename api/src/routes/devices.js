@@ -570,4 +570,48 @@ router.post('/:id/enable', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// ─── Bridge Discovery proxy ────────────────────────────────────
+// Reenvía al servicio bridge para no exponer su puerto directamente.
+const http = require('http');
+
+function bridgeRequest(method, path, body, res) {
+  const bridgeUrl = new URL(process.env.BRIDGE_URL || 'http://localhost:8081');
+  const opts = {
+    hostname: bridgeUrl.hostname,
+    port:     parseInt(bridgeUrl.port || '8081'),
+    path,
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 45000,
+  };
+  const req2 = http.request(opts, r2 => {
+    let data = '';
+    r2.on('data', d => data += d);
+    r2.on('end', () => {
+      try { res.status(r2.statusCode).json(JSON.parse(data)); }
+      catch { res.status(r2.statusCode).send(data); }
+    });
+  });
+  req2.on('error', err => res.status(502).json({ error: 'Bridge no disponible: ' + err.message }));
+  req2.on('timeout', () => { req2.destroy(); res.status(504).json({ error: 'Bridge timeout' }); });
+  if (body) req2.write(JSON.stringify(body));
+  req2.end();
+}
+
+// GET /api/devices/bridge/discovery?subnet=X.X.X&port=4370
+router.get('/bridge/discovery',
+  authorize('admin', 'super_admin'),
+  (req, res) => {
+    const { subnet, port = '4370' } = req.query;
+    if (!subnet) return res.status(400).json({ error: 'subnet requerido' });
+    bridgeRequest('GET', `/discovery?subnet=${encodeURIComponent(subnet)}&port=${port}`, null, res);
+  }
+);
+
+// POST /api/devices/bridge/discovery/probe
+router.post('/bridge/discovery/probe',
+  authorize('admin', 'super_admin'),
+  (req, res) => bridgeRequest('POST', '/discovery/probe', req.body, res)
+);
+
 module.exports = router;

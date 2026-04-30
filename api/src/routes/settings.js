@@ -259,4 +259,54 @@ router.post('/upload', authenticate, authorize('admin', 'gth'), requirePermissio
   });
 });
 
+// ─── Webhooks Slack / Teams ──────────────────────────────────────
+const WEBHOOK_KEYS = ['slack_webhook_url', 'teams_webhook_url', 'webhook_notify_absences', 'webhook_notify_late', 'webhook_notify_device_down', 'webhook_notify_backup'];
+
+router.get('/webhooks',
+  authorize('admin', 'super_admin'),
+  async (_req, res) => {
+    const [rows] = await sequelize.query(
+      `SELECT key_name AS k, value AS v FROM system_settings WHERE key_name IN (${WEBHOOK_KEYS.map(() => '?').join(',')})`,
+      { replacements: WEBHOOK_KEYS }
+    );
+    const map = {};
+    for (const r of rows) map[r.k] = r.v;
+    res.json(map);
+  }
+);
+
+router.put('/webhooks',
+  authorize('admin', 'super_admin'),
+  async (req, res) => {
+    const body = req.body || {};
+    for (const k of WEBHOOK_KEYS) {
+      if (k in body) {
+        await sequelize.query(
+          `INSERT INTO system_settings (key_name, value) VALUES (?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)`,
+          { replacements: [k, body[k] || ''] }
+        );
+      }
+    }
+    res.json({ ok: true });
+  }
+);
+
+// Test endpoint — envía mensaje de prueba a los canales configurados
+router.post('/webhooks/test',
+  authorize('admin', 'super_admin'),
+  async (req, res) => {
+    try {
+      const { notify } = require('../services/notificationWebhooks');
+      await notify({
+        title: '🧪 Test SisHoras',
+        text: `Notificación de prueba desde *SisHoras* — ${new Date().toLocaleString('es-PY')}`,
+        color: '#2563eb',
+      });
+      res.json({ ok: true, message: 'Mensaje enviado a los canales configurados' });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
 module.exports = router;

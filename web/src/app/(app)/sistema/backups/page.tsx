@@ -1,11 +1,113 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { Archive, RefreshCw, Download, Trash2, Plus, AlertTriangle, HardDrive } from 'lucide-react'
+import { Archive, RefreshCw, Download, Trash2, Plus, AlertTriangle, HardDrive, Cloud, Save, TestTube } from 'lucide-react'
 import { api, downloadUrl } from '@/lib/api'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import BackButton from '@/components/BackButton'
+
+function OffsiteConfig() {
+  const [cfg, setCfg] = useState<any>({ provider: '', s3_endpoint: '', s3_bucket: '', s3_access_key: '', s3_secret_key: '', s3_region: 'us-east-1', s3_prefix: 'sishoras/', sftp_host: '', sftp_port: '22', sftp_user: '', sftp_password: '', sftp_remote_dir: '/backups/' })
+  const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    api.get('/api/backups/offsite-config').then(r => {
+      const d = r.data
+      setCfg({
+        provider: d.provider || '',
+        s3_endpoint: d.s3?.endpoint || '', s3_bucket: d.s3?.bucket || '',
+        s3_access_key: d.s3?.accessKey || '', s3_secret_key: d.s3?.secretKey || '',
+        s3_region: d.s3?.region || 'us-east-1', s3_prefix: d.s3?.prefix || 'sishoras/',
+        sftp_host: d.sftp?.host || '', sftp_port: d.sftp?.port || '22',
+        sftp_user: d.sftp?.user || '', sftp_password: d.sftp?.password || '',
+        sftp_remote_dir: d.sftp?.remoteDir || '/backups/',
+      })
+    }).catch(() => {})
+  }, [open])
+
+  async function save() {
+    setSaving(true); setMsg('')
+    try { await api.put('/api/backups/offsite-config', cfg); setMsg('✅ Guardado') }
+    catch (e: any) { setMsg('❌ ' + (e?.response?.data?.error || 'Error')) }
+    finally { setSaving(false) }
+  }
+
+  async function testUpload() {
+    setTesting(true); setMsg('')
+    try { const r = await api.post('/api/backups/offsite-test'); setMsg('✅ ' + JSON.stringify(r.data.result)) }
+    catch (e: any) { setMsg('❌ ' + (e?.response?.data?.error || 'Error')) }
+    finally { setTesting(false) }
+  }
+
+  const set = (k: string) => (v: string) => setCfg((p: any) => ({ ...p, [k]: v }))
+  const inp = (k: string, label: string, type = 'text', ph = '') => (
+    <div key={k}>
+      <label className="text-xs text-slate-500 mb-1 block">{label}</label>
+      <input type={type} value={cfg[k]} onChange={e => set(k)(e.target.value)} placeholder={ph}
+        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono" />
+    </div>
+  )
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-2xl transition-colors">
+        <div className="flex items-center gap-2"><Cloud size={16} className="text-blue-500" /> Backup off-site (S3 / MinIO / SFTP)</div>
+        <span className="text-xs text-slate-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="px-5 pb-5 space-y-4 border-t border-slate-100 pt-4">
+          <div>
+            <label className="text-xs text-slate-500 mb-1 block">Proveedor</label>
+            <select value={cfg.provider} onChange={e => set('provider')(e.target.value)}
+              className="border border-slate-200 rounded-xl px-3 py-2 text-sm">
+              <option value="">Deshabilitado</option>
+              <option value="s3">S3 / MinIO</option>
+              <option value="sftp">SFTP</option>
+            </select>
+          </div>
+          {cfg.provider === 's3' && (
+            <div className="grid grid-cols-2 gap-3">
+              {inp('s3_endpoint', 'Endpoint (vacío = AWS)', 'url', 'https://play.min.io')}
+              {inp('s3_bucket', 'Bucket', 'text', 'mis-backups')}
+              {inp('s3_access_key', 'Access Key')}
+              {inp('s3_secret_key', 'Secret Key', 'password')}
+              {inp('s3_region', 'Región', 'text', 'us-east-1')}
+              {inp('s3_prefix', 'Prefijo', 'text', 'sishoras/')}
+            </div>
+          )}
+          {cfg.provider === 'sftp' && (
+            <div className="grid grid-cols-2 gap-3">
+              {inp('sftp_host', 'Host', 'text', 'sftp.miservidor.com')}
+              {inp('sftp_port', 'Puerto', 'number')}
+              {inp('sftp_user', 'Usuario')}
+              {inp('sftp_password', 'Contraseña', 'password')}
+              {inp('sftp_remote_dir', 'Directorio remoto', 'text', '/backups/')}
+            </div>
+          )}
+          {msg && <p className={`text-xs ${msg.startsWith('❌') ? 'text-red-600' : 'text-emerald-600'}`}>{msg}</p>}
+          <div className="flex gap-2">
+            <button onClick={save} disabled={saving}
+              className="flex items-center gap-2 bg-blue-600 text-white rounded-xl px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-60">
+              <Save size={13} /> {saving ? 'Guardando...' : 'Guardar'}
+            </button>
+            {cfg.provider && (
+              <button onClick={testUpload} disabled={testing}
+                className="flex items-center gap-2 border border-slate-200 text-slate-700 rounded-xl px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-60">
+                <TestTube size={13} /> {testing ? 'Probando...' : 'Test upload'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function bytesToHuman(b: number) {
   if (b < 1024) return `${b} B`
@@ -118,6 +220,9 @@ export default function BackupsPage() {
           </p>
         </div>
       </div>
+
+      {/* Off-site config */}
+      <OffsiteConfig />
 
       {/* Lista */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">

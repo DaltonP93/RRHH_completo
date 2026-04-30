@@ -12,6 +12,8 @@ import {
 import Link from 'next/link'
 import { employeesApi, api } from '@/lib/api'
 import EmployeeNotes from '@/components/EmployeeNotes'
+import dynamic from 'next/dynamic'
+const FaceEnroll = dynamic(() => import('@/components/FaceEnroll'), { ssr: false })
 
 // ─── Helpers ──────────────────────────────────────────────────────
 function minsToHM(mins: number | null) {
@@ -277,6 +279,9 @@ export default function EmpleadoDetallePage() {
               })}
             </div>
           </div>
+
+          {/* Reconocimiento facial */}
+          {emp?.id && <FaceEnroll employeeId={emp.id} />}
 
           {/* Notas / observaciones */}
           {emp?.id && <EmployeeNotes employeeId={emp.id} />}

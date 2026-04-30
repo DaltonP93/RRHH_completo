@@ -20,6 +20,7 @@ const winston = require('winston');
 
 const { syncDevice, connectToDevice, getDeviceUsers, diagnoseDevice } = require('./zkManager');
 const { startPushServer, pushState } = require('./pushServer');
+const { discoverSubnet, probeHost }  = require('./discovery');
 
 // ─── Logger ─────────────────────────────────────────────────────
 const logger = winston.createLogger({
@@ -206,6 +207,31 @@ function startBridgeApi(devices) {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ── LAN Discovery ────────────────────────────────────────────────
+  // GET  /discovery?subnet=172.16.20&port=4370  — escanea la subred
+  // POST /discovery/probe   { ip, port? }       — probar una IP puntual
+  app.get('/discovery', async (req, res) => {
+    const subnet = req.query.subnet || process.env.DISCOVERY_SUBNET;
+    const port   = parseInt(req.query.port || '4370', 10);
+    if (!subnet) return res.status(400).json({ error: 'Parámetro subnet requerido (ej: 172.16.20)' });
+    const progress = [];
+    try {
+      const found = await discoverSubnet(subnet, port, (done, total) => {
+        progress.push({ done, total });
+      });
+      res.json({ ok: true, subnet, port, found, scanned: 254, total_found: found.length });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/discovery/probe', async (req, res) => {
+    const { ip, port = 4370 } = req.body || {};
+    if (!ip) return res.status(400).json({ error: 'ip requerido' });
+    const result = await probeHost(ip, port);
+    res.json({ ok: true, reachable: !!result, ...(result || { ip, port }) });
   });
 
   // Estado de los relojes vía PUSH ADMS (últimos heartbeats/marcajes recibidos)

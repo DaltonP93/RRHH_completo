@@ -72,6 +72,20 @@ async function runBackup() {
   });
 }
 
+async function runBackupWithUpload() {
+  const result = await runBackup();
+  // Upload off-site (no bloqueante — falla silenciosa si no hay config)
+  try {
+    const { uploadBackup } = require('./backupUpload');
+    const uploadResult = await uploadBackup(result.path, result.filename);
+    result.upload = uploadResult;
+  } catch (err) {
+    logger.warn('Backup off-site falló (local OK):', err.message);
+    result.upload_error = err.message;
+  }
+  return result;
+}
+
 async function purgeOldBackups() {
   const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
   const files = await promisify(fs.readdir)(BACKUP_DIR);
@@ -115,7 +129,7 @@ function startBackupCron() {
   _job = cron.schedule(expr, async () => {
     try {
       logger.info('🗄️  Iniciando backup automático de BD...');
-      const result = await runBackup();
+      const result = await runBackupWithUpload();
       const purged = await purgeOldBackups();
       logger.info(`✅ Backup OK: ${result.filename} (${(result.size/1024/1024).toFixed(2)} MB). Purgados: ${purged}`);
     } catch (err) {
@@ -128,6 +142,7 @@ function startBackupCron() {
 module.exports = {
   BACKUP_DIR,
   runBackup,
+  runBackupWithUpload,
   purgeOldBackups,
   listBackups,
   startBackupCron,

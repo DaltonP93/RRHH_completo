@@ -51,7 +51,7 @@ export default function AuditoriaPage() {
   const [error, setError] = useState('')
   const [detail, setDetail] = useState<Event | null>(null)
   const [filter, setFilter] = useState({
-    action: '', entity: '', q: '',
+    action: '', entity: '', q: '', fulltext: '',
     from: daysAgoISO(7), to: todayISO(),
   })
 
@@ -82,6 +82,15 @@ export default function AuditoriaPage() {
     } catch (e: any) { setError(e.response?.data?.error || 'Error al exportar') }
   }
 
+  async function exportPdf() {
+    try {
+      const { downloadUrl } = await import('@/lib/api')
+      const params = new URLSearchParams()
+      Object.entries(filter).forEach(([k, v]) => { if (v) params.set(k, v) })
+      window.open(downloadUrl('/api/audit/export.pdf') + '&' + params.toString(), '_blank')
+    } catch (e: any) { setError('Error al generar PDF') }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   return (
@@ -96,10 +105,16 @@ export default function AuditoriaPage() {
             <p className="text-slate-500 text-sm">Registro de eventos del sistema. {total.toLocaleString()} evento(s) en el filtro actual.</p>
           </div>
         </div>
-        <button onClick={exportCsv}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm">
-          <Download size={14} /> Exportar CSV
-        </button>
+        <div className="flex gap-2">
+          <button onClick={exportCsv}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm">
+            <Download size={14} /> CSV
+          </button>
+          <button onClick={exportPdf}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm">
+            <FileText size={14} /> PDF firmado
+          </button>
+        </div>
       </div>
 
       {/* KPIs por acción */}
@@ -143,11 +158,20 @@ export default function AuditoriaPage() {
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-slate-600 block mb-1">Buscar (usuario/detalle)</label>
-          <input value={filter.q} onChange={e => setFilter(f => ({ ...f, q: e.target.value }))}
+          <label className="text-xs font-medium text-slate-600 block mb-1">Buscar (LIKE)</label>
+          <input value={filter.q} onChange={e => setFilter(f => ({ ...f, q: e.target.value, fulltext: '' }))}
             onKeyDown={e => { if (e.key === 'Enter') { setPage(0); load() } }}
             placeholder="admin, error, 192.168..."
             className="border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-slate-600 block mb-1 flex items-center gap-1">
+            <Search size={10} /> Búsqueda FULLTEXT
+          </label>
+          <input value={filter.fulltext} onChange={e => setFilter(f => ({ ...f, fulltext: e.target.value, q: '' }))}
+            onKeyDown={e => { if (e.key === 'Enter') { setPage(0); load() } }}
+            placeholder='+login -fail  (boolean mode)'
+            className="border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono" />
         </div>
         <div>
           <label className="text-xs font-medium text-slate-600 block mb-1">Desde</label>
