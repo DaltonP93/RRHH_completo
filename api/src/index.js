@@ -53,6 +53,9 @@ const overtimeBankRoutes    = require('./routes/overtimeBank');
 const announcementsRoutes   = require('./routes/announcements');
 const coursesRoutes         = require('./routes/courses');
 const surveysRoutes         = require('./routes/surveys');
+const emailTemplatesRoutes  = require('./routes/emailTemplates');
+const embedRoutes           = require('./routes/embed');
+const trendsRoutes          = require('./routes/trends');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -152,6 +155,11 @@ app.use('/api/overtime-bank',  overtimeBankRoutes);
 app.use('/api/announcements',  announcementsRoutes);
 app.use('/api/courses',        coursesRoutes);
 app.use('/api/surveys',        surveysRoutes);
+app.use('/api/email-templates', emailTemplatesRoutes);
+// Endpoint público de embed (sin auth) — debe ir ANTES del router con auth
+app.use('/api/embed',          embedRoutes.publicRouter);
+app.use('/api/embed-tokens',   embedRoutes);
+app.use('/api/trends',         trendsRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

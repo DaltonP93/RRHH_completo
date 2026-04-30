@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { Server, HardDrive, Database, Calculator, AlertTriangle, FileCog, Archive, Activity, Shield } from 'lucide-react'
+import { Server, HardDrive, Database, Calculator, AlertTriangle, FileCog, Archive, Activity, Shield, Code2 } from 'lucide-react'
 
 const cards = [
   {
@@ -51,6 +51,13 @@ const cards = [
     title: 'Cumplimiento GDPR',
     desc: 'Exportar datos personales de un empleado o anonimizar (right to be forgotten).',
     color: 'bg-slate-700',
+  },
+  {
+    href: '/sistema/embed',
+    icon: Code2,
+    title: 'Embed (dashboards públicos)',
+    desc: 'Tokens read-only para insertar widgets en intranets, Oracle APEX o portales externos.',
+    color: 'bg-violet-500',
   },
 ]
 

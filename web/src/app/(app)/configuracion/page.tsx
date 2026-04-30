@@ -108,6 +108,10 @@ function ConfiguracionPageInner() {
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium shadow-sm transition-colors">
             🎯 Metas KPI
           </a>
+          <a href="/configuracion/plantillas-email"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium shadow-sm transition-colors">
+            ✉️ Plantillas de email
+          </a>
         </div>
       </div>
       <div className="flex gap-1 border-b border-slate-200 flex-wrap">

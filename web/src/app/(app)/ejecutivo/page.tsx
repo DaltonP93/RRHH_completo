@@ -4,6 +4,7 @@ import { TrendingUp, TrendingDown, Users, Clock, AlertTriangle, Calendar } from 
 import { api } from '@/lib/api'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import KpiGoalsWidget from '@/components/KpiGoalsWidget'
+import TrendsForecast from '@/components/TrendsForecast'
 
 interface Overview {
   period: { year: number; month: number; from: string; to: string; branch_id: number | null }
@@ -100,6 +101,9 @@ export default function EjecutivoPage() {
 
           {/* Metas KPI */}
           <KpiGoalsWidget year={year} month={month} deptId={undefined} />
+
+          {/* Forecast */}
+          <TrendsForecast months={12} forecast={3} />
 
           {/* Tendencia 6 meses */}
           <div className="bg-white rounded-2xl shadow border border-slate-100 p-6">
