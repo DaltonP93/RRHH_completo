@@ -64,6 +64,7 @@ const app = express();
 const server = http.createServer(app);
 
 // ─── Middleware ─────────────────────────────────────────────────
+app.set('trust proxy', 1); // Nginx reverse proxy
 app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {
