@@ -192,10 +192,10 @@ router.post('/permissions/:id/cancel', async (req, res) => {
   }
 });
 
-// ─── Permisos efectivos del usuario logueado ─────────────────────
+// ─── Permisos efectivos del usuario logueado (módulos para el sidebar) ───────
 const { MODULES, defaultsForRole } = require('../services/permissionMatrix');
 
-router.get('/permissions', async (req, res) => {
+router.get('/module-permissions', async (req, res) => {
   try {
     const [rows] = await sequelize.query(
       'SELECT module, can_view, can_create, can_update, can_delete FROM user_permissions WHERE user_id = ?',

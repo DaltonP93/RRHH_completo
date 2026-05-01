@@ -1,12 +1,44 @@
 'use client'
-import { useState, useEffect } from 'react'
-import { MapPin, QrCode, LogIn, LogOut, CheckCircle2, AlertCircle, Camera, Scan, Wifi, WifiOff, RefreshCw } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { MapPin, QrCode, LogIn, LogOut, CheckCircle2, AlertCircle, Camera, Scan, Wifi, WifiOff, RefreshCw, ScanFace, Loader2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import SelfieCapture from '@/components/SelfieCapture'
 import QrScanner from '@/components/QrScanner'
 import { enqueue, listPending, flush, setupAutoRetry, type PendingPunch } from '@/lib/offlineQueue'
+import { useCurrentUser } from '@/lib/useCurrentUser'
+
+// face-api.js UMD loaded lazily via script tag; avoids bundler issues with CDN ESM
+const FACE_CDN = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js'
+const FACE_MODELS_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model'
+let faceApiLoading: Promise<any> | null = null
+
+async function loadFaceApi(): Promise<any> {
+  if ((window as any).faceapi?.nets) return (window as any).faceapi
+  if (faceApiLoading) return faceApiLoading
+  faceApiLoading = (async () => {
+    if (!(window as any).faceapi) {
+      await new Promise<void>((resolve, reject) => {
+        const s = document.createElement('script')
+        s.src = FACE_CDN
+        s.crossOrigin = 'anonymous'
+        s.onload = () => resolve()
+        s.onerror = () => reject(new Error('No se pudo cargar face-api.js'))
+        document.head.appendChild(s)
+      })
+    }
+    const fa = (window as any).faceapi
+    await Promise.all([
+      fa.nets.tinyFaceDetector.loadFromUri(FACE_MODELS_URL),
+      fa.nets.faceRecognitionNet.loadFromUri(FACE_MODELS_URL),
+      fa.nets.faceLandmark68TinyNet.loadFromUri(FACE_MODELS_URL),
+    ])
+    return fa
+  })()
+  return faceApiLoading
+}
 
 export default function MarcarPage() {
+  const user = useCurrentUser()
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [token, setToken] = useState('')
@@ -15,6 +47,14 @@ export default function MarcarPage() {
   const [showScanner, setShowScanner] = useState(false)
   const [online, setOnline] = useState(true)
   const [pending, setPending] = useState<PendingPunch[]>([])
+
+  // Face verification state
+  const [useFace, setUseFace] = useState(false)
+  const [faceLoading, setFaceLoading] = useState(false)
+  const [faceResult, setFaceResult] = useState<{ matched: boolean; distance: number } | null>(null)
+  const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
   useEffect(() => {
     setOnline(navigator.onLine)
@@ -30,8 +70,81 @@ export default function MarcarPage() {
       window.removeEventListener('online',  onOn)
       window.removeEventListener('offline', onOff)
       window.removeEventListener('sishoras:queue-flushed', onFlushed as any)
+      stopCamera()
     }
   }, [])
+
+  // Stop webcam stream
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    streamRef.current = null
+  }
+
+  // Toggle face verification section
+  async function toggleFace(enabled: boolean) {
+    setUseFace(enabled)
+    setFaceResult(null)
+    setFaceDescriptor(null)
+    if (!enabled) { stopCamera(); return }
+
+    setFaceLoading(true)
+    try {
+      await loadFaceApi()
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+    } catch (e: any) {
+      setMsg({ type: 'err', text: e?.message || 'No se pudo activar la cámara para Face ID.' })
+      setUseFace(false)
+      faceApiLoading = null
+    } finally {
+      setFaceLoading(false)
+    }
+  }
+
+  // Compute descriptor from current video frame
+  async function scanFace() {
+    if (!videoRef.current) return
+    setFaceLoading(true)
+    setFaceResult(null)
+    try {
+      const fa = await loadFaceApi()
+      const detection = await fa
+        .detectSingleFace(videoRef.current, new fa.TinyFaceDetectorOptions())
+        .withFaceLandmarks(true)
+        .withFaceDescriptor()
+      if (!detection) {
+        setMsg({ type: 'err', text: 'No se detectó ningún rostro. Asegurate de estar frente a la cámara.' })
+        return
+      }
+      const desc = Array.from(detection.descriptor) as number[]
+      setFaceDescriptor(desc)
+
+      if (!user?.employee_id) {
+        setMsg({ type: 'err', text: 'Tu usuario no está vinculado a un empleado. No se puede verificar.' })
+        return
+      }
+      const res = await api.post('/api/face/verify', { employee_id: user.employee_id, descriptor: desc })
+      setFaceResult({ matched: res.data.matched, distance: res.data.distance })
+      if (res.data.matched) {
+        setMsg({ type: 'ok', text: `✅ Face ID verificado (distancia: ${res.data.distance})` })
+      } else {
+        setMsg({ type: 'err', text: `❌ Rostro no coincide (distancia: ${res.data.distance}). Intenta de nuevo o contacta RRHH.` })
+      }
+    } catch (e: any) {
+      const code = e?.response?.data?.code
+      if (code === 'NO_FACE') {
+        setMsg({ type: 'err', text: 'No tenés descriptor facial registrado. Contacta a RRHH para enrolarte.' })
+      } else {
+        setMsg({ type: 'err', text: e?.response?.data?.error || 'Error al verificar rostro.' })
+      }
+    } finally {
+      setFaceLoading(false)
+    }
+  }
 
   async function flushQueue() {
     const r = await flush()
@@ -154,6 +267,47 @@ export default function MarcarPage() {
           Opcional. La foto queda asociada al marcaje para validación visual posterior.
         </p>
         {useSelfie && <SelfieCapture onCapture={setSelfie} />}
+      </div>
+
+      {/* Face ID (opcional) */}
+      <div className="bg-white rounded-2xl shadow border border-slate-100 p-6">
+        <label className="flex items-center gap-2 cursor-pointer mb-3">
+          <input type="checkbox" checked={useFace} onChange={e => toggleFace(e.target.checked)}
+            className="accent-violet-600 w-4 h-4" />
+          <ScanFace size={18} className="text-violet-600" />
+          <span className="font-semibold text-slate-900">Verificación facial (Face ID)</span>
+        </label>
+        <p className="text-xs text-slate-500 mb-3">
+          Opcional. Compara tu rostro con el descriptor registrado en RRHH. El marcaje procede igual independientemente del resultado.
+        </p>
+        {useFace && (
+          <div className="space-y-3">
+            <video ref={videoRef} muted playsInline
+              className="w-full rounded-xl bg-slate-900 aspect-video object-cover"
+              style={{ display: faceLoading && !streamRef.current ? 'none' : 'block' }}
+            />
+            {faceLoading && !streamRef.current && (
+              <div className="flex items-center justify-center gap-2 text-sm text-slate-500 py-4">
+                <Loader2 size={16} className="animate-spin" /> Cargando modelos de IA…
+              </div>
+            )}
+            {faceResult && (
+              <div className={`rounded-xl px-4 py-3 text-sm font-medium flex items-center gap-2
+                ${faceResult.matched
+                  ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                  : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                {faceResult.matched ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                {faceResult.matched ? 'Rostro verificado' : 'Rostro no coincide'}
+                <span className="ml-auto text-xs opacity-60">dist: {faceResult.distance}</span>
+              </div>
+            )}
+            <button onClick={scanFace} disabled={faceLoading || !streamRef.current}
+              className="w-full flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white rounded-xl px-4 py-2.5 text-sm font-medium transition-colors">
+              {faceLoading ? <Loader2 size={16} className="animate-spin" /> : <ScanFace size={16} />}
+              Escanear mi rostro
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Modo QR */}

@@ -12,6 +12,7 @@
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
+const { sendMail } = require('../services/emailService');
 
 router.use(authenticate);
 
@@ -150,11 +151,50 @@ router.post('/',
           expires_at || null, req.user.id,
         ] }
       );
-      res.status(201).json({ ok: true, id: r });
+      const announcementId = r.insertId ?? r;
+      res.status(201).json({ ok: true, id: announcementId });
+
+      // Enviar email a la audiencia de forma asíncrona (no bloquea la respuesta)
+      sendAnnouncementEmails({ announcementId, title, body, audience, audience_dept, audience_role, priority }).catch(() => {});
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
+
+// Envía emails al crear un comunicado (best-effort, no bloquea)
+async function sendAnnouncementEmails({ announcementId, title, body, audience, audience_dept, audience_role, priority }) {
+  try {
+    let emailQuery = '';
+    const params = [];
+    if (audience === 'all') {
+      emailQuery = 'SELECT DISTINCT u.email FROM users u WHERE u.active = 1 AND u.email IS NOT NULL AND u.email != ""';
+    } else if (audience === 'department' && audience_dept) {
+      emailQuery = `SELECT DISTINCT u.email FROM users u
+        JOIN employees e ON e.id = u.employee_id
+        WHERE u.active = 1 AND e.department_id = ? AND u.email IS NOT NULL AND u.email != ""`;
+      params.push(audience_dept);
+    } else if (audience === 'role' && audience_role) {
+      emailQuery = `SELECT DISTINCT u.email FROM users u WHERE u.active = 1 AND u.role = ? AND u.email IS NOT NULL AND u.email != ""`;
+      params.push(audience_role);
+    } else {
+      return;
+    }
+    const [users] = await sequelize.query(emailQuery, { replacements: params });
+    if (!users.length) return;
+    const recipients = users.map(u => u.email).join(', ');
+    const priorityLabel = { critical: '🔴 URGENTE', important: '🟡 Importante', info: '📢' }[priority] || '📢';
+    await sendMail({
+      to: recipients,
+      subject: `${priorityLabel} Comunicado: ${title}`,
+      html: `<div style="font-family:sans-serif;max-width:600px">
+        <h2 style="color:#1e40af">${title}</h2>
+        <div style="white-space:pre-wrap;color:#374151">${body}</div>
+        <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb">
+        <p style="color:#9ca3af;font-size:12px">Este comunicado fue enviado por el Sistema de Asistencia. Ingresá al portal para marcarlo como leído.</p>
+      </div>`,
+    });
+  } catch (_) {}
+}
 
 // POST /:id/read — marcar como leído
 router.post('/:id/read', async (req, res) => {

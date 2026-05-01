@@ -200,10 +200,11 @@ async function start() {
     logger.info('✅ Redis conectado');
 
     // Inicializar scheduler de reportes automáticos
-    const { loadSchedules, startAtt2000PullCron, startDailyAlertsCron } = require('./services/scheduler');
+    const { loadSchedules, startAtt2000PullCron, startDailyAlertsCron, startCoursesDueCron } = require('./services/scheduler');
     setTimeout(() => loadSchedules().catch(() => {}), 5000);
     startAtt2000PullCron();
     startDailyAlertsCron();
+    startCoursesDueCron();
 
     // Reconciliación nocturna att2000 vs MySQL
     const { startReconciliationCron } = require('./services/reconciliation');

@@ -106,7 +106,7 @@ export default function Sidebar() {
       ? (localStorage.getItem('access_token') || localStorage.getItem('token'))
       : null
     if (!token) return
-    fetch(apiUrl('/api/me/permissions'), { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl('/api/me/module-permissions'), { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.effective) setPerms(d.effective) })
       .catch(() => {})

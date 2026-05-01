@@ -349,6 +349,70 @@ function startDailyAlertsCron() {
   }
 }
 
+// ─── Cron diario: vencimiento de capacitaciones ──────────────────
+let _coursesCron = null;
+function startCoursesDueCron() {
+  const expr = process.env.COURSES_DUE_CRON || '0 8 * * 1-6'; // cada día hábil a las 8am
+  const tz   = process.env.CRON_TZ || 'America/Asuncion';
+  try {
+    if (_coursesCron) _coursesCron.stop();
+    if (!cron.validate(expr)) return;
+    _coursesCron = cron.schedule(expr, async () => {
+      try {
+        // Buscar asignaciones de cursos vencidas o a punto de vencer (próximos 3 días)
+        const [rows] = await sequelize.query(`
+          SELECT
+            ca.id AS assignment_id,
+            ca.employee_id,
+            CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+            u.email AS employee_email,
+            c.title AS course_title,
+            ca.due_date,
+            DATEDIFF(ca.due_date, CURDATE()) AS days_left
+          FROM course_assignments ca
+          JOIN courses c ON c.id = ca.course_id
+          JOIN employees e ON e.id = ca.employee_id
+          LEFT JOIN users u ON u.employee_id = e.id AND u.active = 1
+          WHERE ca.status NOT IN ('completed','cancelled')
+            AND ca.due_date IS NOT NULL
+            AND DATEDIFF(ca.due_date, CURDATE()) BETWEEN -1 AND 3
+            AND u.email IS NOT NULL AND u.email != ''
+          ORDER BY ca.due_date ASC
+          LIMIT 200
+        `);
+
+        let sent = 0;
+        for (const r of rows) {
+          const overdue = r.days_left < 0;
+          const subject = overdue
+            ? `⚠️ Capacitación vencida: ${r.course_title}`
+            : `📚 Recordatorio capacitación: ${r.course_title} (${r.days_left === 0 ? 'vence hoy' : `${r.days_left} día${r.days_left > 1 ? 's' : ''}`})`;
+          await sendMail({
+            to: r.employee_email,
+            subject,
+            html: `<div style="font-family:sans-serif;max-width:600px">
+              <h2 style="color:${overdue ? '#dc2626' : '#d97706'}">${subject}</h2>
+              <p>Hola <strong>${r.employee_name}</strong>,</p>
+              <p>${overdue
+                ? `La capacitación <strong>${r.course_title}</strong> venció el <strong>${r.due_date}</strong>. Por favor completala lo antes posible.`
+                : `La capacitación <strong>${r.course_title}</strong> vence el <strong>${r.due_date}</strong>. Ingresá al portal para completarla.`
+              }</p>
+              <p style="color:#9ca3af;font-size:12px">Sistema de Asistencia — Notificación automática</p>
+            </div>`,
+          }).catch(() => {});
+          sent++;
+        }
+        if (sent) logger.info(`📚 Cron cursos: ${sent} recordatorio(s) enviado(s)`);
+      } catch (err) {
+        logger.error('Error cron courses due:', err.message);
+      }
+    }, { timezone: tz });
+    logger.info(`📅 Cron vencimiento capacitaciones activo: ${expr} (${tz})`);
+  } catch (err) {
+    logger.error('No se pudo registrar cron de capacitaciones:', err.message);
+  }
+}
+
 module.exports = {
   loadSchedules,
   registerJob,
@@ -359,4 +423,5 @@ module.exports = {
   fmtTime,
   startAtt2000PullCron,
   startDailyAlertsCron,
+  startCoursesDueCron,
 };
