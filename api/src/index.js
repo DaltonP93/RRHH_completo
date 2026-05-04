@@ -57,6 +57,7 @@ const emailTemplatesRoutes  = require('./routes/emailTemplates');
 const embedRoutes           = require('./routes/embed');
 const trendsRoutes          = require('./routes/trends');
 const faceRoutes            = require('./routes/faceRecognition');
+const appraisalRoutes       = require('./routes/appraisals');
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -163,6 +164,7 @@ app.use('/api/embed',          embedRoutes.publicRouter);
 app.use('/api/embed-tokens',   embedRoutes);
 app.use('/api/trends',         trendsRoutes);
 app.use('/api/face',           faceRoutes);
+app.use('/api/appraisals',    appraisalRoutes);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
