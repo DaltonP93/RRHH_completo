@@ -29,7 +29,7 @@ function pyDateStr(d) {
 /** Parsea un valor (Date o string MySQL "YYYY-MM-DD HH:mm:ss") a JS Date UTC correcto */
 function toDate(v) {
   if (v instanceof Date) return v;
-  // String MySQL sin timezone → tratar como hora local Paraguay (UTC-4 estándar)
+  // String MySQL sin timezone → tratar como hora local Paraguay (UTC-3 permanente)
   const s = String(v);
   if (!s.includes('T') && !s.endsWith('Z') && !s.includes('+')) {
     return new Date(s.replace(' ', 'T') + '-03:00');
@@ -419,7 +419,7 @@ function startDailyAlertsCron() {
         try {
           const wh = require('./notificationWebhooks');
           const [rows] = await require('../config/database').sequelize.query(
-            `SELECT ds.late_minutes, e.full_name, d.name AS department
+            `SELECT ds.late_minutes, CONCAT(e.first_name,' ',e.last_name) AS full_name, d.name AS department
              FROM daily_summary ds
              JOIN employees e ON e.id = ds.employee_id
              LEFT JOIN departments d ON d.id = e.department_id
@@ -441,12 +441,12 @@ function startDailyAlertsCron() {
         try {
           const wh = require('./notificationWebhooks');
           const [rows] = await require('../config/database').sequelize.query(
-            `SELECT e.full_name, d.name AS department
+            `SELECT CONCAT(e.first_name,' ',e.last_name) AS full_name, d.name AS department
              FROM daily_summary ds
              JOIN employees e ON e.id = ds.employee_id
              LEFT JOIN departments d ON d.id = e.department_id
              WHERE ds.date = CURDATE() AND ds.status = 'absent'
-             ORDER BY e.full_name LIMIT 20`
+             ORDER BY e.last_name, e.first_name LIMIT 20`
           );
           if (rows.length) await wh.notifyAbsences(rows).catch(() => {});
         } catch {}

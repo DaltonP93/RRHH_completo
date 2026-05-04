@@ -14,6 +14,7 @@
 const router   = require('express').Router();
 const { sequelize } = require('../config/database');
 const logger   = require('../config/logger');
+const { pyDateStr } = require('../services/scheduler');
 
 // Middleware: autenticación por API Key
 function apiKeyAuth(req, res, next) {
@@ -63,7 +64,7 @@ router.use(apiKeyAuth);
  *                   items: { $ref: '#/components/schemas/DailySummary' }
  */
 router.get('/attendance/today', async (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = pyDateStr(new Date());
   const { dept_id } = req.query;
 
   let deptFilter = '';
@@ -199,7 +200,7 @@ router.get('/employees', async (req, res) => {
  *       - apiKeyAuth: []
  */
 router.get('/stats/summary', async (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = pyDateStr(new Date());
 
   const [[stats]] = await sequelize.query(`
     SELECT

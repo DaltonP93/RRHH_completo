@@ -166,7 +166,7 @@ export default function DashboardPage() {
                         // Normalizar: MySQL devuelve "YYYY-MM-DD HH:mm:ss" sin TZ
                         // lo forzamos a Paraguay (America/Asuncion) para display correcto
                         const raw = log.timestamp as string
-                        const iso = raw.includes('T') ? raw : raw.replace(' ', 'T') + '-04:00'
+                        const iso = raw.includes('T') ? raw : raw.replace(' ', 'T') + '-03:00'
                         return new Date(iso).toLocaleTimeString('es-PY', {
                           timeZone: 'America/Asuncion',
                           hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,

@@ -121,7 +121,7 @@ router.get('/', authorize(...MGR_ROLES), async (req, res) => {
 
     const [rows] = await sequelize.query(`
       SELECT a.id, a.period_label, a.status, a.due_date, a.final_score, a.created_at,
-             e.full_name AS employee_name, e.code AS employee_code,
+             CONCAT(e.first_name,' ',e.last_name) AS employee_name, e.code AS employee_code,
              d.name AS department_name,
              t.name AS template_name,
              u.full_name AS reviewer_name
@@ -167,7 +167,7 @@ router.get('/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const [[a]] = await sequelize.query(`
       SELECT a.*,
-             e.full_name AS employee_name, e.code AS employee_code,
+             CONCAT(e.first_name,' ',e.last_name) AS employee_name, e.code AS employee_code,
              d.name AS department_name,
              t.name AS template_name, t.scale_min, t.scale_max,
              u.full_name AS reviewer_name,

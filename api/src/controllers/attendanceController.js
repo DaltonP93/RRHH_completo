@@ -220,7 +220,7 @@ async function bridgeWebhook(req, res) {
   }
 }
 
-// Fecha actual en Paraguay (UTC-4 estándar / America/Asuncion)
+// Fecha actual en Paraguay (UTC-3 permanente desde 2023 / America/Asuncion)
 function todayPY() {
   return new Intl.DateTimeFormat('sv', { timeZone: 'America/Asuncion' }).format(new Date());
 }

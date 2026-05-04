@@ -34,7 +34,7 @@ router.get('/team-overview', async (req, res) => {
     const placeholders = deptIds.map(() => '?').join(',');
 
     const [team] = await sequelize.query(`
-      SELECT e.id, e.code, e.full_name, e.department_id,
+      SELECT e.id, e.code, CONCAT(e.first_name,' ',e.last_name) AS full_name, e.department_id,
              d.name AS department_name,
              ds.status, ds.late_minutes, ds.worked_minutes,
              (SELECT MAX(timestamp) FROM attendance_logs
@@ -43,7 +43,7 @@ router.get('/team-overview', async (req, res) => {
       LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN daily_summary ds ON ds.employee_id = e.id AND ds.date = ?
       WHERE e.status = 'active' AND e.department_id IN (${placeholders})
-      ORDER BY d.name, e.full_name
+      ORDER BY d.name, e.last_name, e.first_name
     `, { replacements: [date, date, ...deptIds] });
 
     const kpis = team.reduce((a, t) => {
@@ -76,7 +76,7 @@ router.get('/pending-approvals', async (req, res) => {
 
     const [rows] = await sequelize.query(`
       SELECT p.id, p.type, p.start_date, p.end_date, p.reason, p.status, p.created_at,
-             e.code, e.full_name, d.name AS department_name
+             e.code, CONCAT(e.first_name,' ',e.last_name) AS full_name, d.name AS department_name
       FROM permissions p
       JOIN employees e   ON e.id = p.employee_id
       LEFT JOIN departments d ON d.id = e.department_id

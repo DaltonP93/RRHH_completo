@@ -105,7 +105,7 @@ router.post('/schedules', async (req, res) => {
   const {
     name, cron_expression, period_type, recipients,
     report_type = 'marcadas', config = '{}',
-    timezone = 'America/Mexico_City',
+    timezone = 'America/Asuncion',
   } = req.body;
 
   if (!name || !cron_expression || !recipients) {
@@ -190,7 +190,8 @@ router.post('/schedules/:id/run', async (req, res) => {
     const { generateMarcadasReport, buildMarcadasTableHtml } = require('../services/scheduler');
     const schedule = rows[0];
     const cfg = JSON.parse(schedule.config || '{}');
-    const from = req.body.dateFrom || new Date().toISOString().split('T')[0];
+    const { pyDateStr } = require('../services/scheduler');
+    const from = req.body.dateFrom || pyDateStr(new Date());
     const to   = req.body.dateTo   || from;
 
     const report = await generateMarcadasReport({ dateFrom: from, dateTo: to, ...cfg });

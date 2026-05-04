@@ -117,7 +117,7 @@ router.get('/verifications',
     if (empId) { where += ' AND fv.employee_id = ?'; params.push(empId); }
 
     const [rows] = await sequelize.query(`
-      SELECT fv.*, e.full_name, e.code
+      SELECT fv.*, CONCAT(e.first_name,' ',e.last_name) AS full_name, e.code
       FROM face_verifications fv
       JOIN employees e ON e.id = fv.employee_id
       ${where}

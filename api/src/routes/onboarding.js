@@ -123,7 +123,7 @@ router.get('/', authorize(...MGR_ROLES), async (req, res) => {
 
     const [rows] = await sequelize.query(`
       SELECT p.id, p.type, p.status, p.start_date, p.created_at, p.completed_at,
-             e.full_name AS employee_name, e.code AS employee_code,
+             CONCAT(e.first_name,' ',e.last_name) AS employee_name, e.code AS employee_code,
              d.name AS department_name,
              t.name AS template_name,
              (SELECT COUNT(*) FROM onboarding_tasks ot WHERE ot.process_id = p.id) AS total_tasks,
@@ -147,7 +147,7 @@ router.get('/:id', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const [[p]] = await sequelize.query(`
       SELECT p.*,
-             e.full_name AS employee_name, e.code AS employee_code,
+             CONCAT(e.first_name,' ',e.last_name) AS employee_name, e.code AS employee_code,
              d.name AS department_name,
              t.name AS template_name, t.type AS template_type
       FROM onboarding_processes p
@@ -292,7 +292,7 @@ router.patch('/tasks/:taskId', async (req, res) => {
 // ─── Email a responsables al crear proceso ───────────────────────────────────
 async function notifyAssignees(processId) {
   const [[p]] = await sequelize.query(`
-    SELECT p.*, e.full_name AS employee_name, t.name AS template_name, t.type
+    SELECT p.*, CONCAT(e.first_name,' ',e.last_name) AS employee_name, t.name AS template_name, t.type
     FROM onboarding_processes p
     JOIN employees e ON e.id = p.employee_id
     JOIN onboarding_templates t ON t.id = p.template_id
