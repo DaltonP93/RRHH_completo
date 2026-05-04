@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Users, BarChart2, Settings, Clock, Calendar,
   LogOut, Shield, Server, Building2, CheckSquare, UserCircle2,
   Menu, X, FileText, TrendingUp, QrCode, DollarSign, ChevronDown, Activity,
-  Cake, Plane, PiggyBank, Megaphone, GraduationCap, ClipboardList, Star,
+  Cake, Plane, PiggyBank, Megaphone, GraduationCap, ClipboardList, Star, UserCheck,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -49,6 +49,7 @@ const NAV: NavItem[] = [
   { href: '/capacitaciones',icon: GraduationCap,   i18nKey: 'nav.training',     section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor','employee'], module: 'capacitaciones' },
   { href: '/encuestas',     icon: ClipboardList,   i18nKey: 'nav.surveys',      section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor','employee'], module: 'encuestas' },
   { href: '/evaluaciones',  icon: Star,            i18nKey: 'nav.appraisals',   section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor','employee'], module: 'evaluaciones' },
+  { href: '/onboarding',    icon: UserCheck,       i18nKey: 'nav.onboarding',   section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor'], module: 'onboarding' },
 
   // Admin
   { href: '/departamentos', icon: Building2,       i18nKey: 'nav.departments',  section: 'admin', roles: ['admin','gth'], module: 'departamentos' },
