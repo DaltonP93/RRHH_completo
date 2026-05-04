@@ -1,9 +1,10 @@
 'use client'
 import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Calendar, Plane, Stethoscope, Heart, Baby, Users as UsersIcon, AlertTriangle } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronLeft, ChevronRight, Calendar, Plane, Stethoscope, Heart, Baby, Users as UsersIcon, AlertTriangle, Plus, X, CheckCircle2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useI18n } from '@/i18n/I18nProvider'
+import { useCurrentUser } from '@/lib/useCurrentUser'
 
 const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
@@ -28,12 +29,126 @@ function dateInRange(dateStr: string, from: string, to: string) {
   return dateStr >= from && dateStr <= to
 }
 
+const PERM_TYPES = [
+  { value: 'vacation',  label: 'Vacaciones' },
+  { value: 'sick',      label: 'Enfermedad' },
+  { value: 'personal',  label: 'Personal' },
+  { value: 'maternity', label: 'Maternidad' },
+  { value: 'paternity', label: 'Paternidad' },
+  { value: 'other',     label: 'Otro' },
+]
+
+function SolicitarModal({ onClose, onCreated, isAdmin }: {
+  onClose: () => void; onCreated: () => void; isAdmin: boolean
+}) {
+  const [form, setForm] = useState({ type: 'vacation', date_from: '', date_to: '', reason: '', employee_id: '' })
+  const [saving, setSaving] = useState(false)
+  const [ok, setOk] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const { data: emps } = useQuery({
+    queryKey: ['employees-mini'],
+    queryFn: () => api.get('/api/employees?limit=500').then(r => r.data.data || r.data || []),
+    enabled: isAdmin,
+  })
+
+  async function submit() {
+    if (!form.date_from || !form.date_to) { setErr('Las fechas son requeridas'); return }
+    if (form.date_to < form.date_from) { setErr('La fecha de fin debe ser posterior a la de inicio'); return }
+    setSaving(true); setErr(null)
+    try {
+      if (isAdmin && form.employee_id) {
+        await api.post('/api/permissions', {
+          employee_id: parseInt(form.employee_id),
+          type: form.type, date_from: form.date_from, date_to: form.date_to, reason: form.reason,
+        })
+      } else {
+        await api.post('/api/me/permissions', { type: form.type, date_from: form.date_from, date_to: form.date_to, reason: form.reason })
+      }
+      setOk(true); onCreated()
+    } catch (e: any) {
+      setErr(e?.response?.data?.error || 'Error al enviar solicitud')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <h2 className="text-lg font-bold text-slate-900">Solicitar ausencia / vacaciones</h2>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={18} /></button>
+        </div>
+        {ok ? (
+          <div className="px-6 py-10 text-center space-y-3">
+            <CheckCircle2 size={48} className="text-emerald-500 mx-auto" />
+            <p className="font-semibold text-slate-800">Solicitud enviada</p>
+            <p className="text-sm text-slate-500">Queda pendiente de aprobación por RRHH o tu supervisor.</p>
+            <button onClick={onClose} className="mt-2 px-6 py-2 bg-emerald-600 text-white rounded-xl text-sm font-medium hover:bg-emerald-700">Cerrar</button>
+          </div>
+        ) : (
+          <>
+            <div className="px-6 py-4 space-y-3">
+              {isAdmin && (
+                <div>
+                  <label className="text-xs font-medium text-slate-600 block mb-1">Empleado (dejar vacío = tu propia solicitud)</label>
+                  <select value={form.employee_id} onChange={e => setForm(f => ({ ...f, employee_id: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                    <option value="">Mi propia solicitud</option>
+                    {(emps || []).map((e: any) => <option key={e.id} value={e.id}>{e.full_name} ({e.code})</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">Tipo *</label>
+                <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                  {PERM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-medium text-slate-600 block mb-1">Desde *</label>
+                  <input type="date" value={form.date_from} onChange={e => setForm(f => ({ ...f, date_from: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600 block mb-1">Hasta *</label>
+                  <input type="date" value={form.date_to} onChange={e => setForm(f => ({ ...f, date_to: e.target.value }))}
+                    min={form.date_from}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">Motivo</label>
+                <textarea rows={2} value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
+                  placeholder="Opcional…"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm resize-none" />
+              </div>
+              {err && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex gap-2">
+              <button onClick={onClose} className="flex-1 border border-slate-200 rounded-xl py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancelar</button>
+              <button onClick={submit} disabled={saving}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl py-2.5 text-sm font-medium">
+                {saving ? 'Enviando…' : 'Solicitar'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function VacacionesPage() {
   const { t } = useI18n()
+  const user = useCurrentUser()
+  const qc = useQueryClient()
   const now = new Date()
   const [year, setYear]     = useState(now.getFullYear())
   const [month, setMonth]   = useState(now.getMonth() + 1)
   const [deptId, setDeptId] = useState('')
+  const [showSolicitar, setShowSolicitar] = useState(false)
+  const isAdmin = ['admin', 'gth', 'hr', 'coordinator', 'manager', 'super_admin'].includes(user?.role || '')
 
   const { data: deptsData } = useQuery({
     queryKey: ['departments'],
@@ -81,15 +196,28 @@ export default function VacacionesPage() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
-          <Plane className="text-white" size={22} />
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
+            <Plane className="text-white" size={22} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Plan de Vacaciones</h1>
+            <p className="text-sm text-slate-500">Vista mensual de permisos y vacaciones aprobados/pendientes</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Plan de Vacaciones</h1>
-          <p className="text-sm text-slate-500">Vista mensual de permisos y vacaciones aprobados/pendientes</p>
-        </div>
+        <button onClick={() => setShowSolicitar(true)}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm">
+          <Plus size={16} /> Solicitar ausencia
+        </button>
       </div>
+      {showSolicitar && (
+        <SolicitarModal
+          isAdmin={isAdmin}
+          onClose={() => setShowSolicitar(false)}
+          onCreated={() => qc.invalidateQueries({ queryKey: ['vacation-plan'] })}
+        />
+      )}
 
       {/* Controles */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3 flex-wrap">

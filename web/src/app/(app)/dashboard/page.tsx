@@ -143,7 +143,16 @@ export default function DashboardPage() {
                   <div>
                     <p className="font-medium text-slate-800 text-sm">{log.employeeName || log.employee_name}</p>
                     <p className="text-xs text-slate-400">
-                      {format(new Date(log.timestamp), 'HH:mm:ss')}
+                      {(() => {
+                        // Normalizar: MySQL devuelve "YYYY-MM-DD HH:mm:ss" sin TZ
+                        // lo forzamos a Paraguay (America/Asuncion) para display correcto
+                        const raw = log.timestamp as string
+                        const iso = raw.includes('T') ? raw : raw.replace(' ', 'T') + '-04:00'
+                        return new Date(iso).toLocaleTimeString('es-PY', {
+                          timeZone: 'America/Asuncion',
+                          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+                        })
+                      })()}
                     </p>
                   </div>
                 </div>
