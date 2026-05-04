@@ -9,7 +9,7 @@ const sequelize = new Sequelize(
     host: process.env.DB_HOST || 'localhost',
     port: process.env.DB_PORT || 3306,
     dialect: 'mysql',
-    timezone: '-04:00', // Paraguay UTC-4 (America/Asuncion horario estándar, abr-oct)
+    timezone: '-03:00', // Paraguay UTC-3 permanente (eliminó DST en 2023, America/Asuncion)
     logging: msg => logger.debug(msg),
     pool: {
       max: 10,

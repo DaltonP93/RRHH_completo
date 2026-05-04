@@ -32,7 +32,7 @@ function toDate(v) {
   // String MySQL sin timezone → tratar como hora local Paraguay (UTC-4 estándar)
   const s = String(v);
   if (!s.includes('T') && !s.endsWith('Z') && !s.includes('+')) {
-    return new Date(s.replace(' ', 'T') + '-04:00');
+    return new Date(s.replace(' ', 'T') + '-03:00');
   }
   return new Date(s);
 }

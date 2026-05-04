@@ -156,7 +156,7 @@ async function recalcDailySummary(employeeId, timestamp) {
     const [h, m] = emp.check_in.split(':').map(Number);
     const tolerMin = emp.tolerance_in || 0;
     // scheduleTime = fecha Paraguay + hora check_in + tolerancia, en UTC
-    const scheduleTime = new Date(`${date}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00-04:00`);
+    const scheduleTime = new Date(`${date}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00-03:00`);
     scheduleTime.setTime(scheduleTime.getTime() + tolerMin * 60 * 1000);
 
     const inTime = new Date(firstIn.timestamp);
