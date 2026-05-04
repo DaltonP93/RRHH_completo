@@ -11,9 +11,35 @@ const logger = require('../config/logger');
 
 const _jobs = new Map(); // scheduleId → tarea cron activa
 
+// ─── Helpers de timezone Paraguay ────────────────────────────────
+const TZ_PY = 'America/Asuncion';
+const _dtfHour = new Intl.DateTimeFormat('es-PY', { timeZone: TZ_PY, hour: 'numeric', hour12: false });
+const _dtfDate = new Intl.DateTimeFormat('es-PY', { timeZone: TZ_PY, year: 'numeric', month: '2-digit', day: '2-digit' });
+
+/** Hora (0-23) de un Date en Paraguay */
+function pyHour(d) { return parseInt(_dtfHour.format(d), 10); }
+
+/** "YYYY-MM-DD" de un Date en Paraguay */
+function pyDateStr(d) {
+  const parts = _dtfDate.formatToParts(d);
+  const get = t => parts.find(p => p.type === t)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+/** Parsea un valor (Date o string MySQL "YYYY-MM-DD HH:mm:ss") a JS Date UTC correcto */
+function toDate(v) {
+  if (v instanceof Date) return v;
+  // String MySQL sin timezone → tratar como hora local Paraguay (UTC-4 estándar)
+  const s = String(v);
+  if (!s.includes('T') && !s.endsWith('Z') && !s.includes('+')) {
+    return new Date(s.replace(' ', 'T') + '-04:00');
+  }
+  return new Date(s);
+}
+
 // ─── Generar reporte de marcadas (igual al PDF de SisHoras) ───────
 async function generateMarcadasReport({ dateFrom, dateTo, employeeId, deptId } = {}) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = pyDateStr(new Date());
   const from  = dateFrom || today;
   const to    = dateTo   || today;
 
@@ -51,12 +77,12 @@ async function generateMarcadasReport({ dateFrom, dateTo, employeeId, deptId } =
         days: {},
       };
     }
-    const ts = new Date(log.timestamp);
+    const ts = toDate(log.timestamp);                // → JS Date UTC correcto
     const workDate = new Date(ts);
-    if (ts.getHours() < SHIFT_CUTOFF_HOUR) {
-      workDate.setDate(workDate.getDate() - 1);
+    if (pyHour(ts) < SHIFT_CUTOFF_HOUR) {           // hora en Paraguay
+      workDate.setUTCDate(workDate.getUTCDate() - 1);
     }
-    const date = workDate.toISOString().split('T')[0];
+    const date = pyDateStr(workDate);               // fecha laboral en Paraguay
     if (!byEmp[log.employee_id].days[date]) {
       byEmp[log.employee_id].days[date] = [];
     }
@@ -125,9 +151,10 @@ async function generateMarcadasReport({ dateFrom, dateTo, employeeId, deptId } =
 
 function fmtTime(dt) {
   if (!dt) return '';
-  const h = dt.getHours();
-  const m = dt.getMinutes();
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  const d = toDate(dt);
+  return new Intl.DateTimeFormat('es-PY', {
+    timeZone: TZ_PY, hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(d);
 }
 
 function minsToHM(mins) {
@@ -192,7 +219,7 @@ function registerJob(schedule) {
   const task = cron.schedule(schedule.cron_expression, async () => {
     logger.info(`Ejecutando reporte programado #${schedule.id}: ${schedule.name}`);
     await runScheduledReport(schedule);
-  }, { timezone: schedule.timezone || 'America/Mexico_City' });
+  }, { timezone: schedule.timezone || TZ_PY });
 
   _jobs.set(schedule.id, task);
 }
@@ -204,21 +231,24 @@ async function runScheduledReport(schedule) {
 
     // Calcular período según el tipo
     const now = new Date();
+    const todayPY = pyDateStr(now);  // "YYYY-MM-DD" en Paraguay
     let dateFrom, dateTo;
     if (schedule.period_type === 'daily') {
-      const d = new Date(now); d.setDate(d.getDate() - 1);
-      dateFrom = dateTo = d.toISOString().split('T')[0];
+      // Día anterior en Paraguay
+      const d = new Date(now); d.setUTCDate(d.getUTCDate() - 1);
+      dateFrom = dateTo = pyDateStr(d);
     } else if (schedule.period_type === 'weekly') {
-      const to = new Date(now); to.setDate(to.getDate() - 1);
-      const from = new Date(to); from.setDate(from.getDate() - 6);
-      dateFrom = from.toISOString().split('T')[0];
-      dateTo   = to.toISOString().split('T')[0];
+      const to = new Date(now); to.setUTCDate(to.getUTCDate() - 1);
+      const from = new Date(to); from.setUTCDate(from.getUTCDate() - 6);
+      dateFrom = pyDateStr(from);
+      dateTo   = pyDateStr(to);
     } else {
-      // monthly
-      const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-      const m = now.getMonth() === 0 ? 12 : now.getMonth();
-      dateFrom = `${y}-${String(m).padStart(2,'0')}-01`;
-      dateTo   = new Date(y, m, 0).toISOString().split('T')[0];
+      // monthly — mes anterior
+      const [cy, cm] = todayPY.split('-').map(Number);
+      const prevM = cm === 1 ? 12 : cm - 1;
+      const prevY = cm === 1 ? cy - 1 : cy;
+      dateFrom = `${prevY}-${String(prevM).padStart(2,'0')}-01`;
+      dateTo   = `${prevY}-${String(prevM).padStart(2,'0')}-${new Date(prevY, prevM, 0).getDate()}`;
     }
 
     const report = await generateMarcadasReport({
@@ -266,6 +296,74 @@ function stopJob(scheduleId) {
   }
 }
 
+// ─── Recalcular daily_summary en bloque para una fecha (Paraguay) ─
+async function bulkRecalcDailySummary(date) {
+  // Insertar/actualizar daily_summary para todos los empleados
+  // con registros en attendance_logs para la fecha dada.
+  // late_minutes se calcula comparando primer IN con el horario del empleado.
+  await sequelize.query(`
+    INSERT INTO daily_summary
+      (employee_id, date, first_in, last_out, worked_minutes, late_minutes, status)
+    SELECT
+      al.employee_id,
+      ? AS date,
+      MIN(CASE WHEN al.type = 'in'  THEN al.timestamp END) AS first_in,
+      MAX(CASE WHEN al.type = 'out' THEN al.timestamp END) AS last_out,
+      GREATEST(0, COALESCE(
+        TIMESTAMPDIFF(MINUTE,
+          MIN(CASE WHEN al.type = 'in'  THEN al.timestamp END),
+          MAX(CASE WHEN al.type = 'out' THEN al.timestamp END)
+        ), 0
+      )) AS worked_minutes,
+      GREATEST(0, COALESCE(
+        TIMESTAMPDIFF(MINUTE,
+          CONCAT(?, ' ', (
+            SELECT TIME_FORMAT(
+              ADDTIME(s2.check_in, SEC_TO_TIME(COALESCE(s2.tolerance_in,0)*60)),
+              '%H:%i:%s')
+            FROM employees e2
+            LEFT JOIN schedules s2 ON e2.schedule_id = s2.id
+            WHERE e2.id = al.employee_id LIMIT 1
+          )),
+          MIN(CASE WHEN al.type = 'in' THEN al.timestamp END)
+        ), 0
+      )) AS late_minutes,
+      CASE
+        WHEN MIN(CASE WHEN al.type = 'in' THEN al.timestamp END) IS NOT NULL THEN
+          CASE WHEN
+            TIMESTAMPDIFF(MINUTE,
+              CONCAT(?, ' ', (
+                SELECT TIME_FORMAT(
+                  ADDTIME(s2.check_in, SEC_TO_TIME(COALESCE(s2.tolerance_in,0)*60)),
+                  '%H:%i:%s')
+                FROM employees e2
+                LEFT JOIN schedules s2 ON e2.schedule_id = s2.id
+                WHERE e2.id = al.employee_id LIMIT 1
+              )),
+              MIN(CASE WHEN al.type = 'in' THEN al.timestamp END)
+            ) > 0
+          THEN 'late'
+          ELSE 'present'
+          END
+        ELSE 'absent'
+      END AS status
+    FROM attendance_logs al
+    WHERE DATE(al.timestamp) = ?
+    GROUP BY al.employee_id
+    ON DUPLICATE KEY UPDATE
+      first_in       = COALESCE(VALUES(first_in),       first_in),
+      last_out       = COALESCE(VALUES(last_out),        last_out),
+      worked_minutes = VALUES(worked_minutes),
+      late_minutes   = VALUES(late_minutes),
+      status         = CASE
+        WHEN status IN ('holiday','weekend','permission') THEN status
+        ELSE VALUES(status)
+      END
+  `, { replacements: [date, date, date, date] });
+
+  logger.info(`♻️  daily_summary recalculado para ${date}`);
+}
+
 // ─── Cron respaldo: pull att2000 → MySQL ─────────────────────────
 // Activar con ATT2000_PULL_CRON="*/10 * * * *" (sintaxis node-cron)
 let _att2000PullJob = null;
@@ -278,9 +376,20 @@ function startAtt2000PullCron() {
     const { syncAttendance } = require('../config/zkAdapter');
     _att2000PullJob = cron.schedule(expr, async () => {
       try {
-        const dateFrom = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0,10);
+        const dateFrom = pyDateStr(new Date(Date.now() - 24 * 3600 * 1000));
         const result = await syncAttendance({ dateFrom, limit: 5000 });
         logger.info(`⏱️  Cron att2000 pull: ${JSON.stringify(result)}`);
+
+        // Recalcular daily_summary para hoy y ayer (Paraguay) después del sync
+        const today     = pyDateStr(new Date());
+        const yesterday = dateFrom;
+        for (const date of [today, yesterday]) {
+          try {
+            await bulkRecalcDailySummary(date);
+          } catch (e) {
+            logger.warn(`bulkRecalc ${date}: ${e.message}`);
+          }
+        }
       } catch (err) {
         logger.error('Error en cron att2000 pull:', err.message);
       }
@@ -421,6 +530,8 @@ module.exports = {
   buildMarcadasTableHtml,
   minsToHM,
   fmtTime,
+  bulkRecalcDailySummary,
+  pyDateStr,
   startAtt2000PullCron,
   startDailyAlertsCron,
   startCoursesDueCron,

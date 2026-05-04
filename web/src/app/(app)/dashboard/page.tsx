@@ -1,13 +1,13 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts'
-import { Users, Clock, AlertTriangle, UserCheck, Activity } from 'lucide-react'
-import { attendanceApi } from '@/lib/api'
+import { Users, Clock, AlertTriangle, UserCheck, Activity, RefreshCw } from 'lucide-react'
+import { attendanceApi, api } from '@/lib/api'
 import { getSocket } from '@/lib/socket'
 import { useI18n } from '@/i18n/I18nProvider'
 
@@ -27,8 +27,10 @@ const PIE_COLORS = ['#22c55e', '#f59e0b', '#ef4444', '#8b5cf6']
 
 export default function DashboardPage() {
   const { t, locale } = useI18n()
+  const qc = useQueryClient()
   const [liveEvents, setLiveEvents] = useState<AttendanceEvent[]>([])
   const [today, setToday] = useState('')
+  const [recalcLoading, setRecalcLoading] = useState(false)
   const TYPE_LABELS: Record<string, string> = {
     in: t('attendance.in'),
     out: t('attendance.out'),
@@ -76,9 +78,26 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold text-slate-900">{t('nav.dashboard')}</h1>
           <p className="text-slate-500 capitalize" suppressHydrationWarning>{today || '\u00a0'}</p>
         </div>
-        <div className="flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-1.5 rounded-full">
-          <div className="w-2 h-2 rounded-full bg-green-500 pulse-live" />
-          <span className="text-sm font-medium text-green-700">{t('dashboard.live_feed')}</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={async () => {
+              setRecalcLoading(true)
+              try {
+                await api.post('/api/attendance/recalc-summary')
+                await qc.invalidateQueries({ queryKey: ['attendance-live'] })
+              } finally { setRecalcLoading(false) }
+            }}
+            disabled={recalcLoading}
+            title="Recalcular resumen del d\u00eda (sincroniza KPIs con datos de relojes)"
+            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-full border border-slate-200 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={recalcLoading ? 'animate-spin' : ''} />
+            Actualizar KPIs
+          </button>
+          <div className="flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-1.5 rounded-full">
+            <div className="w-2 h-2 rounded-full bg-green-500 pulse-live" />
+            <span className="text-sm font-medium text-green-700">{t('dashboard.live_feed')}</span>
+          </div>
         </div>
       </div>
 

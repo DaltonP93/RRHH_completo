@@ -88,7 +88,9 @@ async function processAttendanceEvent(data) {
 
 // Determinar si es entrada o salida según historial del día
 async function detectMarkType(employeeId, timestamp) {
-  const date = timestamp.toISOString().split('T')[0];
+  const date = new Intl.DateTimeFormat('sv', { timeZone: 'America/Asuncion' }).format(
+    timestamp instanceof Date ? timestamp : new Date(timestamp)
+  );
   const [[row]] = await sequelize.query(
     'SELECT COUNT(*) AS cnt FROM attendance_logs WHERE employee_id = ? AND DATE(timestamp) = ?',
     { replacements: [employeeId, date] }
@@ -99,7 +101,10 @@ async function detectMarkType(employeeId, timestamp) {
 
 // Recalcular resumen diario del empleado
 async function recalcDailySummary(employeeId, timestamp) {
-  const date = timestamp.toISOString().split('T')[0];
+  // Usar fecha en Paraguay para el resumen
+  const date = new Intl.DateTimeFormat('sv', { timeZone: 'America/Asuncion' }).format(
+    timestamp instanceof Date ? timestamp : new Date(timestamp)
+  );
 
   const [logs] = await sequelize.query(`
     SELECT timestamp, type FROM attendance_logs
@@ -147,9 +152,12 @@ async function recalcDailySummary(employeeId, timestamp) {
   let status = firstIn ? 'present' : 'absent';
 
   if (firstIn && emp) {
+    // Construir horario previsto en Paraguay: fecha laboral + hora del turno
     const [h, m] = emp.check_in.split(':').map(Number);
-    const scheduleTime = new Date(firstIn.timestamp);
-    scheduleTime.setHours(h, m + (emp.tolerance_in || 0), 0, 0);
+    const tolerMin = emp.tolerance_in || 0;
+    // scheduleTime = fecha Paraguay + hora check_in + tolerancia, en UTC
+    const scheduleTime = new Date(`${date}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00-04:00`);
+    scheduleTime.setTime(scheduleTime.getTime() + tolerMin * 60 * 1000);
 
     const inTime = new Date(firstIn.timestamp);
     if (inTime > scheduleTime) {
@@ -212,9 +220,14 @@ async function bridgeWebhook(req, res) {
   }
 }
 
+// Fecha actual en Paraguay (UTC-4 estándar / America/Asuncion)
+function todayPY() {
+  return new Intl.DateTimeFormat('sv', { timeZone: 'America/Asuncion' }).format(new Date());
+}
+
 // GET /api/attendance/live  — estado actual del día
 async function getDashboardStats(req, res) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayPY();
 
   try {
     const [[stats]] = await sequelize.query(`
@@ -253,7 +266,7 @@ async function getDashboardStats(req, res) {
 
 // GET /api/attendance?date=&dept=&employeeId=
 async function getByDate(req, res) {
-  const { date = new Date().toISOString().split('T')[0], dept, employeeId, page = 1, limit = 100 } = req.query;
+  const { date = todayPY(), dept, employeeId, page = 1, limit = 100 } = req.query;
   const offset = (page - 1) * limit;
 
   let where = 'WHERE ds.date = ?';
