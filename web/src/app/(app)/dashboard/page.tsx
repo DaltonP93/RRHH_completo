@@ -8,7 +8,7 @@ import {
 } from 'recharts'
 import { Users, Clock, AlertTriangle, UserCheck, Activity, RefreshCw } from 'lucide-react'
 import { attendanceApi, api } from '@/lib/api'
-import { getSocket } from '@/lib/socket'
+import { getSocket, reconnectSocket } from '@/lib/socket'
 import { useI18n } from '@/i18n/I18nProvider'
 
 interface AttendanceEvent {
@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [liveEvents, setLiveEvents] = useState<AttendanceEvent[]>([])
   const [today, setToday] = useState('')
   const [recalcLoading, setRecalcLoading] = useState(false)
+  const [socketConnected, setSocketConnected] = useState(false)
   const TYPE_LABELS: Record<string, string> = {
     in: t('attendance.in'),
     out: t('attendance.out'),
@@ -45,20 +46,36 @@ export default function DashboardPage() {
   const { data, refetch } = useQuery({
     queryKey: ['attendance-live'],
     queryFn: attendanceApi.live,
-    refetchInterval: 60_000,
+    refetchInterval: 30_000,   // refrescar cada 30s como fallback al socket
   })
 
   // Escuchar Socket.io para tiempo real
   useEffect(() => {
+    // Forzar reconexión con token actualizado al montar el dashboard
+    reconnectSocket()
     const socket = getSocket()
 
-    socket.on('attendance:new', (event: AttendanceEvent) => {
+    const onConnect    = () => setSocketConnected(true)
+    const onDisconnect = () => setSocketConnected(false)
+    const onNew = (event: AttendanceEvent) => {
       setLiveEvents(prev => [event, ...prev].slice(0, 50))
-      refetch()
-    })
+      // Refrescar KPIs después de cada marcaje nuevo
+      qc.invalidateQueries({ queryKey: ['attendance-live'] })
+    }
 
-    return () => { socket.off('attendance:new') }
-  }, [refetch])
+    socket.on('connect',         onConnect)
+    socket.on('disconnect',      onDisconnect)
+    socket.on('attendance:new',  onNew)
+
+    // Estado inicial
+    setSocketConnected(socket.connected)
+
+    return () => {
+      socket.off('connect',        onConnect)
+      socket.off('disconnect',     onDisconnect)
+      socket.off('attendance:new', onNew)
+    }
+  }, [qc])
 
   const stats = data?.stats || {}
   const recentLogs = [...liveEvents, ...(data?.recentLogs || [])].slice(0, 20)
@@ -94,9 +111,15 @@ export default function DashboardPage() {
             <RefreshCw size={13} className={recalcLoading ? 'animate-spin' : ''} />
             Actualizar KPIs
           </button>
-          <div className="flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-1.5 rounded-full">
-            <div className="w-2 h-2 rounded-full bg-green-500 pulse-live" />
-            <span className="text-sm font-medium text-green-700">{t('dashboard.live_feed')}</span>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${
+            socketConnected
+              ? 'bg-green-50 border-green-200'
+              : 'bg-amber-50 border-amber-200'
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500 pulse-live' : 'bg-amber-400 animate-pulse'}`} />
+            <span className={`text-sm font-medium ${socketConnected ? 'text-green-700' : 'text-amber-700'}`}>
+              {socketConnected ? t('dashboard.live_feed') : 'Reconectando...'}
+            </span>
           </div>
         </div>
       </div>

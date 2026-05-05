@@ -1,19 +1,46 @@
 {
   "name": "SisHoras — Sistema de Asistencia",
   "short_name": "SisHoras",
-  "description": "Gestión de asistencia y marcación biométrica",
-  "start_url": "/marcar",
+  "description": "Control de asistencia y marcación biométrica en tiempo real",
+  "start_url": "/dashboard",
+  "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#0f172a",
   "theme_color": "#2563eb",
+  "lang": "es",
+  "categories": ["business", "productivity"],
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
   ],
   "shortcuts": [
-    { "name": "Marcar entrada",  "url": "/marcar", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
-    { "name": "Mi asistencia",   "url": "/mi-asistencia" }
-  ]
+    {
+      "name": "Marcar asistencia",
+      "short_name": "Marcar",
+      "description": "Registrar entrada o salida",
+      "url": "/marcar",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Mi asistencia",
+      "short_name": "Historial",
+      "description": "Ver mi historial de asistencia",
+      "url": "/mi-asistencia",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Panel",
+      "short_name": "Panel",
+      "description": "Dashboard de asistencia en tiempo real",
+      "url": "/dashboard",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
 }

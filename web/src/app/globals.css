@@ -10,7 +10,27 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  /* Evita scroll horizontal en móvil */
+  overflow-x: hidden;
 }
+
+/* iOS: texto de formularios no hace zoom automático en input focus */
+@media (max-width: 768px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Área segura para notch de iPhone (bottom navigation) */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Scrollbar delgada en escritorio */
+::-webkit-scrollbar         { width: 5px; height: 5px; }
+::-webkit-scrollbar-track   { background: transparent; }
+::-webkit-scrollbar-thumb   { background: #cbd5e1; border-radius: 9px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 /* Animación para marcajes en tiempo real */
 @keyframes slideIn {

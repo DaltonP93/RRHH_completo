@@ -7,17 +7,33 @@ import { SwRegister } from '@/components/SwRegister'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Sistema de Asistencia — RH',
-  description: 'Control de asistencia en tiempo real',
+  title: 'SisHoras — Sistema de Asistencia',
+  description: 'Control de asistencia y marcación biométrica en tiempo real',
   manifest: '/manifest.webmanifest',
   applicationName: 'SisHoras',
-  appleWebApp: { capable: true, title: 'SisHoras', statusBarStyle: 'black-translucent' },
+  appleWebApp: {
+    capable: true,
+    title: 'SisHoras',
+    statusBarStyle: 'black-translucent',
+  },
+  icons: {
+    apple: '/icons/icon.svg',
+    icon:  '/icons/icon.svg',
+  },
+  other: {
+    // iOS: permite instalación como app de pantalla completa
+    'mobile-web-app-capable': 'yes',
+    'apple-mobile-web-app-capable': 'yes',
+    'apple-mobile-web-app-status-bar-style': 'black-translucent',
+  },
 }
 
 export const viewport: Viewport = {
   themeColor: '#2563eb',
   width: 'device-width',
   initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

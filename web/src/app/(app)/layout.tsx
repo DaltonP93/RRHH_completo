@@ -2,6 +2,7 @@ import Sidebar from '@/components/layout/Sidebar'
 import TopBar from '@/components/layout/TopBar'
 import DeviceAlertBanner from '@/components/layout/DeviceAlertBanner'
 import MobileBottomNav from '@/components/layout/MobileBottomNav'
+import HelpButton from '@/components/HelpButton'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -13,6 +14,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </main>
       <DeviceAlertBanner />
       <MobileBottomNav />
+      {/* Botón flotante de ayuda contextual — se muestra en todos los módulos */}
+      <HelpButton />
     </div>
   )
 }

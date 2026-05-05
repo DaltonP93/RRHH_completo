@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Fondo circular azul -->
+  <rect width="512" height="512" rx="110" fill="#2563eb"/>
+  <!-- Reloj/ícono de asistencia -->
+  <circle cx="256" cy="220" r="110" fill="none" stroke="white" stroke-width="28"/>
+  <!-- Agujas del reloj -->
+  <line x1="256" y1="220" x2="256" y2="150" stroke="white" stroke-width="22" stroke-linecap="round"/>
+  <line x1="256" y1="220" x2="310" y2="260" stroke="white" stroke-width="16" stroke-linecap="round"/>
+  <!-- Punto central -->
+  <circle cx="256" cy="220" r="14" fill="white"/>
+  <!-- Check de asistencia debajo -->
+  <path d="M176 370 L230 424 L336 318" fill="none" stroke="white" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
