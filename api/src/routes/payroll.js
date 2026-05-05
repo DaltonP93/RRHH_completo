@@ -31,7 +31,7 @@ async function fetchRows(year, month, branchId) {
     SELECT
       e.code                 AS codigo,
       CONCAT(e.first_name, ' ', e.last_name) AS nombre,
-      COALESCE(e.document_number, '') AS cedula,
+      COALESCE(e.document_number, e.employee_number, '') AS cedula,
       COALESCE(d.name, '')   AS departamento,
       COALESCE(b.name, '')   AS sede,
       SUM(CASE WHEN ds.status IN ('present','late') THEN 1 ELSE 0 END) AS dias_trab,

@@ -5,12 +5,26 @@ const logger = require('../config/logger');
 let io;
 
 function initSocket(server) {
+  // Construir lista de orígenes permitidos: permite http y https del mismo dominio
+  const rawOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const allowedOrigins = Array.from(new Set([
+    rawOrigin,
+    rawOrigin.replace(/^http:\/\//,  'https://'),
+    rawOrigin.replace(/^https:\/\//, 'http://'),
+    'http://localhost:3000',
+    'https://localhost:3000',
+    'http://sishoras.saa.com.py',
+    'https://sishoras.saa.com.py',
+  ]));
+
   io = new Server(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+      origin: allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true
-    }
+    },
+    // Permite WebSocket y polling como fallback
+    transports: ['websocket', 'polling'],
   });
 
   // Middleware de autenticación para WebSocket

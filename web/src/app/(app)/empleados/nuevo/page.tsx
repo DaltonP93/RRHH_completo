@@ -9,6 +9,7 @@ import { employeesApi, api } from '@/lib/api'
 interface FormData {
   code: string
   employee_number: string
+  document_number: string
   first_name: string
   last_name: string
   email: string
@@ -20,7 +21,7 @@ interface FormData {
 }
 
 const EMPTY: FormData = {
-  code: '', employee_number: '', first_name: '', last_name: '',
+  code: '', employee_number: '', document_number: '', first_name: '', last_name: '',
   email: '', phone: '', position: '', hire_date: '',
   department_id: '', schedule_id: '',
 }
@@ -128,9 +129,15 @@ export default function NuevoEmpleadoPage() {
               value={form.employee_number}
               onChange={set}
             />
+            <Field
+              label="Cédula de identidad"
+              name="document_number"
+              value={form.document_number}
+              onChange={set}
+            />
           </div>
           <p className="text-xs text-slate-400 mt-1.5">
-            El código debe coincidir con el USERID del reloj biométrico.
+            El código debe coincidir con el USERID del reloj biométrico. La cédula se usa en exportación de nómina SAA.
           </p>
         </div>
 
