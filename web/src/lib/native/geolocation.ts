@@ -32,19 +32,43 @@ export class GeoError extends Error {
 }
 
 /**
+ * Detecta si estamos corriendo dentro de un WebView de Capacitor.
+ * El binding global `window.Capacitor` lo inyecta el runtime nativo.
+ */
+function isCapacitorNative(): boolean {
+  const cap = (typeof globalThis !== 'undefined' && (globalThis as any).Capacitor) || null
+  return !!(cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform())
+}
+
+/**
  * Obtiene la posición actual con alta precisión.
  * @throws GeoError con .code legible.
  */
 export async function getCurrentPosition(opts?: { timeout?: number; maximumAge?: number }): Promise<Coords> {
-  // TODO Fase 2 — Capacitor:
-  // const Capacitor = (globalThis as any).Capacitor
-  // if (Capacitor?.isNativePlatform?.()) {
-  //   const { Geolocation } = await import('@capacitor/geolocation')
-  //   const r = await Geolocation.getCurrentPosition({ enableHighAccuracy: true })
-  //   return { latitude: r.coords.latitude, longitude: r.coords.longitude,
-  //            accuracy: r.coords.accuracy, timestamp: r.timestamp }
-  // }
+  // ── Capacitor (Android/iOS nativo) ───────────────────────────
+  if (isCapacitorNative()) {
+    try {
+      // Import dinámico para no romper el bundle web cuando @capacitor/geolocation no está instalado
+      const mod: any = await import(/* webpackIgnore: true */ '@capacitor/geolocation' as any).catch(() => null)
+      if (mod?.Geolocation) {
+        const r = await mod.Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: opts?.timeout ?? 12_000,
+          maximumAge: opts?.maximumAge ?? 0,
+        })
+        return {
+          latitude:  r.coords.latitude,
+          longitude: r.coords.longitude,
+          accuracy:  r.coords.accuracy,
+          timestamp: r.timestamp,
+        }
+      }
+    } catch (e: any) {
+      throw new GeoError('PERMISSION_DENIED', e?.message || 'Permiso de ubicación denegado (Capacitor)')
+    }
+  }
 
+  // ── Web fallback ─────────────────────────────────────────────
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
     throw new GeoError('UNSUPPORTED', 'Geolocalización no soportada en este navegador')
   }
