@@ -1,4 +1,3 @@
-/// <reference types="@capacitor/cli" />
 /**
  * Configuración Capacitor para SisHoras.
  *
@@ -16,7 +15,18 @@
  *
  * Empezar con modo HÍBRIDO. Cuando todo esté estable, evaluar bundle.
  */
-import type { CapacitorConfig } from '@capacitor/cli'
+// Type local — evita requerir @capacitor/cli instalado en el server.
+// Cuando se ejecuta `npx cap`, Capacitor lee este archivo aunque el tipo
+// venga de aquí (no necesita la importación oficial).
+type CapacitorConfig = {
+  appId:    string
+  appName:  string
+  webDir:   string
+  server?:  { url?: string; cleartext?: boolean; androidScheme?: string; iosScheme?: string }
+  plugins?: Record<string, any>
+  android?: Record<string, any>
+  ios?:     Record<string, any>
+}
 
 const config: CapacitorConfig = {
   appId:   'py.saa.sishoras',
