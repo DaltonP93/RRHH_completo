@@ -17,6 +17,7 @@ const audit = require('../services/audit');
 const BRANDING_KEYS = [
   'system_name', 'system_company',
   'system_logo_url', 'system_favicon_url',
+  'system_pwa_icon_url',             // icono PWA personalizado (manifest.webmanifest)
   'system_login_bg',                 // gradient tailwind (fallback)
   'system_login_bg_image',           // URL local /uploads/*.jpg (preferido)
   'system_login_title', 'system_login_subtitle',
@@ -76,6 +77,7 @@ const DEFAULTS = {
   system_company: '',
   system_logo_url: '',
   system_favicon_url: '',
+  system_pwa_icon_url: '',
   system_login_bg: 'from-slate-900 to-blue-900',
   system_login_bg_image: '',
   system_login_title: 'Sistema de Asistencia',
@@ -264,6 +266,7 @@ router.post('/upload', authenticate, authorize('admin', 'gth'), requirePermissio
       login_bg:   'system_login_bg_image',
       signature:  'system_signature_url',
       seal:       'system_seal_url',
+      pwa_icon:   'system_pwa_icon_url',
     };
     const key = kindToKey[kind];
 

@@ -6,6 +6,7 @@ import { api } from '@/lib/api'
 interface Settings {
   system_name: string; system_company: string
   system_logo_url: string; system_favicon_url: string
+  system_pwa_icon_url: string
   system_login_bg: string; system_login_bg_image: string
   system_login_title: string; system_login_subtitle: string; system_login_footer: string
   system_login_layout: 'center' | 'left' | 'right' | 'split'
@@ -35,6 +36,7 @@ export default function AparienciaPage() {
   const logoRef = useRef<HTMLInputElement>(null)
   const favRef  = useRef<HTMLInputElement>(null)
   const bgRef   = useRef<HTMLInputElement>(null)
+  const pwaRef  = useRef<HTMLInputElement>(null)
 
   async function load() {
     setLoading(true); setErr('')
@@ -74,7 +76,7 @@ export default function AparienciaPage() {
     } finally { setSaving(false) }
   }
 
-  async function upload(kind: 'logo' | 'favicon' | 'login_bg', file: File | null) {
+  async function upload(kind: 'logo' | 'favicon' | 'login_bg' | 'pwa_icon', file: File | null) {
     if (!file) return
     const fd = new FormData(); fd.append('file', file)
     try {
@@ -82,6 +84,7 @@ export default function AparienciaPage() {
       if (kind === 'logo')     set('system_logo_url',       res.data.url)
       if (kind === 'favicon')  set('system_favicon_url',    res.data.url)
       if (kind === 'login_bg') set('system_login_bg_image', res.data.url)
+      if (kind === 'pwa_icon') set('system_pwa_icon_url',   res.data.url)
       setMsg('Archivo subido correctamente.')
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Error al subir')
@@ -150,6 +153,39 @@ export default function AparienciaPage() {
             </button>
             <input ref={favRef} type="file" accept="image/x-icon,image/png,image/svg+xml" className="hidden"
               onChange={e => upload('favicon', e.target.files?.[0] || null)} />
+          </div>
+        </Row>
+        <Row label="Ícono PWA (app móvil)">
+          <div className="space-y-2">
+            <p className="text-xs text-slate-400">
+              Este ícono aparece cuando el usuario instala SisHoras como app desde Chrome/Safari.
+              Se recomienda PNG cuadrado 512×512 px o SVG.
+            </p>
+            <div className="flex items-center gap-3">
+              {s.system_pwa_icon_url ? (
+                <img src={s.system_pwa_icon_url} alt="pwa icon"
+                  className="w-12 h-12 rounded-xl bg-slate-100 p-1 object-contain" />
+              ) : (
+                <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-300 text-xs border border-dashed border-slate-300">
+                  SVG
+                </div>
+              )}
+              <input value={s.system_pwa_icon_url}
+                onChange={e => set('system_pwa_icon_url', e.target.value)}
+                placeholder="URL del ícono o sube archivo →"
+                className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+              <button onClick={() => pwaRef.current?.click()}
+                className="px-3 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-sm flex items-center gap-1">
+                <Upload size={14} /> Subir
+              </button>
+              <input ref={pwaRef} type="file" accept="image/png,image/svg+xml,image/webp" className="hidden"
+                onChange={e => upload('pwa_icon', e.target.files?.[0] || null)} />
+            </div>
+            {s.system_pwa_icon_url && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1.5 border border-emerald-200">
+                ✅ Ícono personalizado activo — se aplica en el manifest de la PWA automáticamente.
+              </p>
+            )}
           </div>
         </Row>
       </Section>

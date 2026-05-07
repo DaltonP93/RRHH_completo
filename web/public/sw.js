@@ -1,6 +1,11 @@
-// SisHoras Service Worker — cache estático + network-first para API
-const CACHE = 'sishoras-v1'
-const STATIC_ASSETS = ['/', '/marcar', '/mi-asistencia', '/manifest.webmanifest']
+// SisHoras Service Worker — cache estático + network-first para navegación
+//
+// Reglas:
+// - NUNCA cachear /api/*, /socket.io/*, /uploads/* (datos sensibles).
+// - Rutas /marcar y /mi-asistencia NO se cachean para evitar mostrar marcajes desactualizados.
+// - El cache name versionado (sishoras-v2) fuerza invalidación tras deploy.
+const CACHE = 'sishoras-v2'
+const STATIC_ASSETS = ['/manifest.webmanifest', '/icons/icon.svg']
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC_ASSETS)).catch(() => {}))
@@ -16,20 +21,33 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url)
-  // No cachear API ni rutas de auth/socket
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) return
 
-  // Network-first para navegaciones, cache-first para estáticos
+  // ── Lista negra: nunca cachear ──────────────────────────────
+  if (url.pathname.startsWith('/api/'))         return
+  if (url.pathname.startsWith('/socket.io/'))   return
+  if (url.pathname.startsWith('/uploads/'))     return
+  // Páginas con datos sensibles en tiempo real
+  if (url.pathname === '/marcar')               return
+  if (url.pathname === '/mi-asistencia')        return
+  if (url.pathname.startsWith('/dashboard'))    return
+
+  // ── Solo cachear GETs ───────────────────────────────────────
+  if (e.request.method !== 'GET') return
+
+  // ── Navegaciones: network-first con fallback a cache ────────
   if (e.request.mode === 'navigate') {
     e.respondWith(
       fetch(e.request).catch(() => caches.match(e.request).then(r => r || caches.match('/')))
     )
     return
   }
+
+  // ── Otros recursos estáticos: cache-first con revalidación ──
   e.respondWith(
     caches.match(e.request).then(hit =>
       hit || fetch(e.request).then(res => {
-        if (res.ok && e.request.method === 'GET') {
+        // No cachear respuestas con Authorization (datos del usuario)
+        if (res.ok && !e.request.headers.get('authorization')) {
           const clone = res.clone()
           caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {})
         }

@@ -34,6 +34,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: 'cover',   // safe-area iPhone (notch / home indicator)
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

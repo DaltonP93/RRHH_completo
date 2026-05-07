@@ -242,19 +242,26 @@ export default function Sidebar() {
     </>
   )
 
+  // Para empleados en móvil: solo se usa MobileBottomNav.
+  // El sidebar entero se oculta (sin hamburger ni drawer).
+  // En desktop (md+) sí se muestra.
+  const isEmployee = user?.role === 'employee'
+
   return (
     <>
-      {/* Hamburger (mobile only) */}
-      <button
-        aria-label="Abrir menú"
-        onClick={() => setOpen(true)}
-        className="md:hidden fixed top-3 left-3 z-40 p-2 rounded-xl bg-slate-900 text-white shadow-lg"
-      >
-        <Menu size={20} />
-      </button>
+      {/* Hamburger (mobile only) — oculto para empleados (usan bottom nav) */}
+      {!isEmployee && (
+        <button
+          aria-label="Abrir menú"
+          onClick={() => setOpen(true)}
+          className="md:hidden fixed top-3 left-3 z-40 p-2 rounded-xl bg-slate-900 text-white shadow-lg"
+        >
+          <Menu size={20} />
+        </button>
+      )}
 
       {/* Overlay mobile */}
-      {open && (
+      {open && !isEmployee && (
         <div
           role="button"
           tabIndex={0}
@@ -265,12 +272,16 @@ export default function Sidebar() {
         />
       )}
 
-      {/* Drawer / sidebar */}
+      {/* Drawer / sidebar
+          - Empleados: oculto en móvil (hidden md:flex), visible en desktop.
+          - Otros roles: oculto fuera de pantalla con translate y aparece al abrir hamburger. */}
       <aside
         className={clsx(
-          'w-64 min-h-screen flex flex-col z-50',
+          'w-64 min-h-screen flex-col z-50',
           'fixed md:sticky top-0 left-0 transition-transform duration-200',
-          open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+          isEmployee
+            ? 'hidden md:flex'
+            : clsx('flex', open ? 'translate-x-0' : '-translate-x-full md:translate-x-0')
         )}
         style={{ backgroundColor: bg, maxHeight: '100vh' }}
       >
