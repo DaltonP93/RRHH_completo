@@ -1,0 +1,6 @@
+name: RRHH Completo CodeQL configuration
+
+disable-default-queries: false
+
+queries:
+  - uses: security-and-quality
