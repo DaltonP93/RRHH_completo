@@ -305,4 +305,494 @@ router.get('/reconcile/history', async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// ENDPOINTS NUEVOS — Migración estructurada att2000 (Backlog Sprint 1+2)
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── GET /api/sync/att2000/diagnose ──────────────────────────────
+router.get('/att2000/diagnose', async (req, res) => {
+  try {
+    const { getAtt2000, queryAtt2000 } = require('../config/att2000');
+    await getAtt2000();
+
+    const checks = await Promise.allSettled([
+      queryAtt2000('SELECT COUNT(*) AS cnt FROM CHECKINOUT'),
+      queryAtt2000('SELECT COUNT(*) AS cnt FROM USERINFO'),
+      queryAtt2000('SELECT COUNT(*) AS cnt FROM DEPARTMENTS').catch(() => [{ cnt: 0 }]),
+      queryAtt2000('SELECT MIN(CHECKTIME) AS min_dt, MAX(CHECKTIME) AS max_dt FROM CHECKINOUT'),
+      queryAtt2000(`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_CATALOG = '${process.env.ATT_DATABASE || 'att2000'}'`),
+    ]);
+
+    const punches    = checks[0].status === 'fulfilled' ? checks[0].value[0]?.cnt : null;
+    const users      = checks[1].status === 'fulfilled' ? checks[1].value[0]?.cnt : null;
+    const depts      = checks[2].status === 'fulfilled' ? checks[2].value[0]?.cnt : null;
+    const range      = checks[3].status === 'fulfilled' ? checks[3].value[0] : null;
+    const tables     = checks[4].status === 'fulfilled' ? checks[4].value.map(r => r.TABLE_NAME) : [];
+
+    const issues = [];
+    if (punches === null) issues.push('No se pudo leer CHECKINOUT');
+    if (users   === null) issues.push('No se pudo leer USERINFO');
+
+    res.json({
+      connected:       true,
+      database:        process.env.ATT_DATABASE || 'att2000',
+      host:            process.env.ATT_HOST || '',
+      tables_detected: tables,
+      users_count:     users,
+      punches_count:   punches,
+      departments_count: depts,
+      min_checktime:   range?.min_dt,
+      max_checktime:   range?.max_dt,
+      issues,
+    });
+  } catch (err) {
+    res.status(503).json({ connected: false, error: err.message });
+  }
+});
+
+// ─── GET /api/sync/att2000/schema ────────────────────────────────
+router.get('/att2000/schema', async (req, res) => {
+  try {
+    const { queryAtt2000 } = require('../config/att2000');
+    const rows = await queryAtt2000(`
+      SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_CATALOG = '${process.env.ATT_DATABASE || 'att2000'}'
+      ORDER BY TABLE_NAME, ORDINAL_POSITION
+    `);
+    const byTable = {};
+    for (const r of rows) {
+      if (!byTable[r.TABLE_NAME]) byTable[r.TABLE_NAME] = [];
+      byTable[r.TABLE_NAME].push({ column: r.COLUMN_NAME, type: r.DATA_TYPE, nullable: r.IS_NULLABLE === 'YES' });
+    }
+    res.json({ ok: true, schema: byTable, table_count: Object.keys(byTable).length });
+  } catch (err) {
+    res.status(503).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── GET /api/sync/att2000/counts ────────────────────────────────
+router.get('/att2000/counts', async (req, res) => {
+  try {
+    const { queryAtt2000 } = require('../config/att2000');
+    const tables = ['CHECKINOUT','USERINFO','DEPARTMENTS'];
+    const results = {};
+    for (const t of tables) {
+      try {
+        const r = await queryAtt2000(`SELECT COUNT(*) AS cnt FROM ${t}`);
+        results[t] = r[0]?.cnt ?? 0;
+      } catch {
+        results[t] = null;
+      }
+    }
+    res.json({ ok: true, counts: results });
+  } catch (err) {
+    res.status(503).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── GET /api/sync/att2000/source-mode ───────────────────────────
+router.get('/att2000/source-mode', async (req, res) => {
+  try {
+    const [[row]] = await sequelize.query(
+      "SELECT `value` FROM settings WHERE `key` = 'attendance.source_mode'"
+    );
+    res.json({ source_mode: row?.value || 'legacy_att2000' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── PUT /api/sync/att2000/source-mode ───────────────────────────
+router.put('/att2000/source-mode', async (req, res) => {
+  const { mode } = req.body;
+  if (!['legacy_att2000','hybrid','direct_only'].includes(mode)) {
+    return res.status(400).json({ error: 'mode inválido: legacy_att2000 | hybrid | direct_only' });
+  }
+  try {
+    await sequelize.query(
+      "UPDATE settings SET `value` = ? WHERE `key` = 'attendance.source_mode'",
+      { replacements: [mode] }
+    );
+    res.json({ ok: true, source_mode: mode });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/sync/att2000/sync-runs ─────────────────────────────
+router.get('/att2000/sync-runs', async (req, res) => {
+  try {
+    const { limit = 30, status } = req.query;
+    let where = 'ss.code = ?';
+    const params = ['att2000'];
+    if (status) { where += ' AND sr.status = ?'; params.push(status); }
+    const [rows] = await sequelize.query(`
+      SELECT sr.*, ss.name AS source_name
+      FROM source_sync_runs sr
+      JOIN source_systems ss ON ss.id = sr.source_system_id
+      WHERE ${where}
+      ORDER BY sr.created_at DESC
+      LIMIT ${parseInt(limit)}
+    `, { replacements: params });
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /api/sync/att2000/employee-map ──────────────────────────
+router.get('/att2000/employee-map', async (req, res) => {
+  try {
+    const { status, limit = 100 } = req.query;
+    let where = 'ss.code = ?';
+    const params = ['att2000'];
+    if (status) { where += ' AND em.match_status = ?'; params.push(status); }
+    const [rows] = await sequelize.query(`
+      SELECT em.*, e.first_name, e.last_name, e.code AS employee_code
+      FROM source_employee_map em
+      JOIN source_systems ss ON ss.id = em.source_system_id
+      LEFT JOIN employees e ON e.id = em.employee_id
+      WHERE ${where}
+      ORDER BY em.match_status, em.raw_name
+      LIMIT ${parseInt(limit)}
+    `, { replacements: params });
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── PUT /api/sync/att2000/employee-map/:id ───────────────────────
+router.put('/att2000/employee-map/:id', async (req, res) => {
+  const { employee_id, match_status, notes } = req.body;
+  try {
+    await sequelize.query(`
+      UPDATE source_employee_map
+      SET employee_id = ?, match_status = ?, notes = ?, updated_at = NOW()
+      WHERE id = ?
+    `, { replacements: [employee_id || null, match_status || 'matched', notes || null, req.params.id] });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/sync/att2000/import-employees ─────────────────────
+router.post('/att2000/import-employees', async (req, res) => {
+  try {
+    const { queryAtt2000, getTableColumns, pickCol } = require('../config/att2000');
+    const logger = require('../config/logger');
+
+    // Crear sync run
+    const [[src]] = await sequelize.query("SELECT id FROM source_systems WHERE code = 'att2000'");
+    const sourceId = src.id;
+    const [runRes] = await sequelize.query(`
+      INSERT INTO source_sync_runs (source_system_id, sync_type, entity_type, status, started_at)
+      VALUES (?, 'full', 'users', 'running', NOW())
+    `, { replacements: [sourceId] });
+    const runId = runRes;
+
+    const cols = await getTableColumns('USERINFO');
+    const badgeCol  = pickCol(cols, 'BADGENUMBER', { prefix: 'u.' });
+    const nameCol   = pickCol(cols, 'Name',         { prefix: 'u.', alias: 'raw_name' });
+    const deptCol   = pickCol(cols, 'DEFAULTDEPTID',{ prefix: 'u.', alias: 'dept_id' });
+
+    const users = await queryAtt2000(`SELECT u.USERID AS source_user_id, ${badgeCol}, ${nameCol}, ${deptCol} FROM USERINFO u`);
+
+    let inserted = 0, updated = 0, errors = 0;
+
+    for (const u of users) {
+      try {
+        const badge = String(u.BADGENUMBER || u.source_user_id).trim();
+
+        // Buscar empleado existente por código
+        const [[emp]] = await sequelize.query(
+          'SELECT id FROM employees WHERE code = ? LIMIT 1',
+          { replacements: [badge] }
+        );
+
+        const employeeId = emp?.id || null;
+        const matchStatus = employeeId ? 'matched' : 'unmatched';
+
+        // Upsert source_employee_map
+        await sequelize.query(`
+          INSERT INTO source_employee_map
+            (source_system_id, source_user_id, source_badge_number, employee_id, raw_name, match_status, match_confidence)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            source_badge_number = VALUES(source_badge_number),
+            employee_id = COALESCE(VALUES(employee_id), employee_id),
+            raw_name = VALUES(raw_name),
+            match_status = IF(employee_id IS NOT NULL, 'matched', VALUES(match_status)),
+            match_confidence = IF(employee_id IS NOT NULL, 100, 0),
+            updated_at = NOW()
+        `, { replacements: [sourceId, String(u.source_user_id), badge, employeeId, u.raw_name || null, matchStatus, employeeId ? 100 : 0] });
+
+        if (employeeId) updated++; else inserted++;
+      } catch (e) {
+        errors++;
+        logger.error('import-employees row error:', e.message);
+      }
+    }
+
+    await sequelize.query(`
+      UPDATE source_sync_runs SET status='completed', finished_at=NOW(),
+        total_read=?, total_inserted=?, total_updated=?, total_errors=?
+      WHERE id=?
+    `, { replacements: [users.length, inserted, updated, errors, runId] });
+
+    res.json({ ok: true, total: users.length, matched: updated, unmatched: inserted, errors, run_id: runId });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/sync/att2000/import-punches ───────────────────────
+// Body: { from, to, batch_size?, mode? }
+router.post('/att2000/import-punches', async (req, res) => {
+  const { from, to, batch_size = 5000, mode = 'staging_then_apply' } = req.body;
+  if (!from || !to) return res.status(400).json({ error: 'from y to son requeridos (YYYY-MM-DD)' });
+
+  try {
+    const { queryAtt2000, getTableColumns, pickCol } = require('../config/att2000');
+    const logger = require('../config/logger');
+
+    const [[src]] = await sequelize.query("SELECT id FROM source_systems WHERE code = 'att2000'");
+    const sourceId = src.id;
+    const [runRes] = await sequelize.query(`
+      INSERT INTO source_sync_runs
+        (source_system_id, sync_type, entity_type, status, started_at, from_datetime, to_datetime, created_by)
+      VALUES (?, 'full', 'punches', 'running', NOW(), ?, ?, ?)
+    `, { replacements: [sourceId, from, to, req.user?.id || null] });
+    const runId = runRes;
+
+    const cols = await getTableColumns('CHECKINOUT');
+    const workCode  = pickCol(cols, 'WorkCode',   { prefix: 'c.', alias: 'work_code' });
+    const checkType = pickCol(cols, 'CHECKTYPE',  { prefix: 'c.', alias: 'check_type' });
+    const sensorId  = pickCol(cols, 'SENSORID',   { prefix: 'c.', alias: 'sensor_id' });
+    const verifyCode= pickCol(cols, 'VERIFYCODE', { prefix: 'c.', alias: 'verify_code' });
+
+    const punches = await queryAtt2000(`
+      SELECT c.USERID AS source_user_id, c.CHECKTIME AS check_time,
+             ${checkType}, ${sensorId}, ${verifyCode}, ${workCode}
+      FROM CHECKINOUT c
+      WHERE c.CHECKTIME >= '${from}' AND c.CHECKTIME <= '${to} 23:59:59'
+      ORDER BY c.CHECKTIME
+    `);
+
+    let staged = 0, imported = 0, dupes = 0, errors = 0;
+
+    // Cargar mapa de usuarios
+    const [empMaps] = await sequelize.query(
+      'SELECT source_user_id, employee_id FROM source_employee_map WHERE source_system_id = ?',
+      { replacements: [sourceId] }
+    );
+    const empMap = {};
+    for (const m of empMaps) empMap[String(m.source_user_id)] = m.employee_id;
+
+    // Normalizar checktype
+    const normalizeType = (ct) => {
+      if (!ct) return 'unknown';
+      const t = String(ct).toUpperCase();
+      if (t === 'I' || t === '0') return 'in';
+      if (t === 'O' || t === '1') return 'out';
+      return 'unknown';
+    };
+
+    // Procesar en lotes
+    for (let i = 0; i < punches.length; i += batch_size) {
+      const batch = punches.slice(i, i + batch_size);
+      for (const p of batch) {
+        try {
+          const empId = empMap[String(p.source_user_id)] || null;
+          const normType = normalizeType(p.check_type);
+          const rawData = JSON.stringify(p);
+
+          await sequelize.query(`
+            INSERT IGNORE INTO attendance_import_staging
+              (sync_run_id, source_system_id, source_user_id, check_time, check_type,
+               sensor_id, verify_code, work_code, raw_data, normalized_type, employee_id, import_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+          `, { replacements: [
+            runId, sourceId, String(p.source_user_id),
+            p.check_time, p.check_type || null,
+            p.sensor_id || null, p.verify_code || null, p.work_code || null,
+            rawData, normType, empId
+          ]});
+          staged++;
+        } catch (e) {
+          if (e.message?.includes('Duplicate')) dupes++;
+          else { errors++; }
+        }
+      }
+    }
+
+    // Aplicar staging → attendance_logs
+    if (mode === 'staging_then_apply') {
+      const [pending] = await sequelize.query(`
+        SELECT * FROM attendance_import_staging
+        WHERE sync_run_id = ? AND import_status = 'pending' AND employee_id IS NOT NULL
+          AND normalized_type IN ('in','out')
+      `, { replacements: [runId] });
+
+      for (const s of pending) {
+        try {
+          // Verificar duplicado en attendance_logs
+          const [[dup]] = await sequelize.query(`
+            SELECT id FROM attendance_logs WHERE employee_id=? AND timestamp=? LIMIT 1
+          `, { replacements: [s.employee_id, s.check_time] });
+
+          if (dup) {
+            await sequelize.query("UPDATE attendance_import_staging SET import_status='duplicate' WHERE id=?", { replacements: [s.id] });
+            dupes++;
+          } else {
+            await sequelize.query(`
+              INSERT INTO attendance_logs (employee_id, timestamp, type, source, source_system, raw_data, created_at)
+              VALUES (?, ?, ?, 'att2000_import', 'att2000', ?, NOW())
+            `, { replacements: [s.employee_id, s.check_time, s.normalized_type, s.raw_data] });
+            await sequelize.query("UPDATE attendance_import_staging SET import_status='imported' WHERE id=?", { replacements: [s.id] });
+            imported++;
+          }
+        } catch (e) {
+          errors++;
+          await sequelize.query("UPDATE attendance_import_staging SET import_status='error', error_message=? WHERE id=?",
+            { replacements: [e.message, s.id] });
+        }
+      }
+    }
+
+    await sequelize.query(`
+      UPDATE source_sync_runs SET status='completed', finished_at=NOW(),
+        total_read=?, total_inserted=?, total_skipped=?, total_errors=?
+      WHERE id=?
+    `, { replacements: [punches.length, imported, dupes, errors, runId] });
+
+    res.json({ ok: true, run_id: runId, total_read: punches.length, staged, imported, duplicates: dupes, errors });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── GET /api/sync/att2000/staging ───────────────────────────────
+router.get('/att2000/staging', async (req, res) => {
+  try {
+    const { run_id, status, limit = 100 } = req.query;
+    let where = '1=1';
+    const params = [];
+    if (run_id) { where += ' AND sync_run_id = ?'; params.push(run_id); }
+    if (status) { where += ' AND import_status = ?'; params.push(status); }
+    const [rows] = await sequelize.query(`
+      SELECT s.*, e.first_name, e.last_name, e.code AS employee_code
+      FROM attendance_import_staging s
+      LEFT JOIN employees e ON e.id = s.employee_id
+      WHERE ${where}
+      ORDER BY s.check_time DESC
+      LIMIT ${parseInt(limit)}
+    `, { replacements: params });
+    const [[total]] = await sequelize.query(`SELECT COUNT(*) AS cnt FROM attendance_import_staging WHERE ${where}`, { replacements: params });
+    res.json({ data: rows, total: total.cnt });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── POST /api/sync/att2000/reconcile-advanced ───────────────────
+router.post('/att2000/reconcile-advanced', async (req, res) => {
+  const { date_from, date_to, employee_id } = req.body;
+  if (!date_from || !date_to) return res.status(400).json({ error: 'date_from y date_to requeridos' });
+
+  try {
+    const { queryAtt2000 } = require('../config/att2000');
+    const [[src]] = await sequelize.query("SELECT id FROM source_systems WHERE code = 'att2000'");
+    const sourceId = src.id;
+    const [runRes] = await sequelize.query(`
+      INSERT INTO source_sync_runs
+        (source_system_id, sync_type, entity_type, status, started_at, from_datetime, to_datetime)
+      VALUES (?, 'reconciliation', 'punches', 'running', NOW(), ?, ?)
+    `, { replacements: [sourceId, date_from, date_to] });
+    const runId = runRes;
+
+    let empFilter = '';
+    const params = [date_from, date_to + ' 23:59:59'];
+    if (employee_id) { empFilter = ' AND al.employee_id = ?'; params.push(employee_id); }
+
+    // Conteo local por empleado/día
+    const [localCounts] = await sequelize.query(`
+      SELECT DATE(al.timestamp) AS d, al.employee_id, COUNT(*) AS cnt
+      FROM attendance_logs al
+      WHERE al.timestamp BETWEEN ? AND ?${empFilter}
+      GROUP BY DATE(al.timestamp), al.employee_id
+    `, { replacements: params });
+
+    // Conteo en att2000 por usuario/día
+    const sourceCounts = await queryAtt2000(`
+      SELECT CAST(CHECKTIME AS DATE) AS d, USERID AS source_user_id, COUNT(*) AS cnt
+      FROM CHECKINOUT
+      WHERE CHECKTIME >= '${date_from}' AND CHECKTIME <= '${date_to} 23:59:59'
+      GROUP BY CAST(CHECKTIME AS DATE), USERID
+    `);
+
+    // Mapear source_user_id → employee_id
+    const [empMaps] = await sequelize.query(
+      'SELECT source_user_id, employee_id FROM source_employee_map WHERE source_system_id = ?',
+      { replacements: [sourceId] }
+    );
+    const sourceToEmp = {};
+    for (const m of empMaps) if (m.employee_id) sourceToEmp[String(m.source_user_id)] = m.employee_id;
+
+    // Construir índice local
+    const localIdx = {};
+    for (const r of localCounts) localIdx[`${r.d}_${r.employee_id}`] = r.cnt;
+
+    let issues = 0;
+    for (const s of sourceCounts) {
+      const empId = sourceToEmp[String(s.source_user_id)];
+      if (!empId) continue;
+      const key = `${s.d}_${empId}`;
+      const localCnt = localIdx[key] || 0;
+      if (localCnt !== s.cnt) {
+        await sequelize.query(`
+          INSERT INTO attendance_reconciliation_results
+            (sync_run_id, employee_id, date, issue_type, source_count, local_count, details_json)
+          VALUES (?, ?, ?, 'time_mismatch', ?, ?, ?)
+        `, { replacements: [
+          runId, empId, s.d,
+          s.cnt, localCnt,
+          JSON.stringify({ source_user_id: s.source_user_id })
+        ]});
+        issues++;
+      }
+    }
+
+    await sequelize.query(`
+      UPDATE source_sync_runs SET status='completed', finished_at=NOW(), total_errors=? WHERE id=?
+    `, { replacements: [issues, runId] });
+
+    res.json({ ok: true, run_id: runId, issues_found: issues, date_from, date_to });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── GET /api/sync/att2000/reconcile-results ─────────────────────
+router.get('/att2000/reconcile-results', async (req, res) => {
+  try {
+    const { status = 'open', limit = 100 } = req.query;
+    const [rows] = await sequelize.query(`
+      SELECT r.*, e.first_name, e.last_name, e.code AS employee_code,
+             sr.created_at AS run_date
+      FROM attendance_reconciliation_results r
+      LEFT JOIN employees e ON e.id = r.employee_id
+      JOIN source_sync_runs sr ON sr.id = r.sync_run_id
+      WHERE r.status = ?
+      ORDER BY r.date DESC, r.created_at DESC
+      LIMIT ${parseInt(limit)}
+    `, { replacements: [status] });
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
