@@ -82,7 +82,9 @@ const app = express();
 const server = http.createServer(app);
 
 // ─── Middleware ─────────────────────────────────────────────────
+const { requestId } = require('./middleware/requestId');
 app.set('trust proxy', 1); // Nginx reverse proxy
+app.use(requestId); // UUID por request — disponible en logs y respuesta X-Request-Id
 app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {
