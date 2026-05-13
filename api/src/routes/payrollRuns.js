@@ -19,6 +19,7 @@
 const router = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
+const { calculateEmployeePayroll } = require('../services/payrollFormulaEngine');
 
 router.use(authenticate);
 
@@ -636,6 +637,107 @@ router.put('/payroll-monthly-parameters/:id', authorize('admin', 'hr', 'super_ad
   } catch (err) {
     console.error('PUT /api/payroll-monthly-parameters/:id error:', err);
     res.status(500).json({ error: 'Error al actualizar parámetros mensuales' });
+  }
+});
+
+// POST /api/payroll-runs/:id/queue — encolar para procesamiento en background
+router.post('/:id/queue', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const [[run]] = await sequelize.query(
+      'SELECT * FROM payroll_runs WHERE id = ?',
+      { replacements: [req.params.id] }
+    );
+    if (!run) return res.status(404).json({ error: 'Liquidación no encontrada' });
+
+    const blocked = ['queued', 'calculating', 'approved', 'closed'];
+    if (blocked.includes(run.status)) {
+      return res.status(400).json({ error: `No se puede encolar en estado '${run.status}'` });
+    }
+
+    await sequelize.query(
+      "UPDATE payroll_runs SET status='queued', queued_at=NOW(), queued_by=? WHERE id=?",
+      { replacements: [req.user.id, run.id] }
+    );
+
+    res.json({ message: 'Liquidación encolada para procesamiento', run_id: run.id });
+  } catch (err) {
+    console.error('POST /api/payroll-runs/:id/queue error:', err);
+    res.status(500).json({ error: 'Error al encolar liquidación' });
+  }
+});
+
+// GET /api/payroll-runs/:id/preview/:employeeId — preview de nómina sin persistir
+router.get('/:id/preview/:employeeId', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const [[run]] = await sequelize.query(
+      'SELECT * FROM payroll_runs WHERE id = ?',
+      { replacements: [req.params.id] }
+    );
+    if (!run) return res.status(404).json({ error: 'Liquidación no encontrada' });
+
+    const result = await calculateEmployeePayroll(
+      parseInt(req.params.employeeId),
+      run.period_year,
+      run.period_month,
+      { companyId: run.company_id }
+    );
+
+    res.json(result);
+  } catch (err) {
+    console.error('GET /api/payroll-runs/:id/preview/:employeeId error:', err);
+    res.status(500).json({ error: 'Error al calcular preview de nómina' });
+  }
+});
+
+// GET /api/payroll-runs/:id/preview — preview completo de todos los empleados
+router.get('/:id/preview', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const [[run]] = await sequelize.query(
+      'SELECT * FROM payroll_runs WHERE id = ?',
+      { replacements: [req.params.id] }
+    );
+    if (!run) return res.status(404).json({ error: 'Liquidación no encontrada' });
+
+    const [employees] = await sequelize.query(`
+      SELECT e.id FROM employees e
+      INNER JOIN payroll_profiles pp ON pp.employee_id = e.id AND pp.status = 'active'
+      WHERE e.company_id = ? AND e.status = 'active'
+    `, { replacements: [run.company_id] });
+
+    const results = [];
+    let totalGross = 0, totalNet = 0, totalIpsEmployee = 0, totalIpsEmployer = 0;
+
+    for (const { id: employeeId } of employees) {
+      try {
+        const r = await calculateEmployeePayroll(
+          employeeId, run.period_year, run.period_month,
+          { companyId: run.company_id }
+        );
+        results.push(r);
+        totalGross       += r.gross_amount;
+        totalNet         += r.net_amount;
+        totalIpsEmployee += r.ips_employee;
+        totalIpsEmployer += r.ips_employer;
+      } catch (e) {
+        results.push({ employee_id: employeeId, error: e.message });
+      }
+    }
+
+    res.json({
+      run_id: run.id,
+      period: `${run.period_year}/${String(run.period_month).padStart(2, '0')}`,
+      total_employees: employees.length,
+      totals: {
+        gross: totalGross,
+        net: totalNet,
+        ips_employee: totalIpsEmployee,
+        ips_employer: totalIpsEmployer,
+      },
+      employees: results,
+    });
+  } catch (err) {
+    console.error('GET /api/payroll-runs/:id/preview error:', err);
+    res.status(500).json({ error: 'Error al calcular preview de nómina' });
   }
 });
 
