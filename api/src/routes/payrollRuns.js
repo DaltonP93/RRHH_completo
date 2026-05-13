@@ -488,36 +488,86 @@ router.get('/:id/ips-export', async (req, res) => {
 });
 
 // GET /api/payroll-runs/:id/mtess-export
+// Query: format = reop_xlsx | sueldos_csv | resumen_json (default: resumen_json)
 router.get('/:id/mtess-export', async (req, res) => {
   try {
-    const [runs] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
-    if (!runs.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+    const { generateReop, generateSueldosCsv, generateResumenJson } = require('../services/mtessExporter');
 
-    const [rows] = await sequelize.query(`
+    const [[run]] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    if (!run) return res.status(404).json({ error: 'Liquidación no encontrada' });
+
+    // Preferir payroll_items si hay datos del motor de fórmulas
+    let rows = [];
+    const [settlements] = await sequelize.query(`
       SELECT
-        e.document_number,
-        CONCAT(e.last_name, ', ', e.first_name) AS employee_name,
-        e.position_id,
+        e.document_number, e.first_name, e.last_name, e.hire_date, e.ips_number,
         p.name AS position_name,
-        es.gross_income AS salary,
-        es.worked_days,
-        es.net_pay,
-        e.hire_date,
-        e.ips_number
+        es.gross_income, es.worked_days, es.net_pay,
+        es.ips_employee_amount, es.ips_employer_amount
       FROM employee_settlements es
       JOIN employees e ON e.id = es.employee_id
       LEFT JOIN positions p ON p.id = e.position_id
       WHERE es.payroll_run_id = ?
       ORDER BY e.last_name ASC, e.first_name ASC
-    `, { replacements: [req.params.id] });
+    `, { replacements: [run.id] });
 
+    if (settlements.length) {
+      rows = settlements;
+    } else {
+      // Fallback: leer desde payroll_items agrupado
+      const [items] = await sequelize.query(`
+        SELECT
+          pi.employee_id,
+          e.document_number, e.first_name, e.last_name, e.hire_date, e.ips_number,
+          pos.name AS position_name,
+          SUM(CASE WHEN pi.concept_type='INCOME' THEN pi.amount ELSE 0 END) AS gross_income,
+          MAX(pi.days_worked) AS worked_days,
+          SUM(CASE WHEN pi.concept_code='IPS_EMPLEADO' THEN pi.amount ELSE 0 END) AS ips_employee_amount,
+          SUM(CASE WHEN pi.concept_code='IPS_PATRONAL' THEN pi.amount ELSE 0 END) AS ips_employer_amount
+        FROM payroll_items pi
+        JOIN employees e ON e.id = pi.employee_id
+        LEFT JOIN payroll_profiles pp ON pp.employee_id = e.id AND pp.status='active'
+        LEFT JOIN positions pos ON pos.id = e.position_id
+        WHERE pi.payroll_run_id = ?
+        GROUP BY pi.employee_id
+        ORDER BY e.last_name ASC, e.first_name ASC
+      `, { replacements: [run.id] });
+
+      rows = items.map(r => ({
+        ...r,
+        net_pay: r.gross_income - r.ips_employee_amount,
+      }));
+    }
+
+    const [[company]] = await sequelize.query(
+      'SELECT * FROM companies WHERE id = ?', { replacements: [run.company_id || 1] }
+    ).catch(() => [[{}]]);
+
+    const fmt = req.query.format || 'resumen_json';
+    const dateStr = `${run.period_year}${String(run.period_month).padStart(2, '0')}`;
+
+    if (fmt === 'reop_xlsx') {
+      const buffer = await generateReop(run, rows, company);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="REOP_${dateStr}.xlsx"`);
+      return res.send(buffer);
+    }
+
+    if (fmt === 'sueldos_csv') {
+      const buffer = generateSueldosCsv(run, rows);
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="MTESS_Sueldos_${dateStr}.txt"`);
+      return res.send(buffer);
+    }
+
+    // resumen_json (default)
+    const resumen = generateResumenJson(run, rows);
     res.json({
-      run_id: runs[0].id,
-      period_year: runs[0].period_year,
-      period_month: runs[0].period_month,
-      period_start: runs[0].period_start,
-      period_end: runs[0].period_end,
-      records: rows
+      run_id: run.id,
+      period_year: run.period_year,
+      period_month: run.period_month,
+      resumen,
+      records: rows,
     });
   } catch (err) {
     console.error('GET /api/payroll-runs/:id/mtess-export error:', err);
