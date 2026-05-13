@@ -313,4 +313,203 @@ router.post('/:id/close', authorize(...ADMIN_ROLES), async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── 360 — Invitar evaluadores por pares ─────────────────────────
+
+// POST /api/appraisals/:id/invite-peers
+// Body: { peers: [{reviewer_id, reviewer_role, weight, due_date}] }
+router.post('/:id/invite-peers', authorize(...MGR_ROLES), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { peers = [] } = req.body;
+    if (!peers.length) return res.status(400).json({ error: 'Se requiere al menos un evaluador' });
+
+    const [[appraisal]] = await sequelize.query('SELECT * FROM appraisals WHERE id = ?', { replacements: [id] });
+    if (!appraisal) return res.status(404).json({ error: 'Evaluación no encontrada' });
+
+    const inserted = [];
+    for (const p of peers) {
+      const [result] = await sequelize.query(`
+        INSERT INTO appraisal_peer_reviewers
+          (appraisal_id, reviewer_id, reviewer_role, weight, due_date, status, invited_at)
+        VALUES (?, ?, ?, ?, ?, 'invited', NOW())
+        ON DUPLICATE KEY UPDATE reviewer_role=VALUES(reviewer_role), weight=VALUES(weight),
+          due_date=VALUES(due_date), status='invited'
+      `, { replacements: [id, p.reviewer_id, p.reviewer_role || 'peer', p.weight || 1.0, p.due_date || null] });
+      inserted.push(result);
+    }
+
+    // Marcar evaluación como 360 si no lo estaba
+    await sequelize.query(
+      "UPDATE appraisals SET appraisal_type='360' WHERE id=? AND appraisal_type='traditional'",
+      { replacements: [id] }
+    );
+
+    res.json({ ok: true, invited: inserted.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/appraisals/:id/peers — listar evaluadores par con su estado
+router.get('/:id/peers', async (req, res) => {
+  try {
+    const [peers] = await sequelize.query(`
+      SELECT apr.*, u.username, u.full_name AS reviewer_name, u.email AS reviewer_email
+      FROM appraisal_peer_reviewers apr
+      JOIN users u ON u.id = apr.reviewer_id
+      WHERE apr.appraisal_id = ?
+      ORDER BY apr.reviewer_role, u.full_name
+    `, { replacements: [req.params.id] });
+    res.json(peers);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/appraisals/:id/peer-score — evaluador par envía puntajes
+// Body: { scores: [{criteria_id, score, comment}], qualitative: [{question_key, response}] }
+router.post('/:id/peer-score', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const reviewerId = req.user.id;
+
+    const [[peer]] = await sequelize.query(`
+      SELECT apr.*, a.anonymize_peers FROM appraisal_peer_reviewers apr
+      JOIN appraisals a ON a.id = apr.appraisal_id
+      WHERE apr.appraisal_id = ? AND apr.reviewer_id = ?
+    `, { replacements: [id, reviewerId] });
+
+    if (!peer) return res.status(403).json({ error: 'No eres evaluador par de esta evaluación' });
+    if (peer.status === 'completed') return res.status(400).json({ error: 'Ya completaste esta evaluación' });
+
+    const { scores = [], qualitative = [] } = req.body;
+
+    // Insertar puntajes por criterio
+    for (const s of scores) {
+      await sequelize.query(`
+        INSERT INTO appraisal_scores
+          (appraisal_id, criteria_id, scorer_role, peer_reviewer_id, score, comment, is_anonymous, scored_by, scored_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE score=VALUES(score), comment=VALUES(comment), scored_at=NOW()
+      `, { replacements: [
+        id, s.criteria_id, peer.reviewer_role, peer.id, s.score,
+        s.comment || null, peer.anonymize_peers ? 1 : 0, reviewerId,
+      ]});
+    }
+
+    // Insertar feedback cualitativo
+    for (const q of qualitative) {
+      await sequelize.query(`
+        INSERT INTO appraisal_qualitative_feedback
+          (appraisal_id, reviewer_id, reviewer_role, question_key, response, is_anonymous, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE response=VALUES(response)
+      `, { replacements: [
+        id, peer.anonymize_peers ? null : reviewerId, peer.reviewer_role,
+        q.question_key, q.response || '', peer.anonymize_peers ? 1 : 0,
+      ]});
+    }
+
+    // Marcar par como completado
+    await sequelize.query(
+      "UPDATE appraisal_peer_reviewers SET status='completed', completed_at=NOW() WHERE id=?",
+      { replacements: [peer.id] }
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/appraisals/:id/close-360 — cerrar y calcular puntaje 360 consolidado
+router.post('/:id/close-360', authorize(...ADMIN_ROLES), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [[appraisal]] = await sequelize.query('SELECT * FROM appraisals WHERE id = ?', { replacements: [id] });
+    if (!appraisal) return res.status(404).json({ error: 'Evaluación no encontrada' });
+
+    // Puntajes por rol
+    const [scores] = await sequelize.query(`
+      SELECT scorer_role, AVG(score) AS avg_score
+      FROM appraisal_scores
+      WHERE appraisal_id = ?
+      GROUP BY scorer_role
+    `, { replacements: [id] });
+
+    const byRole = {};
+    for (const s of scores) byRole[s.scorer_role] = parseFloat(s.avg_score || 0);
+
+    const selfScore    = byRole['self']    || null;
+    const managerScore = byRole['manager'] || null;
+    const peerRoles    = ['peer', 'subordinate', 'client'];
+    const peerScores   = peerRoles.map(r => byRole[r]).filter(Boolean);
+    const peerScore    = peerScores.length ? peerScores.reduce((a, b) => a + b, 0) / peerScores.length : null;
+
+    // Ponderación: self 20%, manager 50%, peers 30%
+    const weights = { self: 0.2, manager: 0.5, peer: 0.3 };
+    let overall = 0, totalWeight = 0;
+    if (selfScore !== null)    { overall += selfScore    * weights.self;    totalWeight += weights.self; }
+    if (managerScore !== null) { overall += managerScore * weights.manager; totalWeight += weights.manager; }
+    if (peerScore !== null)    { overall += peerScore    * weights.peer;    totalWeight += weights.peer; }
+    const overallScore = totalWeight > 0 ? parseFloat((overall / totalWeight).toFixed(2)) : null;
+
+    // Upsert resultado 360
+    await sequelize.query(`
+      INSERT INTO appraisal_360_results
+        (appraisal_id, self_score, manager_score, peer_score, overall_score,
+         gap_self_mgr, gap_self_peer, generated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        self_score=VALUES(self_score), manager_score=VALUES(manager_score),
+        peer_score=VALUES(peer_score), overall_score=VALUES(overall_score),
+        gap_self_mgr=VALUES(gap_self_mgr), gap_self_peer=VALUES(gap_self_peer),
+        generated_at=NOW()
+    `, { replacements: [
+      id, selfScore, managerScore, peerScore, overallScore,
+      selfScore !== null && managerScore !== null ? parseFloat((selfScore - managerScore).toFixed(2)) : null,
+      selfScore !== null && peerScore    !== null ? parseFloat((selfScore - peerScore).toFixed(2))    : null,
+    ]});
+
+    // Cerrar evaluación
+    await sequelize.query(
+      "UPDATE appraisals SET status='closed', final_score=?, closed_at=NOW() WHERE id=?",
+      { replacements: [overallScore, id] }
+    );
+
+    res.json({ ok: true, self_score: selfScore, manager_score: managerScore, peer_score: peerScore, overall_score: overallScore });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/appraisals/:id/360-results — obtener resultados consolidados con feedback
+router.get('/:id/360-results', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [[result]] = await sequelize.query(
+      'SELECT * FROM appraisal_360_results WHERE appraisal_id = ?',
+      { replacements: [id] }
+    );
+
+    const [[appraisal]] = await sequelize.query(
+      'SELECT a.*, CONCAT(e.first_name," ",e.last_name) AS employee_name FROM appraisals a JOIN employees e ON e.id=a.employee_id WHERE a.id=?',
+      { replacements: [id] }
+    );
+
+    const [feedback] = await sequelize.query(`
+      SELECT question_key, reviewer_role, response, is_anonymous
+      FROM appraisal_qualitative_feedback
+      WHERE appraisal_id = ?
+      ORDER BY reviewer_role, question_key
+    `, { replacements: [id] });
+
+    res.json({ appraisal, result: result || null, qualitative_feedback: feedback });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
