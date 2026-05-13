@@ -502,73 +502,63 @@ cd web && npm run build && cd ..
 pm2 reload all
 ```
 
-### Con Docker Compose
+## Módulos RRHH Platform
 
-```bash
-# Copiar y configurar variables
-cp .env.example .env
-# Editar .env con valores reales
+### Gestión de Empresas y Sucursales
+- Multiempresa y multisucursal
+- Números patronales MTESS e IPS
+- [/empresas](/empresas)
 
-# Iniciar stack completo
-docker compose up -d
+### Nómina y Liquidaciones
+- Perfiles salariales por empleado
+- Conceptos salariales (ingresos, descuentos, aportes)
+- Liquidaciones mensuales con cálculo IPS
+- Aguinaldo (1/12 de remuneraciones)
+- Anticipos de salario y aguinaldo
+- [/nomina/liquidaciones](/nomina/liquidaciones)
 
-# Ver logs
-docker compose logs -f api
-```
+### Bancos y Pagos
+- Lotes de pago por banco
+- Exportación CSV/Excel según layout bancario
+- Soporte para Banco GNB, Itaú, ueno, Familiar, Continental y otros
+- [/bancos](/bancos)
 
-### Nginx (proxy inverso)
+### Cumplimiento Legal Paraguay
+- Comunicaciones MTESS/REOP (altas, bajas, liquidaciones, vacaciones, aguinaldo)
+- Planillas laborales anuales REOP
+- IPS/REI: cálculo y registro de aportes (9% obrero + 16.5% patronal)
+- Calendario de vencimientos por terminación de número patronal
+- [/cumplimiento](/cumplimiento)
 
-Ejemplo de configuración:
+### Gestión Documental
+- Plantillas con campos dinámicos ({{employee.full_name}}, {{payroll.net_pay}}, etc.)
+- Documentos por empleado: contratos, recibos, autorizaciones
+- Firma digital dibujada en pantalla
+- Trazabilidad completa: quién creó, envió, vio, firmó, con IP y timestamp
+- Hash SHA-256 de documentos
+- [/documentos](/documentos)
 
-```nginx
-server {
-    listen 80;
-    server_name tudominio.com;
+### Gestión por Competencias
+- Catálogo de competencias por categoría y tipo
+- Matriz de competencias por cargo con niveles requeridos (1-5)
+- Ciclos de evaluación: autoevaluación, evaluación por jefe, 360°
+- Cálculo automático de brechas con severidad
+- Planes de desarrollo individuales
+- Catálogo de capacitaciones y seguimiento
+- [/competencias](/competencias)
 
-    location /api/ {
-        proxy_pass http://localhost:4000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-    }
+### Motor de Notificaciones Multicanal
+- Canales: Interno, Email, WhatsApp, Telegram, SMS, Push Web/PWA, Webhook
+- Plantillas configurables por evento y canal
+- Cola con reintentos automáticos
+- Preferencias por usuario/empleado
+- Logs de entrega completos
+- [/notificaciones-config](/notificaciones-config)
 
-    location /analytics/ {
-        proxy_pass http://localhost:5000/;
-    }
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-```
-
----
-
-## Seguridad
-
-- **Autenticación**: JWT con access token (15 min) + refresh token (7 días)
-- **Autorización**: RBAC + ABAC — roles: `admin`, `rrhh`, `supervisor`, `employee`
-- **Credenciales**: nunca almacenadas en el repositorio; siempre en variables de entorno
-- **SQL Server att2000**: acceso estrictamente de solo lectura
-- **HTTPS**: configurar en Nginx con certificado TLS (Let's Encrypt recomendado)
-- **Headers de seguridad**: Helmet.js habilitado en la API
-- **Rate limiting**: protección contra fuerza bruta en `/api/auth/login`
-
-> ⚠️ **Importante**: No commitear archivos `.env`, credenciales, certificados ni IPs internas. El `.gitignore` ya está configurado para excluirlos.
-
----
-
-## Contribuir
-
-1. Crear una rama desde `main`: `git checkout -b feature/mi-feature`
-2. Desarrollar y testear los cambios
-3. Confirmar que no se incluye información sensible: `git diff --staged`
-4. Enviar pull request con descripción clara de los cambios
-
----
-
-*SisHoras — Sistema Integral de Gestión de RRHH*
+### Seguridad Granular (RBAC + ABAC)
+- Módulos y permisos atómicos (formato: módulo.entidad.acción)
+- Roles configurables por empresa/sucursal/departamento
+- Permisos por campo sensible (salario, cuenta bancaria, datos médicos)
+- Alcances: global, empresa, sucursal, área, equipo, propio
+- 10 roles base: SUPER_ADMIN, ADMIN_EMPRESA, GERENTE_RRHH, ANALISTA_RRHH, JEFE_AREA, TESORERIA, CONTABILIDAD, AUDITOR, EMPLEADO, SOPORTE_TI
+- [/seguridad-avanzada](/seguridad-avanzada)

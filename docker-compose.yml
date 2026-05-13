@@ -16,6 +16,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./database/migrations:/docker-entrypoint-initdb.d/migrations:ro
     networks:
       - asistencia_net
     healthcheck:
@@ -58,9 +59,33 @@ services:
       DB_USER: ${DB_USER:-asistencia_user}
       DB_PASSWORD: ${DB_PASSWORD:-asistencia_pass}
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-cambia_este_secreto_en_produccion}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-otro_secreto_refresh}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      # Notification channels
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@empresa.com}
+      SMTP_TLS: ${SMTP_TLS:-true}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-WAHA}
+      WAHA_API_URL: ${WAHA_API_URL:-}
+      WAHA_SESSION: ${WAHA_SESSION:-default}
+      META_WHATSAPP_TOKEN: ${META_WHATSAPP_TOKEN:-}
+      META_WHATSAPP_PHONE_ID: ${META_WHATSAPP_PHONE_ID:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      SMS_PROVIDER: ${SMS_PROVIDER:-HTTP}
+      SMS_API_URL: ${SMS_API_URL:-}
+      SMS_API_KEY: ${SMS_API_KEY:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_EMAIL: ${VAPID_EMAIL:-admin@empresa.com}
+      # Document storage
+      DOCUMENT_STORAGE_PATH: ${DOCUMENT_STORAGE_PATH:-/app/uploads/documents}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+    volumes:
+      - document_uploads:/app/uploads/documents
     ports:
       - "4000:4000"
     networks:
@@ -80,7 +105,7 @@ services:
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
       API_URL: http://api:4000
-      API_KEY: ${BRIDGE_API_KEY:-bridge_secret_key}
+      API_KEY: ${BRIDGE_API_KEY}
       ZKTECO_POLL_INTERVAL: 30000
     ports:
       - "8080:8080"   # Puerto para recibir PUSH del reloj ZKTeco
@@ -103,7 +128,7 @@ services:
       DB_NAME: ${DB_NAME:-asistencia}
       DB_USER: ${DB_USER:-asistencia_user}
       DB_PASSWORD: ${DB_PASSWORD:-asistencia_pass}
-      API_KEY: ${ANALYTICS_API_KEY:-analytics_secret_key}
+      API_KEY: ${ANALYTICS_API_KEY}
     ports:
       - "5000:5000"
     networks:
@@ -149,6 +174,7 @@ services:
 volumes:
   mysql_data:
   redis_data:
+  document_uploads:
 
 networks:
   asistencia_net:

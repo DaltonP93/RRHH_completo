@@ -59,6 +59,22 @@ const trendsRoutes          = require('./routes/trends');
 const faceRoutes            = require('./routes/faceRecognition');
 const appraisalRoutes       = require('./routes/appraisals');
 const onboardingRoutes      = require('./routes/onboarding');
+
+// RRHH Platform modules
+const companiesRouter            = require('./routes/companies');
+const positionsRouter            = require('./routes/positions');
+const payrollCoreRouter          = require('./routes/payrollCore');
+const payrollRunsRouter          = require('./routes/payrollRuns');
+const aguinaldoRouter            = require('./routes/aguinaldo');
+const salaryAdvancesRouter       = require('./routes/salaryAdvances');
+const bankingRouter              = require('./routes/banking');
+const complianceRouter           = require('./routes/compliance');
+const documentTemplatesRouter    = require('./routes/documentTemplates');
+const documentsRouter            = require('./routes/documents');
+const competenciesRouter         = require('./routes/competencies');
+const notificationsMulticanalRouter = require('./routes/notificationsMulticanal');
+const securityGranularRouter     = require('./routes/securityGranular');
+
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
 
@@ -168,6 +184,21 @@ app.use('/api/face',           faceRoutes);
 app.use('/api/appraisals',    appraisalRoutes);
 app.use('/api/onboarding',   onboardingRoutes);
 
+// RRHH Platform modules
+app.use('/api', companiesRouter);
+app.use('/api', positionsRouter);
+app.use('/api', payrollCoreRouter);
+app.use('/api', payrollRunsRouter);
+app.use('/api', aguinaldoRouter);
+app.use('/api', salaryAdvancesRouter);
+app.use('/api', bankingRouter);
+app.use('/api', complianceRouter);
+app.use('/api', documentTemplatesRouter);
+app.use('/api', documentsRouter);
+app.use('/api', competenciesRouter);
+app.use('/api', notificationsMulticanalRouter);
+app.use('/api', securityGranularRouter);
+
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
@@ -221,6 +252,10 @@ async function start() {
     // Cron de backups automáticos de MySQL
     const { startBackupCron } = require('./services/backups');
     startBackupCron();
+
+    // Notification queue processor (runs every 30 seconds)
+    const { processQueue } = require('./routes/notificationsMulticanal');
+    if (processQueue) setInterval(processQueue, 30000);
 
     // Conectar MySQL
     await sequelize.authenticate();

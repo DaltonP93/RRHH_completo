@@ -107,21 +107,23 @@ export const attendanceApi = {
 }
 
 // ─── Reportes (Analytics Service) ────────────────────────────────
+const ANALYTICS_API_KEY = process.env.NEXT_PUBLIC_ANALYTICS_API_KEY || '';
+
 export const reportsApi = {
   monthly: (year: number, month: number, deptId?: number) =>
     analyticsApi.get('/reports/monthly', {
-      params: { year, month, dept_id: deptId, api_key: 'analytics_secret_key' }
+      params: { year, month, dept_id: deptId, api_key: ANALYTICS_API_KEY }
     }).then(r => r.data),
   daily: (date?: string, deptId?: number) =>
     analyticsApi.get('/reports/daily', {
-      params: { report_date: date, dept_id: deptId, api_key: 'analytics_secret_key' }
+      params: { report_date: date, dept_id: deptId, api_key: ANALYTICS_API_KEY }
     }).then(r => r.data),
   kpis: () =>
     analyticsApi.get('/reports/dashboard-kpis', {
-      params: { api_key: 'analytics_secret_key' }
+      params: { api_key: ANALYTICS_API_KEY }
     }).then(r => r.data),
   exportExcel: (type: string, year: number, month: number) => {
-    const url = `${ANALYTICS_URL}/reports/export/excel?report_type=${type}&year=${year}&month=${month}&api_key=analytics_secret_key`
+    const url = `${ANALYTICS_URL}/reports/export/excel?report_type=${type}&year=${year}&month=${month}&api_key=${ANALYTICS_API_KEY}`
     window.open(url, '_blank')
   }
 }
