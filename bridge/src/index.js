@@ -3,10 +3,8 @@
  * Conexión DIRECTA a los relojes biométricos — sin depender del
  * ZK Attendance Management Program.
  *
- * Relojes configurados:
- *   - Reloj Comedor:   172.16.20.160:4370  (3000T-C/ID, MachineNo: 101)
- *   - Reloj Lavadero:  172.16.20.161:4370  (GT200,      MachineNo: 103)
- *   - Reloj Gerencia:  172.16.20.162:4370  (3000T-C,    MachineNo: 1)
+ * Configurar relojes vía variable de entorno ZKTECO_DEVICES:
+ *   ZKTECO_DEVICES=IP1:PORT,IP2:PORT,IP3:PORT
  *
  * Modos de operación:
  *   1. PUSH  — El reloj envía marcajes en tiempo real (puerto 8080)
@@ -34,22 +32,17 @@ const logger = winston.createLogger({
   transports: [new winston.transports.Console()]
 });
 
-// ─── Relojes configurados (se pueden sobreescribir con ZKTECO_DEVICES) ──
-const DEFAULT_DEVICES = [
-  { id: 101, name: 'Reloj Comedor',  ip: '172.16.20.160', port: 4370 },
-  { id: 103, name: 'Reloj Lavadero', ip: '172.16.20.161', port: 4370 },
-  { id: 1,   name: 'Reloj Gerencia', ip: '172.16.20.162', port: 4370 },
-];
-
+// ─── Relojes — cargados exclusivamente desde ZKTECO_DEVICES env var ──────────
 function getDevices() {
   const envDevices = process.env.ZKTECO_DEVICES;
-  if (envDevices) {
-    return envDevices.split(',').map((entry, idx) => {
-      const [ip, port] = entry.trim().split(':');
-      return { id: idx + 1, name: `Reloj ${idx + 1}`, ip, port: parseInt(port || '4370') };
-    });
+  if (!envDevices) {
+    logger.warn('ZKTECO_DEVICES no configurado. No se conectará a ningún reloj. Defina la variable en .env');
+    return [];
   }
-  return DEFAULT_DEVICES;
+  return envDevices.split(',').map((entry, idx) => {
+    const [ip, port] = entry.trim().split(':');
+    return { id: idx + 1, name: `Reloj ${idx + 1}`, ip, port: parseInt(port || '4370') };
+  });
 }
 
 // ─── Redis ──────────────────────────────────────────────────────

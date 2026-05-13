@@ -8,10 +8,10 @@
  *   - Escritura: insertar marcaciones desde relojes o SisHoras → att2000.
  *
  * Variables necesarias en .env:
- *   ATT_HOST=ADVENTISTA       (nombre o IP del servidor SQL Server)
+ *   ATT_HOST=<hostname_o_ip_del_servidor>
  *   ATT_PORT=1433
- *   ATT_USER=sa
- *   ATT_PASSWORD=tu_password
+ *   ATT_USER=<usuario_sql>
+ *   ATT_PASSWORD=<password>
  *   ATT_DATABASE=att2000
  */
 
@@ -19,9 +19,9 @@ const sql = require('mssql');
 const logger = require('./logger');
 
 const config = {
-  server:   process.env.ATT_HOST     || 'ADVENTISTA',
+  server:   process.env.ATT_HOST     || '',
   port:     parseInt(process.env.ATT_PORT || '1433'),
-  user:     process.env.ATT_USER     || 'sa',
+  user:     process.env.ATT_USER     || '',
   password: process.env.ATT_PASSWORD || '',
   database: process.env.ATT_DATABASE || 'att2000',
   options: {
@@ -42,7 +42,7 @@ let pool = null;
 let poolHost = null;  // host con el que se creó el pool actual
 
 async function getAtt2000() {
-  const currentHost = process.env.ATT_HOST || 'ADVENTISTA';
+  const currentHost = process.env.ATT_HOST || '';
 
   // Si el host cambió, cerrar el pool viejo y reconectar
   if (pool && poolHost !== currentHost) {
@@ -57,7 +57,7 @@ async function getAtt2000() {
     // Reconstruir config con los env vars actuales (pueden haber cambiado en runtime)
     const runtimeConfig = {
       ...config,
-      server:   process.env.ATT_HOST     || 'ADVENTISTA',
+      server:   process.env.ATT_HOST     || '',
       port:     parseInt(process.env.ATT_PORT || '1433'),
       user:     process.env.ATT_USER     || 'sa',
       password: process.env.ATT_PASSWORD ?? '',
