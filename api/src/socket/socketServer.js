@@ -4,8 +4,7 @@ const logger = require('../config/logger');
 
 let io;
 
-function initSocket(server) {
-  // Construir lista de orígenes permitidos: permite http y https del mismo dominio
+async function initSocket(server) {
   const rawOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
   const allowedOrigins = Array.from(new Set([
     rawOrigin,
@@ -23,9 +22,29 @@ function initSocket(server) {
       methods: ['GET', 'POST'],
       credentials: true
     },
-    // Permite WebSocket y polling como fallback
     transports: ['websocket', 'polling'],
   });
+
+  // Redis adapter para escalabilidad horizontal (múltiples instancias API)
+  if (process.env.REDIS_URL || process.env.SOCKET_REDIS_URL) {
+    try {
+      const { createAdapter } = require('@socket.io/redis-adapter');
+      const { createClient } = require('redis');
+
+      const redisUrl = process.env.SOCKET_REDIS_URL || process.env.REDIS_URL || 'redis://localhost:6379';
+      const pubClient = createClient({ url: redisUrl });
+      const subClient = pubClient.duplicate();
+
+      pubClient.on('error', err => logger.warn(`Socket Redis pub error: ${err.message}`));
+      subClient.on('error', err => logger.warn(`Socket Redis sub error: ${err.message}`));
+
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      io.adapter(createAdapter(pubClient, subClient));
+      logger.info('Socket.io Redis adapter activo — escalabilidad horizontal habilitada');
+    } catch (err) {
+      logger.warn(`Redis adapter no disponible, usando memoria local: ${err.message}`);
+    }
+  }
 
   // Middleware de autenticación para WebSocket
   io.use((socket, next) => {
@@ -43,7 +62,6 @@ function initSocket(server) {
   io.on('connection', (socket) => {
     logger.info(`Socket conectado: ${socket.id} | Usuario: ${socket.user?.username}`);
 
-    // Unir al usuario a su sala según rol
     socket.join(`role:${socket.user.role}`);
     socket.join(`user:${socket.user.id}`);
 
@@ -52,7 +70,7 @@ function initSocket(server) {
     });
   });
 
-  logger.info('✅ Socket.io listo');
+  logger.info('Socket.io listo');
   return io;
 }
 

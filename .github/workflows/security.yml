@@ -1,0 +1,93 @@
+name: Security
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Lunes 6am UTC
+
+jobs:
+  audit-api:
+    name: npm audit — API
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+      # Usar npm install porque package.json del PR agrega dependencias nuevas y el lockfile puede estar desfasado.
+      - run: npm install --no-audit --no-fund
+      - name: Audit (non-blocking)
+        run: npm audit --audit-level=critical || true
+
+  audit-web:
+    name: npm audit — Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Audit (non-blocking)
+        run: npm audit --audit-level=critical || true
+
+  secret-scan:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for secrets
+        run: |
+          # Buscar patrones de secretos reales en el código (no en .env.example)
+          # Excluir archivos de ejemplo, tests y documentación
+          PATTERNS=(
+            "password\s*=\s*['\"][^'\"]{8,}"
+            "secret\s*=\s*['\"][^'\"]{8,}"
+            "api_key\s*=\s*['\"][^'\"]{8,}"
+            "172\.16\.[0-9]+\.[0-9]+"
+            "192\.168\.[0-9]+\.[0-9]+"
+          )
+          FAIL=0
+          for pat in "${PATTERNS[@]}"; do
+            # Solo buscar en archivos de código, excluir ejemplos y docs
+            found=$(grep -rn --include="*.js" --include="*.ts" --include="*.tsx" \
+              --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.next \
+              -iE "$pat" . 2>/dev/null | \
+              grep -v ".example\|.test.\|.spec.\|__mocks__\|# \|// " || true)
+            if [ -n "$found" ]; then
+              echo "ADVERTENCIA — Patron encontrado: $pat"
+              echo "$found"
+              FAIL=1
+            fi
+          done
+          exit 0  # No-blocking — solo advertir
+
+  gitignore-check:
+    name: Check .env files not tracked
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify no .env files committed
+        run: |
+          ENV_FILES=$(git ls-files | grep -E '^\.env$|\.env\.local$|\.env\.production$|\.env\.staging$' || true)
+          if [ -n "$ENV_FILES" ]; then
+            echo "ERROR: Archivos .env comprometidos en el repo:"
+            echo "$ENV_FILES"
+            exit 1
+          fi
+          echo "OK: No se detectaron archivos .env comprometidos"

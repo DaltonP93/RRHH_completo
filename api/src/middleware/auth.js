@@ -24,6 +24,11 @@ function authenticate(req, res, next) {
   }
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    // Inyectar userId al contexto AsyncLocalStorage para que aparezca en todos los logs
+    try {
+      const { setContextUser } = require('./requestId');
+      setContextUser(req.user.id || req.user.sub);
+    } catch {}
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido o expirado' });

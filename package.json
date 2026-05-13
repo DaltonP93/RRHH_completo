@@ -1,0 +1,30 @@
+{
+  "name": "sishoras-rrhh",
+  "version": "2.0.0",
+  "private": true,
+  "description": "SisHoras — Sistema de Gestión de RRHH y Asistencia",
+  "scripts": {
+    "lint": "eslint api/src --ext .js --max-warnings 0",
+    "format": "prettier --write \"api/src/**/*.js\" \"workers/**/*.js\"",
+    "format:check": "prettier --check \"api/src/**/*.js\" \"workers/**/*.js\"",
+    "test": "cd api && npm test",
+    "prepare": "husky install || true"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.3.0",
+    "@commitlint/config-conventional": "^19.2.2",
+    "eslint": "^8.57.0",
+    "husky": "^9.0.11",
+    "lint-staged": "^15.2.7",
+    "prettier": "^3.3.2"
+  },
+  "lint-staged": {
+    "api/src/**/*.js": [
+      "eslint --fix --max-warnings 0",
+      "prettier --write"
+    ],
+    "workers/**/*.js": [
+      "prettier --write"
+    ]
+  }
+}

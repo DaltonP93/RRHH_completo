@@ -76,7 +76,9 @@
     "logout": "Log out",
     "section_portal": "Portal",
     "section_management": "Management",
-    "section_admin": "Administration"
+    "section_admin": "Administration",
+    "attendance_live": "Live Feed",
+    "sync_att2000": "att2000 Migration"
   },
   "dashboard": {
     "title": "Main dashboard",

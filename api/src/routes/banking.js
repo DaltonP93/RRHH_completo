@@ -461,14 +461,72 @@ router.post('/payment-batches/:id/approve', authorize('admin', 'super_admin'), a
 });
 
 // GET /api/payment-batches/:id/export-csv
-router.get('/payment-batches/:id/export-csv', async (req, res) => {
+// ─── Exportador configurable por layout ─────────────────────────
+// GET /api/payment-batches/:id/export — exportar según layout configurado
+// Query params: layout_id (opcional, usa el del batch si no se pasa), format (override)
+router.get('/payment-batches/:id/export', async (req, res) => {
   try {
-    const [batches] = await sequelize.query(
+    const { exportBatch } = require('../services/bankExporter');
+
+    const [[batch]] = await sequelize.query(
       'SELECT * FROM payment_batches WHERE id = ?',
       { replacements: [req.params.id] }
     );
-    if (!batches.length) return res.status(404).json({ error: 'Lote de pago no encontrado' });
-    const batch = batches[0];
+    if (!batch) return res.status(404).json({ error: 'Lote de pago no encontrado' });
+
+    const layoutId = req.query.layout_id || batch.layout_id;
+    if (!layoutId) return res.status(400).json({ error: 'Se requiere layout_id' });
+
+    const [[layout]] = await sequelize.query(
+      'SELECT * FROM bank_file_layouts WHERE id = ?',
+      { replacements: [layoutId] }
+    );
+    if (!layout) return res.status(404).json({ error: 'Layout no encontrado' });
+
+    if (req.query.format) layout.format_type = req.query.format.toUpperCase();
+
+    const [fields] = await sequelize.query(
+      'SELECT * FROM bank_file_layout_fields WHERE layout_id = ? ORDER BY field_order ASC',
+      { replacements: [layoutId] }
+    );
+
+    const [lines] = await sequelize.query(`
+      SELECT
+        pbl.*,
+        e.document_number,
+        e.first_name, e.last_name,
+        CONCAT(e.last_name, ' ', e.first_name) AS full_name,
+        b.name AS bank_name, b.code AS bank_code,
+        pb.payment_date, pb.notes AS batch_notes
+      FROM payment_batch_lines pbl
+      JOIN employees e ON e.id = pbl.employee_id
+      LEFT JOIN banks b ON b.id = pbl.bank_id
+      JOIN payment_batches pb ON pb.id = pbl.payment_batch_id
+      WHERE pbl.payment_batch_id = ? AND pbl.status != 'rejected'
+      ORDER BY e.last_name ASC, e.first_name ASC
+    `, { replacements: [batch.id] });
+
+    const { buffer, ext, mime } = await exportBatch(layout, fields, lines);
+    const dateStr = new Date(batch.payment_date || Date.now()).toISOString().slice(0, 10).replace(/-/g, '');
+    const filename = `pago_${batch.id}_${dateStr}.${ext}`;
+
+    res.setHeader('Content-Type', `${mime}; charset=utf-8`);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('GET /api/payment-batches/:id/export error:', err);
+    res.status(500).json({ error: 'Error al exportar lote de pago' });
+  }
+});
+
+// GET /api/payment-batches/:id/export-csv — retrocompatibilidad con export básico
+router.get('/payment-batches/:id/export-csv', async (req, res) => {
+  try {
+    const [[batch]] = await sequelize.query(
+      'SELECT * FROM payment_batches WHERE id = ?',
+      { replacements: [req.params.id] }
+    );
+    if (!batch) return res.status(404).json({ error: 'Lote de pago no encontrado' });
 
     const [lines] = await sequelize.query(`
       SELECT
@@ -476,16 +534,15 @@ router.get('/payment-batches/:id/export-csv', async (req, res) => {
         CONCAT(e.last_name, ' ', e.first_name) AS nombre,
         b.name AS banco,
         pbl.bank_account_number AS cuenta,
-        pbl.bank_account_type AS tipo_cuenta,
+        pbl.account_type AS tipo_cuenta,
         pbl.amount AS monto,
-        pb.description AS concepto
+        pbl.concept AS concepto
       FROM payment_batch_lines pbl
       JOIN employees e ON e.id = pbl.employee_id
       LEFT JOIN banks b ON b.id = pbl.bank_id
-      JOIN payment_batches pb ON pb.id = pbl.payment_batch_id
       WHERE pbl.payment_batch_id = ? AND pbl.status != 'rejected'
       ORDER BY e.last_name ASC, e.first_name ASC
-    `, { replacements: [req.params.id] });
+    `, { replacements: [batch.id] });
 
     const header = 'documento,nombre,banco,cuenta,tipo_cuenta,monto,concepto\n';
     const csvRows = lines.map(r =>
@@ -501,9 +558,9 @@ router.get('/payment-batches/:id/export-csv', async (req, res) => {
     );
     const csv = header + csvRows.join('\n');
 
-    const dateStr = new Date(batch.batch_date || Date.now()).toISOString().slice(0, 10).replace(/-/g, '');
+    const dateStr = new Date(batch.payment_date || Date.now()).toISOString().slice(0, 10).replace(/-/g, '');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename=pago_salarios_${dateStr}.csv`);
+    res.setHeader('Content-Disposition', `attachment; filename=pago_${dateStr}.csv`);
     res.send(csv);
   } catch (err) {
     console.error('GET /api/payment-batches/:id/export-csv error:', err);

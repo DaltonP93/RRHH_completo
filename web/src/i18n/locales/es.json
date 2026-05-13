@@ -76,7 +76,9 @@
     "logout": "Cerrar sesión",
     "section_portal": "Portal",
     "section_management": "Gestión",
-    "section_admin": "Administración"
+    "section_admin": "Administración",
+    "attendance_live": "Tiempo Real",
+    "sync_att2000": "Migracion att2000"
   },
   "dashboard": {
     "title": "Panel principal",

@@ -93,4 +93,115 @@ router.get('/detailed', authenticate, authorize('admin', 'gth'), async (req, res
   });
 });
 
+// ─── /api/health/storage — estado del sistema de archivos ─────────
+router.get('/storage', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
+  const t0 = Date.now();
+  const checks = {};
+
+  // Upload dir
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../../uploads');
+    const stats = fs.statfsSync ? fs.statfsSync(uploadDir) : null;
+    const testFile = path.join(uploadDir, '.health_probe');
+    fs.writeFileSync(testFile, Date.now().toString());
+    fs.unlinkSync(testFile);
+    checks.uploads = {
+      ok: true,
+      path: uploadDir,
+      writable: true,
+      ...(stats ? {
+        total_gb: Math.round(stats.blocks * stats.bsize / 1e9 * 100) / 100,
+        free_gb:  Math.round(stats.bfree  * stats.bsize / 1e9 * 100) / 100,
+      } : {}),
+    };
+  } catch (err) {
+    checks.uploads = { ok: false, error: err.message };
+  }
+
+  // Backup dir
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const backupDir = process.env.BACKUP_DIR || path.join(__dirname, '../../../backups');
+    if (fs.existsSync(backupDir)) {
+      const files = fs.readdirSync(backupDir, { recursive: false });
+      checks.backups = { ok: true, path: backupDir, top_level_entries: files.length };
+    } else {
+      checks.backups = { ok: false, error: 'Directorio de backups no existe' };
+    }
+  } catch (err) {
+    checks.backups = { ok: false, error: err.message };
+  }
+
+  const allOk = Object.values(checks).every(c => c.ok);
+  res.status(allOk ? 200 : 503).json({
+    status: allOk ? 'ok' : 'degraded',
+    latency_ms: Date.now() - t0,
+    checks,
+  });
+});
+
+// ─── /api/health/workers — estado de los workers PM2 ──────────────
+router.get('/workers', authenticate, authorize('admin', 'super_admin'), async (req, res) => {
+  const t0 = Date.now();
+  const workerNames = [
+    'worker-sync', 'worker-notifications', 'worker-payroll',
+    'worker-documents', 'worker-backups',
+  ];
+
+  // Leer state desde payroll_runs (worker-payroll), source_sync_runs (worker-sync)
+  // y notification_queue (worker-notifications) para ver actividad reciente
+  const checks = {};
+
+  try {
+    // worker-payroll: último run procesado
+    const [[lastPayroll]] = await sequelize.query(`
+      SELECT status, finished_at FROM payroll_runs
+      WHERE status IN ('calculated','failed')
+      ORDER BY finished_at DESC LIMIT 1
+    `).catch(() => [[null]]);
+    checks['worker-payroll'] = {
+      last_run: lastPayroll?.finished_at || null,
+      last_status: lastPayroll?.status || 'unknown',
+    };
+
+    // worker-sync: último sync run
+    const [[lastSync]] = await sequelize.query(`
+      SELECT status, finished_at FROM source_sync_runs
+      ORDER BY finished_at DESC LIMIT 1
+    `).catch(() => [[null]]);
+    checks['worker-sync'] = {
+      last_run: lastSync?.finished_at || null,
+      last_status: lastSync?.status || 'unknown',
+    };
+
+    // worker-notifications: pendientes en cola
+    const [[nqStats]] = await sequelize.query(`
+      SELECT COUNT(*) AS total,
+             SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
+             SUM(CASE WHEN status='failed'  THEN 1 ELSE 0 END) AS failed
+      FROM notification_queue
+      WHERE created_at >= NOW() - INTERVAL 1 HOUR
+    `).catch(() => [[{ total: 0, pending: 0, failed: 0 }]]);
+    checks['worker-notifications'] = {
+      last_hour_total: nqStats?.total || 0,
+      last_hour_pending: nqStats?.pending || 0,
+      last_hour_failed: nqStats?.failed || 0,
+    };
+  } catch (err) {
+    checks.db_error = { ok: false, error: err.message };
+  }
+
+  res.json({
+    status: 'ok',
+    latency_ms: Date.now() - t0,
+    timestamp: new Date().toISOString(),
+    note: 'Para estado PM2 en tiempo real, usar: pm2 status en el servidor',
+    workers: workerNames,
+    checks,
+  });
+});
+
 module.exports = router;

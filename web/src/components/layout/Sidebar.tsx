@@ -8,6 +8,7 @@ import {
   Menu, X, FileText, TrendingUp, QrCode, DollarSign, ChevronDown, Activity,
   Cake, Plane, PiggyBank, Megaphone, GraduationCap, ClipboardList, Star, UserCheck,
   Briefcase, Layers, CreditCard, AlertCircle, FolderOpen, Award, Bell, Lock,
+  Radio, Database,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -36,8 +37,9 @@ const NAV: NavItem[] = [
   // Gestión
   { href: '/dashboard',     icon: LayoutDashboard, i18nKey: 'nav.dashboard',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'dashboard' },
   { href: '/empleados',     icon: Users,           i18nKey: 'nav.employees',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'empleados' },
-  { href: '/asistencia',    icon: Clock,           i18nKey: 'nav.attendance',   section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'asistencia' },
-  { href: '/permisos',      icon: Calendar,        i18nKey: 'nav.permissions',  section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'permisos' },
+  { href: '/asistencia',           icon: Clock,    i18nKey: 'nav.attendance',       section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'asistencia' },
+  { href: '/asistencia/tiempo-real', icon: Radio,  i18nKey: 'nav.attendance_live',  section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'asistencia' },
+  { href: '/permisos',             icon: Calendar, i18nKey: 'nav.permissions',      section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'permisos' },
   { href: '/aprobaciones',  icon: CheckSquare,     i18nKey: 'nav.approvals',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager'], module: 'aprobaciones' },
   { href: '/supervisor',    icon: Users,           i18nKey: 'nav.my_team',      section: 'gestion', roles: ['coordinator','manager','supervisor','gestor'], module: 'supervisor' },
   { href: '/reportes',      icon: BarChart2,       i18nKey: 'nav.reports',      section: 'gestion', roles: ['admin','gth','hr','manager','gestor'], module: 'reportes' },
@@ -81,8 +83,9 @@ const NAV: NavItem[] = [
   { href: '/usuarios',      icon: Shield,          i18nKey: 'nav.users',        section: 'admin', roles: ['admin','gth'], module: 'usuarios' },
   { href: '/auditoria',     icon: FileText,        i18nKey: 'nav.audit',        section: 'admin', roles: ['admin','gth'], module: 'auditoria' },
   { href: '/configuracion', icon: Settings,        i18nKey: 'nav.settings',     section: 'admin', roles: ['admin','gth'], module: 'configuracion' },
-  { href: '/sistema',       icon: Server,          i18nKey: 'nav.system',       section: 'admin', superOnly: true, module: 'sistema' },
-  { href: '/sistema/salud', icon: Activity,        i18nKey: 'nav.system_health',section: 'admin', roles: ['admin','gth'], module: 'sistema' },
+  { href: '/sistema',       icon: Server,          i18nKey: 'nav.system',          section: 'admin', superOnly: true, module: 'sistema' },
+  { href: '/sistema/salud', icon: Activity,        i18nKey: 'nav.system_health',   section: 'admin', roles: ['admin','gth'], module: 'sistema' },
+  { href: '/sync/att2000',  icon: Database,        i18nKey: 'nav.sync_att2000',    section: 'admin', roles: ['admin'], module: 'sistema' },
 
   // Configuración Avanzada
   { href: '/notificaciones-config', icon: Bell,    i18nKey: 'nav.notifications_config', section: 'config_avanzada', roles: ['admin','gth'], module: 'notificaciones_config' },

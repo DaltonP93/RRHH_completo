@@ -76,7 +76,9 @@
     "logout": "Sair",
     "section_portal": "Portal",
     "section_management": "Gestão",
-    "section_admin": "Administração"
+    "section_admin": "Administração",
+    "attendance_live": "Tempo Real",
+    "sync_att2000": "Migração att2000"
   },
   "dashboard": {
     "title": "Painel principal",

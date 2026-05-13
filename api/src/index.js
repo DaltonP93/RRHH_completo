@@ -82,7 +82,11 @@ const app = express();
 const server = http.createServer(app);
 
 // ─── Middleware ─────────────────────────────────────────────────
+const { requestId } = require('./middleware/requestId');
+const { metricsMiddleware, metricsHandler } = require('./middleware/metrics');
 app.set('trust proxy', 1); // Nginx reverse proxy
+app.use(requestId); // UUID por request — disponible en logs y respuesta X-Request-Id
+app.use(metricsMiddleware);
 app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {
@@ -212,6 +216,9 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Prometheus metrics (acceso solo desde red interna — configurable en nginx)
+app.get('/metrics', metricsHandler);
+
 // ─── Manejo de errores ──────────────────────────────────────────
 app.use((err, req, res, next) => {
   logger.error(`${err.status || 500} - ${err.message} - ${req.originalUrl}`);
@@ -261,9 +268,8 @@ async function start() {
     await sequelize.authenticate();
     logger.info('✅ MySQL conectado');
 
-    // Inicializar Socket.io
-    initSocket(server);
-    logger.info('✅ Socket.io inicializado');
+    // Inicializar Socket.io (con Redis adapter si REDIS_URL está configurado)
+    await initSocket(server);
 
     server.listen(PORT, () => {
       logger.info(`🚀 API corriendo en puerto ${PORT}`);
