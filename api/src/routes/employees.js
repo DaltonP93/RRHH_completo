@@ -193,4 +193,102 @@ router.patch('/:id/quick', authorize('admin','hr'), requirePermission('empleados
   }
 });
 
+// ─── Preaviso e Indemnización (Código Laboral Paraguay) ──────────
+
+// POST /api/employees/:id/termination-preview
+// Calcula preaviso e indemnización sin persistir (dry-run)
+// Body: { termination_date, termination_type, days_since_last_payment }
+router.post('/:id/termination-preview', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const { calculateTermination } = require('../services/terminationCalculator');
+
+    const [[emp]] = await sequelize.query(`
+      SELECT e.*, pp.base_salary FROM employees e
+      LEFT JOIN payroll_profiles pp ON pp.employee_id = e.id AND pp.status = 'active'
+      WHERE e.id = ?
+    `, { replacements: [req.params.id] });
+
+    if (!emp) return res.status(404).json({ error: 'Empleado no encontrado' });
+
+    const {
+      termination_date = new Date().toISOString().slice(0, 10),
+      termination_type = 'sin_causa',
+      days_since_last_payment = 0,
+    } = req.body;
+
+    const baseSalary = parseFloat(emp.base_salary || emp.salary_base || 0);
+    if (baseSalary === 0) return res.status(400).json({ error: 'El empleado no tiene salario base configurado' });
+
+    const result = calculateTermination({
+      hireDate: emp.hire_date,
+      terminationDate: termination_date,
+      baseSalary,
+      terminationType: termination_type,
+      daysSinceLastSalaryPayment: parseInt(days_since_last_payment) || 0,
+    });
+
+    res.json({
+      employee: { id: emp.id, name: `${emp.first_name} ${emp.last_name}`, code: emp.code },
+      ...result,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/employees/:id/terminate — registrar baja y generar liquidación
+router.post('/:id/terminate', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const { calculateTermination } = require('../services/terminationCalculator');
+
+    const [[emp]] = await sequelize.query(`
+      SELECT e.*, pp.base_salary FROM employees e
+      LEFT JOIN payroll_profiles pp ON pp.employee_id = e.id AND pp.status = 'active'
+      WHERE e.id = ?
+    `, { replacements: [req.params.id] });
+
+    if (!emp) return res.status(404).json({ error: 'Empleado no encontrado' });
+    if (emp.status === 'inactive') return res.status(400).json({ error: 'El empleado ya está inactivo' });
+
+    const {
+      termination_date = new Date().toISOString().slice(0, 10),
+      termination_type = 'sin_causa',
+      termination_reason = '',
+      days_since_last_payment = 0,
+    } = req.body;
+
+    const baseSalary = parseFloat(emp.base_salary || emp.salary_base || 0);
+    const calc = calculateTermination({
+      hireDate: emp.hire_date,
+      terminationDate: termination_date,
+      baseSalary,
+      terminationType: termination_type,
+      daysSinceLastSalaryPayment: parseInt(days_since_last_payment) || 0,
+    });
+
+    // Inactivar empleado
+    await sequelize.query(`
+      UPDATE employees SET status = 'inactive', termination_date = ?,
+        termination_type = ?, termination_reason = ?, updated_at = NOW()
+      WHERE id = ?
+    `, { replacements: [termination_date, termination_type, termination_reason || null, emp.id] });
+
+    // Desactivar perfil de nómina
+    await sequelize.query(
+      "UPDATE payroll_profiles SET status = 'inactive', valid_to = ? WHERE employee_id = ? AND status = 'active'",
+      { replacements: [termination_date, emp.id] }
+    );
+
+    res.json({
+      message: 'Empleado dado de baja correctamente',
+      employee_id: emp.id,
+      termination_date,
+      termination_type,
+      liquidation: calc,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
