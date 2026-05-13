@@ -7,6 +7,7 @@ import {
   LogOut, Shield, Server, Building2, CheckSquare, UserCircle2,
   Menu, X, FileText, TrendingUp, QrCode, DollarSign, ChevronDown, Activity,
   Cake, Plane, PiggyBank, Megaphone, GraduationCap, ClipboardList, Star, UserCheck,
+  Briefcase, Layers, CreditCard, AlertCircle, FolderOpen, Award, Bell, Lock,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -20,7 +21,7 @@ type NavItem = {
   i18nKey: string  // clave en el dictionary (nav.*)
   roles?: Role[]
   superOnly?: boolean
-  section?: 'portal' | 'gestion' | 'admin'
+  section?: 'portal' | 'gestion' | 'admin' | 'rrhh' | 'nomina' | 'pagos' | 'cumplimiento' | 'documentos' | 'competencias' | 'config_avanzada'
   module?: string   // clave de user_permissions (si se define, la flag can_view manda)
 }
 
@@ -51,6 +52,30 @@ const NAV: NavItem[] = [
   { href: '/evaluaciones',  icon: Star,            i18nKey: 'nav.appraisals',   section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor','employee'], module: 'evaluaciones' },
   { href: '/onboarding',    icon: UserCheck,       i18nKey: 'nav.onboarding',   section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor'], module: 'onboarding' },
 
+  // RRHH
+  { href: '/empresas',      icon: Building2,       i18nKey: 'nav.companies',    section: 'rrhh', roles: ['admin','gth','hr'], module: 'empresas' },
+  { href: '/cargos',        icon: Briefcase,       i18nKey: 'nav.positions',    section: 'rrhh', roles: ['admin','gth','hr'], module: 'cargos' },
+
+  // Nómina
+  { href: '/nomina',            icon: DollarSign,  i18nKey: 'nav.payroll_hub',      section: 'nomina', roles: ['admin','gth','hr'], module: 'nomina' },
+  { href: '/nomina/liquidaciones', icon: Layers,   i18nKey: 'nav.settlements',      section: 'nomina', roles: ['admin','gth','hr'], module: 'nomina' },
+  { href: '/nomina/conceptos',  icon: ClipboardList, i18nKey: 'nav.salary_concepts', section: 'nomina', roles: ['admin','gth','hr'], module: 'nomina' },
+  { href: '/nomina/aguinaldo',  icon: Cake,        i18nKey: 'nav.aguinaldo',        section: 'nomina', roles: ['admin','gth','hr'], module: 'nomina' },
+  { href: '/nomina/anticipos',  icon: PiggyBank,   i18nKey: 'nav.advances',         section: 'nomina', roles: ['admin','gth','hr'], module: 'nomina' },
+
+  // Pagos
+  { href: '/bancos',        icon: CreditCard,      i18nKey: 'nav.banks_payments',section: 'pagos', roles: ['admin','gth','hr'], module: 'bancos' },
+
+  // Cumplimiento
+  { href: '/cumplimiento',  icon: AlertCircle,     i18nKey: 'nav.compliance',    section: 'cumplimiento', roles: ['admin','gth','hr'], module: 'cumplimiento' },
+
+  // Documentos
+  { href: '/documentos',    icon: FolderOpen,      i18nKey: 'nav.document_mgmt', section: 'documentos', roles: ['admin','gth','hr','coordinator','manager','gestor'], module: 'documentos' },
+
+  // Competencias
+  { href: '/competencias',         icon: Award,    i18nKey: 'nav.competencies',  section: 'competencias', roles: ['admin','gth','hr','coordinator','manager','gestor'], module: 'competencias' },
+  { href: '/competencias/planes',  icon: TrendingUp, i18nKey: 'nav.dev_plans',   section: 'competencias', roles: ['admin','gth','hr','coordinator','manager','gestor'], module: 'competencias' },
+
   // Admin
   { href: '/departamentos', icon: Building2,       i18nKey: 'nav.departments',  section: 'admin', roles: ['admin','gth'], module: 'departamentos' },
   { href: '/usuarios',      icon: Shield,          i18nKey: 'nav.users',        section: 'admin', roles: ['admin','gth'], module: 'usuarios' },
@@ -58,6 +83,10 @@ const NAV: NavItem[] = [
   { href: '/configuracion', icon: Settings,        i18nKey: 'nav.settings',     section: 'admin', roles: ['admin','gth'], module: 'configuracion' },
   { href: '/sistema',       icon: Server,          i18nKey: 'nav.system',       section: 'admin', superOnly: true, module: 'sistema' },
   { href: '/sistema/salud', icon: Activity,        i18nKey: 'nav.system_health',section: 'admin', roles: ['admin','gth'], module: 'sistema' },
+
+  // Configuración Avanzada
+  { href: '/notificaciones-config', icon: Bell,    i18nKey: 'nav.notifications_config', section: 'config_avanzada', roles: ['admin','gth'], module: 'notificaciones_config' },
+  { href: '/seguridad-avanzada',    icon: Lock,    i18nKey: 'nav.security_advanced',    section: 'config_avanzada', roles: ['admin','gth'], module: 'seguridad_avanzada' },
 ]
 
 interface SidebarSettings {
@@ -74,9 +103,16 @@ export default function Sidebar() {
   const user = useCurrentUser()
   const { t } = useI18n()
   const SECTION_LABEL: Record<string, string> = {
-    portal:  t('nav.section_portal'),
-    gestion: t('nav.section_management'),
-    admin:   t('nav.section_admin'),
+    portal:         t('nav.section_portal'),
+    gestion:        t('nav.section_management'),
+    rrhh:           'RRHH',
+    nomina:         'Nómina',
+    pagos:          'Pagos',
+    cumplimiento:   'Cumplimiento',
+    documentos:     'Documentos',
+    competencias:   'Competencias',
+    config_avanzada: 'Configuración Avanzada',
+    admin:          t('nav.section_admin'),
   }
   const [open, setOpen] = useState(false)
   const [theme, setTheme] = useState<SidebarSettings>({})
@@ -178,7 +214,7 @@ export default function Sidebar() {
 
       {/* Nav con secciones */}
       <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
-        {(['portal','gestion','admin'] as const).map(sec => {
+        {(['portal','gestion','rrhh','nomina','pagos','cumplimiento','documentos','competencias','config_avanzada','admin'] as const).map(sec => {
           const list = sections[sec]
           if (!list?.length) return null
           const sectionActive = list.some(it => pathname === it.href || pathname.startsWith(it.href + '/'))

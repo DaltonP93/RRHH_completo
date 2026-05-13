@@ -1,0 +1,642 @@
+/**
+ * payrollRuns.js — Payroll runs (liquidaciones), settlements, approvals.
+ *
+ * Routes:
+ *   GET/POST              /api/payroll-runs
+ *   GET                   /api/payroll-runs/:id
+ *   POST                  /api/payroll-runs/:id/calculate
+ *   GET                   /api/payroll-runs/:id/settlements
+ *   GET/PUT               /api/payroll-runs/:id/settlements/:settlementId
+ *   POST                  /api/payroll-runs/:id/approve
+ *   POST                  /api/payroll-runs/:id/close
+ *   POST                  /api/payroll-runs/:id/reopen
+ *   GET                   /api/payroll-runs/:id/summary
+ *   GET                   /api/payroll-runs/:id/ips-export
+ *   GET                   /api/payroll-runs/:id/mtess-export
+ *   GET/POST              /api/settlement-types
+ *   GET/POST/PUT          /api/payroll-monthly-parameters
+ */
+const router = require('express').Router();
+const { authenticate, authorize } = require('../middleware/auth');
+const { sequelize } = require('../config/database');
+
+router.use(authenticate);
+
+// ─── Payroll Runs ────────────────────────────────────────────────────────────
+
+// GET /api/payroll-runs — list with filters
+router.get('/', async (req, res) => {
+  try {
+    const { year, month, status, company_id } = req.query;
+    let sql = `
+      SELECT pr.*,
+             c.legal_name AS company_name,
+             c.trade_name AS company_trade_name,
+             b.name AS branch_name,
+             st.name AS settlement_type_name,
+             COUNT(es.id) AS settlement_count,
+             SUM(es.net_pay) AS total_net_pay
+      FROM payroll_runs pr
+      LEFT JOIN companies c ON c.id = pr.company_id
+      LEFT JOIN branches b ON b.id = pr.branch_id
+      LEFT JOIN settlement_types st ON st.id = pr.settlement_type_id
+      LEFT JOIN employee_settlements es ON es.payroll_run_id = pr.id
+      WHERE 1=1
+    `;
+    const replacements = [];
+    if (year)       { sql += ' AND pr.period_year = ?';   replacements.push(year); }
+    if (month)      { sql += ' AND pr.period_month = ?';  replacements.push(month); }
+    if (status)     { sql += ' AND pr.status = ?';        replacements.push(status); }
+    if (company_id) { sql += ' AND pr.company_id = ?';    replacements.push(company_id); }
+    sql += ' GROUP BY pr.id ORDER BY pr.period_year DESC, pr.period_month DESC, pr.created_at DESC';
+
+    const [rows] = await sequelize.query(sql, { replacements });
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/payroll-runs error:', err);
+    res.status(500).json({ error: 'Error al obtener liquidaciones' });
+  }
+});
+
+// POST /api/payroll-runs — create new run
+router.post('/', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const {
+      company_id, branch_id, period_year, period_month,
+      period_start, period_end, settlement_type_id, description
+    } = req.body;
+
+    if (!company_id || !period_year || !period_month || !period_start || !period_end) {
+      return res.status(400).json({ error: 'company_id, period_year, period_month, period_start y period_end son requeridos' });
+    }
+
+    const [result] = await sequelize.query(`
+      INSERT INTO payroll_runs
+        (company_id, branch_id, period_year, period_month, period_start, period_end,
+         settlement_type_id, description, status, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, NOW(), NOW())
+    `, { replacements: [
+      company_id, branch_id || null, period_year, period_month,
+      period_start, period_end, settlement_type_id || null,
+      description || null, req.user.id
+    ]});
+
+    const [row] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [result] });
+    res.status(201).json(row[0]);
+  } catch (err) {
+    console.error('POST /api/payroll-runs error:', err);
+    res.status(500).json({ error: 'Error al crear liquidación' });
+  }
+});
+
+// GET /api/payroll-runs/:id — run detail with settlements summary
+router.get('/:id', async (req, res) => {
+  try {
+    const [runs] = await sequelize.query(`
+      SELECT pr.*,
+             c.legal_name AS company_name, c.trade_name, c.ruc,
+             b.name AS branch_name,
+             st.name AS settlement_type_name
+      FROM payroll_runs pr
+      LEFT JOIN companies c ON c.id = pr.company_id
+      LEFT JOIN branches b ON b.id = pr.branch_id
+      LEFT JOIN settlement_types st ON st.id = pr.settlement_type_id
+      WHERE pr.id = ?
+    `, { replacements: [req.params.id] });
+
+    if (!runs.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+
+    const [summary] = await sequelize.query(`
+      SELECT
+        COUNT(*) AS employee_count,
+        SUM(gross_income) AS total_gross,
+        SUM(total_deductions) AS total_deductions,
+        SUM(ips_employee_amount) AS total_ips_employee,
+        SUM(ips_employer_amount) AS total_ips_employer,
+        SUM(net_pay) AS total_net
+      FROM employee_settlements
+      WHERE payroll_run_id = ?
+    `, { replacements: [req.params.id] });
+
+    res.json({ ...runs[0], summary: summary[0] });
+  } catch (err) {
+    console.error('GET /api/payroll-runs/:id error:', err);
+    res.status(500).json({ error: 'Error al obtener liquidación' });
+  }
+});
+
+// POST /api/payroll-runs/:id/calculate — calculate all settlements
+router.post('/:id/calculate', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const [runs] = await sequelize.query(
+      'SELECT * FROM payroll_runs WHERE id = ?',
+      { replacements: [req.params.id] }
+    );
+    if (!runs.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+    const run = runs[0];
+
+    if (['approved', 'closed'].includes(run.status)) {
+      return res.status(400).json({ error: `No se puede recalcular una liquidación en estado '${run.status}'` });
+    }
+
+    // Get active employees for company (optionally filtered by branch)
+    let empSql = `
+      SELECT e.*,
+             pp.base_salary, pp.payment_method, pp.bank_id, pp.bank_account_number,
+             pp.id AS profile_id
+      FROM employees e
+      LEFT JOIN payroll_profiles pp
+        ON pp.employee_id = e.id
+        AND pp.status = 'active'
+        AND pp.valid_from <= ?
+        AND (pp.valid_to IS NULL OR pp.valid_to >= ?)
+      WHERE e.status = 'active' AND e.company_id = ?
+    `;
+    const empReplacements = [run.period_end, run.period_start, run.company_id];
+    if (run.branch_id) {
+      empSql += ' AND e.branch_id = ?';
+      empReplacements.push(run.branch_id);
+    }
+
+    const [employees] = await sequelize.query(empSql, { replacements: empReplacements });
+
+    let calculatedCount = 0;
+    let errorCount = 0;
+
+    for (const emp of employees) {
+      try {
+        const baseSalary = parseFloat(emp.base_salary || 0);
+
+        // Get worked days from attendance
+        const [attRows] = await sequelize.query(`
+          SELECT COUNT(*) AS days,
+                 COALESCE(SUM(worked_minutes), 0) AS total_minutes,
+                 COALESCE(SUM(overtime_minutes), 0) AS overtime_minutes
+          FROM attendance_days
+          WHERE employee_id = ? AND work_date BETWEEN ? AND ? AND status = 'present'
+        `, { replacements: [emp.id, run.period_start, run.period_end] });
+
+        const workedDays = parseInt(attRows[0]?.days || 0) || 26;
+        const totalDays = 30;
+
+        // Get fixed earning concepts
+        const [fixedConcepts] = await sequelize.query(`
+          SELECT efc.amount, efc.percentage, sc.type, sc.affects_ips,
+                 sc.affects_christmas_bonus, sc.calculation_type, sc.name AS concept_name
+          FROM employee_fixed_concepts efc
+          JOIN salary_concepts sc ON sc.id = efc.salary_concept_id
+          WHERE efc.employee_id = ?
+            AND efc.status = 'active'
+            AND (efc.valid_from IS NULL OR efc.valid_from <= ?)
+            AND (efc.valid_to IS NULL OR efc.valid_to >= ?)
+        `, { replacements: [emp.id, run.period_end, run.period_start] });
+
+        // Calculate proportional base salary
+        const dailySalary = baseSalary / totalDays;
+        const earnedSalary = dailySalary * workedDays;
+
+        // Sum fixed earning additions
+        let additionalEarnings = 0;
+        let additionalDeductions = 0;
+        for (const concept of fixedConcepts) {
+          const amount = concept.calculation_type === 'percentage'
+            ? earnedSalary * (parseFloat(concept.percentage || 0) / 100)
+            : parseFloat(concept.amount || 0);
+          if (concept.type === 'earning') {
+            additionalEarnings += amount;
+          } else if (concept.type === 'deduction') {
+            additionalDeductions += amount;
+          }
+        }
+
+        // IPS calculation (9% employee, 16.5% employer)
+        const ipsBase = earnedSalary + additionalEarnings;
+        const ipsEmployee = parseFloat((ipsBase * 0.09).toFixed(2));
+        const ipsEmployer = parseFloat((ipsBase * 0.165).toFixed(2));
+
+        const grossIncome = parseFloat((ipsBase).toFixed(2));
+        const totalDeductions = parseFloat((ipsEmployee + additionalDeductions).toFixed(2));
+        const netPay = parseFloat((grossIncome - totalDeductions).toFixed(2));
+
+        // Upsert settlement
+        await sequelize.query(`
+          INSERT INTO employee_settlements
+            (payroll_run_id, employee_id, payroll_profile_id, worked_days, gross_income,
+             total_deductions, ips_employee_amount, ips_employer_amount, net_pay,
+             payment_method, bank_id, bank_account_number, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'calculated', NOW(), NOW())
+          ON DUPLICATE KEY UPDATE
+            payroll_profile_id    = VALUES(payroll_profile_id),
+            worked_days           = VALUES(worked_days),
+            gross_income          = VALUES(gross_income),
+            total_deductions      = VALUES(total_deductions),
+            ips_employee_amount   = VALUES(ips_employee_amount),
+            ips_employer_amount   = VALUES(ips_employer_amount),
+            net_pay               = VALUES(net_pay),
+            status                = 'calculated',
+            updated_at            = NOW()
+        `, { replacements: [
+          run.id, emp.id, emp.profile_id || null, workedDays, grossIncome,
+          totalDeductions, ipsEmployee, ipsEmployer, netPay,
+          emp.payment_method || 'BANCO', emp.bank_id || null, emp.bank_account_number || null
+        ]});
+
+        calculatedCount++;
+      } catch (empErr) {
+        console.error(`Error calculando empleado ${emp.id}:`, empErr);
+        errorCount++;
+      }
+    }
+
+    // Update run status
+    await sequelize.query(`
+      UPDATE payroll_runs
+      SET status = 'calculated', calculated_at = NOW(), calculated_by = ?, updated_at = NOW()
+      WHERE id = ?
+    `, { replacements: [req.user.id, run.id] });
+
+    res.json({
+      message: 'Cálculo completado',
+      calculated: calculatedCount,
+      errors: errorCount,
+      total_employees: employees.length
+    });
+  } catch (err) {
+    console.error('POST /api/payroll-runs/:id/calculate error:', err);
+    res.status(500).json({ error: 'Error al calcular liquidación' });
+  }
+});
+
+// GET /api/payroll-runs/:id/settlements — list employee settlements
+router.get('/:id/settlements', async (req, res) => {
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT es.*,
+             CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+             e.document_number, e.code AS employee_code,
+             b.name AS bank_name
+      FROM employee_settlements es
+      JOIN employees e ON e.id = es.employee_id
+      LEFT JOIN banks b ON b.id = es.bank_id
+      WHERE es.payroll_run_id = ?
+      ORDER BY e.last_name ASC, e.first_name ASC
+    `, { replacements: [req.params.id] });
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/payroll-runs/:id/settlements error:', err);
+    res.status(500).json({ error: 'Error al obtener liquidaciones de empleados' });
+  }
+});
+
+// GET /api/payroll-runs/:id/settlements/:settlementId — settlement detail with lines
+router.get('/:id/settlements/:settlementId', async (req, res) => {
+  try {
+    const [settlements] = await sequelize.query(`
+      SELECT es.*,
+             CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+             e.document_number, e.code AS employee_code,
+             e.position_id, p.name AS position_name,
+             b.name AS bank_name
+      FROM employee_settlements es
+      JOIN employees e ON e.id = es.employee_id
+      LEFT JOIN positions p ON p.id = e.position_id
+      LEFT JOIN banks b ON b.id = es.bank_id
+      WHERE es.id = ? AND es.payroll_run_id = ?
+    `, { replacements: [req.params.settlementId, req.params.id] });
+
+    if (!settlements.length) return res.status(404).json({ error: 'Liquidación de empleado no encontrada' });
+
+    const [lines] = await sequelize.query(`
+      SELECT sl.*, sc.name AS concept_name, sc.type AS concept_type, sc.affects_ips
+      FROM settlement_lines sl
+      LEFT JOIN salary_concepts sc ON sc.id = sl.salary_concept_id
+      WHERE sl.employee_settlement_id = ?
+      ORDER BY sc.type ASC, sl.sort_order ASC
+    `, { replacements: [req.params.settlementId] });
+
+    res.json({ ...settlements[0], lines });
+  } catch (err) {
+    console.error('GET /api/payroll-runs/:id/settlements/:settlementId error:', err);
+    res.status(500).json({ error: 'Error al obtener detalle de liquidación' });
+  }
+});
+
+// PUT /api/payroll-runs/:id/settlements/:settlementId — update settlement manually
+router.put('/:id/settlements/:settlementId', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const { worked_days, gross_income, total_deductions, ips_employee_amount, ips_employer_amount, net_pay, notes } = req.body;
+
+    await sequelize.query(`
+      UPDATE employee_settlements SET
+        worked_days           = COALESCE(?, worked_days),
+        gross_income          = COALESCE(?, gross_income),
+        total_deductions      = COALESCE(?, total_deductions),
+        ips_employee_amount   = COALESCE(?, ips_employee_amount),
+        ips_employer_amount   = COALESCE(?, ips_employer_amount),
+        net_pay               = COALESCE(?, net_pay),
+        notes                 = COALESCE(?, notes),
+        status                = 'adjusted',
+        updated_at            = NOW()
+      WHERE id = ? AND payroll_run_id = ?
+    `, { replacements: [
+      worked_days ?? null, gross_income ?? null, total_deductions ?? null,
+      ips_employee_amount ?? null, ips_employer_amount ?? null, net_pay ?? null,
+      notes || null, req.params.settlementId, req.params.id
+    ]});
+
+    const [row] = await sequelize.query(
+      'SELECT * FROM employee_settlements WHERE id = ?',
+      { replacements: [req.params.settlementId] }
+    );
+    if (!row.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+    res.json(row[0]);
+  } catch (err) {
+    console.error('PUT /api/payroll-runs/:id/settlements/:settlementId error:', err);
+    res.status(500).json({ error: 'Error al actualizar liquidación de empleado' });
+  }
+});
+
+// POST /api/payroll-runs/:id/approve
+router.post('/:id/approve', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const [runs] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    if (!runs.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+    if (!['calculated', 'review'].includes(runs[0].status)) {
+      return res.status(400).json({ error: 'Solo se pueden aprobar liquidaciones calculadas o en revisión' });
+    }
+
+    await sequelize.query(`
+      UPDATE payroll_runs
+      SET status = 'approved', approved_by = ?, approved_at = NOW(), updated_at = NOW()
+      WHERE id = ?
+    `, { replacements: [req.user.id, req.params.id] });
+
+    const [updated] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    res.json(updated[0]);
+  } catch (err) {
+    console.error('POST /api/payroll-runs/:id/approve error:', err);
+    res.status(500).json({ error: 'Error al aprobar liquidación' });
+  }
+});
+
+// POST /api/payroll-runs/:id/close
+router.post('/:id/close', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const [runs] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    if (!runs.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+    if (runs[0].status !== 'approved') {
+      return res.status(400).json({ error: 'Solo se pueden cerrar liquidaciones aprobadas' });
+    }
+
+    await sequelize.query(`
+      UPDATE payroll_runs
+      SET status = 'closed', closed_by = ?, closed_at = NOW(), updated_at = NOW()
+      WHERE id = ?
+    `, { replacements: [req.user.id, req.params.id] });
+
+    const [updated] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    res.json(updated[0]);
+  } catch (err) {
+    console.error('POST /api/payroll-runs/:id/close error:', err);
+    res.status(500).json({ error: 'Error al cerrar liquidación' });
+  }
+});
+
+// POST /api/payroll-runs/:id/reopen — reopen approved run back to 'review'
+router.post('/:id/reopen', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const [runs] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    if (!runs.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+    if (runs[0].status === 'closed') {
+      return res.status(400).json({ error: 'No se puede reabrir una liquidación cerrada' });
+    }
+
+    await sequelize.query(`
+      UPDATE payroll_runs
+      SET status = 'review', approved_by = NULL, approved_at = NULL, updated_at = NOW()
+      WHERE id = ?
+    `, { replacements: [req.params.id] });
+
+    const [updated] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    res.json(updated[0]);
+  } catch (err) {
+    console.error('POST /api/payroll-runs/:id/reopen error:', err);
+    res.status(500).json({ error: 'Error al reabrir liquidación' });
+  }
+});
+
+// GET /api/payroll-runs/:id/summary
+router.get('/:id/summary', async (req, res) => {
+  try {
+    const [runs] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    if (!runs.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+
+    const [summary] = await sequelize.query(`
+      SELECT
+        COUNT(*) AS employee_count,
+        SUM(worked_days) AS total_worked_days,
+        SUM(gross_income) AS total_gross,
+        SUM(total_deductions) AS total_deductions,
+        SUM(ips_employee_amount) AS total_ips_employee,
+        SUM(ips_employer_amount) AS total_ips_employer,
+        SUM(net_pay) AS total_net,
+        SUM(gross_income + ips_employer_amount) AS total_employer_cost
+      FROM employee_settlements
+      WHERE payroll_run_id = ?
+    `, { replacements: [req.params.id] });
+
+    res.json({ run: runs[0], summary: summary[0] });
+  } catch (err) {
+    console.error('GET /api/payroll-runs/:id/summary error:', err);
+    res.status(500).json({ error: 'Error al obtener resumen de liquidación' });
+  }
+});
+
+// GET /api/payroll-runs/:id/ips-export
+router.get('/:id/ips-export', async (req, res) => {
+  try {
+    const [runs] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    if (!runs.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+
+    const [rows] = await sequelize.query(`
+      SELECT
+        e.document_number,
+        CONCAT(e.last_name, ', ', e.first_name) AS employee_name,
+        e.ips_number,
+        es.gross_income AS salary_base,
+        es.ips_employee_amount AS contribution_employee,
+        es.ips_employer_amount AS contribution_employer,
+        (es.ips_employee_amount + es.ips_employer_amount) AS total_contribution,
+        es.worked_days
+      FROM employee_settlements es
+      JOIN employees e ON e.id = es.employee_id
+      WHERE es.payroll_run_id = ?
+      ORDER BY e.last_name ASC, e.first_name ASC
+    `, { replacements: [req.params.id] });
+
+    res.json({
+      run_id: runs[0].id,
+      period_year: runs[0].period_year,
+      period_month: runs[0].period_month,
+      records: rows
+    });
+  } catch (err) {
+    console.error('GET /api/payroll-runs/:id/ips-export error:', err);
+    res.status(500).json({ error: 'Error al exportar datos IPS' });
+  }
+});
+
+// GET /api/payroll-runs/:id/mtess-export
+router.get('/:id/mtess-export', async (req, res) => {
+  try {
+    const [runs] = await sequelize.query('SELECT * FROM payroll_runs WHERE id = ?', { replacements: [req.params.id] });
+    if (!runs.length) return res.status(404).json({ error: 'Liquidación no encontrada' });
+
+    const [rows] = await sequelize.query(`
+      SELECT
+        e.document_number,
+        CONCAT(e.last_name, ', ', e.first_name) AS employee_name,
+        e.position_id,
+        p.name AS position_name,
+        es.gross_income AS salary,
+        es.worked_days,
+        es.net_pay,
+        e.hire_date,
+        e.ips_number
+      FROM employee_settlements es
+      JOIN employees e ON e.id = es.employee_id
+      LEFT JOIN positions p ON p.id = e.position_id
+      WHERE es.payroll_run_id = ?
+      ORDER BY e.last_name ASC, e.first_name ASC
+    `, { replacements: [req.params.id] });
+
+    res.json({
+      run_id: runs[0].id,
+      period_year: runs[0].period_year,
+      period_month: runs[0].period_month,
+      period_start: runs[0].period_start,
+      period_end: runs[0].period_end,
+      records: rows
+    });
+  } catch (err) {
+    console.error('GET /api/payroll-runs/:id/mtess-export error:', err);
+    res.status(500).json({ error: 'Error al exportar datos MTESS' });
+  }
+});
+
+// ─── Settlement Types ────────────────────────────────────────────────────────
+
+// GET /api/settlement-types
+router.get('/settlement-types', async (req, res) => {
+  try {
+    const [rows] = await sequelize.query(
+      "SELECT * FROM settlement_types WHERE status != 'deleted' ORDER BY name ASC"
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/settlement-types error:', err);
+    res.status(500).json({ error: 'Error al obtener tipos de liquidación' });
+  }
+});
+
+// POST /api/settlement-types
+router.post('/settlement-types', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const { name, code, description } = req.body;
+    if (!name) return res.status(400).json({ error: 'name es requerido' });
+
+    const [result] = await sequelize.query(`
+      INSERT INTO settlement_types (name, code, description, status, created_at, updated_at)
+      VALUES (?, ?, ?, 'active', NOW(), NOW())
+    `, { replacements: [name, code || null, description || null] });
+
+    const [row] = await sequelize.query('SELECT * FROM settlement_types WHERE id = ?', { replacements: [result] });
+    res.status(201).json(row[0]);
+  } catch (err) {
+    console.error('POST /api/settlement-types error:', err);
+    res.status(500).json({ error: 'Error al crear tipo de liquidación' });
+  }
+});
+
+// ─── Payroll Monthly Parameters ─────────────────────────────────────────────
+
+// GET /api/payroll-monthly-parameters
+router.get('/payroll-monthly-parameters', async (req, res) => {
+  try {
+    const { year } = req.query;
+    let sql = 'SELECT * FROM payroll_monthly_parameters WHERE 1=1';
+    const replacements = [];
+    if (year) { sql += ' AND year = ?'; replacements.push(year); }
+    sql += ' ORDER BY year DESC, month DESC';
+
+    const [rows] = await sequelize.query(sql, { replacements });
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/payroll-monthly-parameters error:', err);
+    res.status(500).json({ error: 'Error al obtener parámetros mensuales' });
+  }
+});
+
+// POST /api/payroll-monthly-parameters
+router.post('/payroll-monthly-parameters', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const {
+      year, month, working_days, ips_rate_employee, ips_rate_employer,
+      minimum_wage, notes
+    } = req.body;
+
+    if (!year || !month) {
+      return res.status(400).json({ error: 'year y month son requeridos' });
+    }
+
+    const [result] = await sequelize.query(`
+      INSERT INTO payroll_monthly_parameters
+        (year, month, working_days, ips_rate_employee, ips_rate_employer,
+         minimum_wage, notes, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+    `, { replacements: [
+      year, month, working_days || 26,
+      ips_rate_employee || 0.09, ips_rate_employer || 0.165,
+      minimum_wage || null, notes || null, req.user.id
+    ]});
+
+    const [row] = await sequelize.query('SELECT * FROM payroll_monthly_parameters WHERE id = ?', { replacements: [result] });
+    res.status(201).json(row[0]);
+  } catch (err) {
+    console.error('POST /api/payroll-monthly-parameters error:', err);
+    res.status(500).json({ error: 'Error al crear parámetros mensuales' });
+  }
+});
+
+// PUT /api/payroll-monthly-parameters/:id
+router.put('/payroll-monthly-parameters/:id', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const {
+      working_days, ips_rate_employee, ips_rate_employer,
+      minimum_wage, notes
+    } = req.body;
+
+    await sequelize.query(`
+      UPDATE payroll_monthly_parameters SET
+        working_days        = COALESCE(?, working_days),
+        ips_rate_employee   = COALESCE(?, ips_rate_employee),
+        ips_rate_employer   = COALESCE(?, ips_rate_employer),
+        minimum_wage        = COALESCE(?, minimum_wage),
+        notes               = COALESCE(?, notes),
+        updated_at          = NOW()
+      WHERE id = ?
+    `, { replacements: [
+      working_days ?? null, ips_rate_employee ?? null, ips_rate_employer ?? null,
+      minimum_wage ?? null, notes || null, req.params.id
+    ]});
+
+    const [row] = await sequelize.query('SELECT * FROM payroll_monthly_parameters WHERE id = ?', { replacements: [req.params.id] });
+    if (!row.length) return res.status(404).json({ error: 'Parámetros no encontrados' });
+    res.json(row[0]);
+  } catch (err) {
+    console.error('PUT /api/payroll-monthly-parameters/:id error:', err);
+    res.status(500).json({ error: 'Error al actualizar parámetros mensuales' });
+  }
+});
+
+module.exports = router;

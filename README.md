@@ -78,3 +78,64 @@ cd analytics && pip install -r requirements.txt && python main.py
 # Web
 cd web && npm install && npm run dev
 ```
+
+## Módulos RRHH Platform
+
+### Gestión de Empresas y Sucursales
+- Multiempresa y multisucursal
+- Números patronales MTESS e IPS
+- [/empresas](/empresas)
+
+### Nómina y Liquidaciones
+- Perfiles salariales por empleado
+- Conceptos salariales (ingresos, descuentos, aportes)
+- Liquidaciones mensuales con cálculo IPS
+- Aguinaldo (1/12 de remuneraciones)
+- Anticipos de salario y aguinaldo
+- [/nomina/liquidaciones](/nomina/liquidaciones)
+
+### Bancos y Pagos
+- Lotes de pago por banco
+- Exportación CSV/Excel según layout bancario
+- Soporte para Banco GNB, Itaú, ueno, Familiar, Continental y otros
+- [/bancos](/bancos)
+
+### Cumplimiento Legal Paraguay
+- Comunicaciones MTESS/REOP (altas, bajas, liquidaciones, vacaciones, aguinaldo)
+- Planillas laborales anuales REOP
+- IPS/REI: cálculo y registro de aportes (9% obrero + 16.5% patronal)
+- Calendario de vencimientos por terminación de número patronal
+- [/cumplimiento](/cumplimiento)
+
+### Gestión Documental
+- Plantillas con campos dinámicos ({{employee.full_name}}, {{payroll.net_pay}}, etc.)
+- Documentos por empleado: contratos, recibos, autorizaciones
+- Firma digital dibujada en pantalla
+- Trazabilidad completa: quién creó, envió, vio, firmó, con IP y timestamp
+- Hash SHA-256 de documentos
+- [/documentos](/documentos)
+
+### Gestión por Competencias
+- Catálogo de competencias por categoría y tipo
+- Matriz de competencias por cargo con niveles requeridos (1-5)
+- Ciclos de evaluación: autoevaluación, evaluación por jefe, 360°
+- Cálculo automático de brechas con severidad
+- Planes de desarrollo individuales
+- Catálogo de capacitaciones y seguimiento
+- [/competencias](/competencias)
+
+### Motor de Notificaciones Multicanal
+- Canales: Interno, Email, WhatsApp, Telegram, SMS, Push Web/PWA, Webhook
+- Plantillas configurables por evento y canal
+- Cola con reintentos automáticos
+- Preferencias por usuario/empleado
+- Logs de entrega completos
+- [/notificaciones-config](/notificaciones-config)
+
+### Seguridad Granular (RBAC + ABAC)
+- Módulos y permisos atómicos (formato: módulo.entidad.acción)
+- Roles configurables por empresa/sucursal/departamento
+- Permisos por campo sensible (salario, cuenta bancaria, datos médicos)
+- Alcances: global, empresa, sucursal, área, equipo, propio
+- 10 roles base: SUPER_ADMIN, ADMIN_EMPRESA, GERENTE_RRHH, ANALISTA_RRHH, JEFE_AREA, TESORERIA, CONTABILIDAD, AUDITOR, EMPLEADO, SOPORTE_TI
+- [/seguridad-avanzada](/seguridad-avanzada)
