@@ -263,9 +263,8 @@ async function start() {
     await sequelize.authenticate();
     logger.info('✅ MySQL conectado');
 
-    // Inicializar Socket.io
-    initSocket(server);
-    logger.info('✅ Socket.io inicializado');
+    // Inicializar Socket.io (con Redis adapter si REDIS_URL está configurado)
+    await initSocket(server);
 
     server.listen(PORT, () => {
       logger.info(`🚀 API corriendo en puerto ${PORT}`);
