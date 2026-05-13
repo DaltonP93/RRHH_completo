@@ -184,7 +184,7 @@ export default function NotificacionesConfigPage() {
     if (r.ok) loadQueue(); else alert('Error al reintentar');
   }
 
-  const categories = [...new Set(matrix.map((e: any) => e.category))].sort();
+  const categories = Array.from(new Set(matrix.map((e: any) => e.category))).sort();
   const filteredMatrix = matrix.filter((e: any) =>
     (!filterCategory || e.category === filterCategory) &&
     (!filterChannel  || e.channels.some((c: any) => c.channel_code === filterChannel))

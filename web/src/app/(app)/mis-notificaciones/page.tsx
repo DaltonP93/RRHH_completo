@@ -115,7 +115,7 @@ export default function MisNotificacionesPage() {
     load();
   }
 
-  const categories = [...new Set(matrix.map((e: any) => e.category))].sort();
+  const categories = Array.from(new Set(matrix.map((e: any) => e.category))).sort();
   const filtered   = filterCategory ? matrix.filter((e: any) => e.category === filterCategory) : matrix;
   const dirtyCount = Object.values(dirty).reduce((acc, ch) => acc + Object.keys(ch).length, 0);
 
