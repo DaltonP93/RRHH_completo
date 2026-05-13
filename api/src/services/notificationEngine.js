@@ -28,6 +28,27 @@ function renderTemplate(template, payload) {
   return template.replace(/\{\{([^}]+)\}\}/g, (_, key) => flat[key.trim()] ?? '');
 }
 
+// ─── Resolve recipient address by channel ─────────────────────────────────────
+
+async function resolveRecipientAddress(userId, channelCode) {
+  if (!userId) return null;
+  const [rows] = await sequelize.query(
+    `SELECT email, phone FROM users WHERE id = ? LIMIT 1`,
+    { replacements: [userId] }
+  );
+  const user = rows[0];
+  if (!user) return null;
+  switch (channelCode) {
+    case 'EMAIL': return user.email || null;
+    case 'WHATSAPP':
+    case 'SMS': return user.phone || null;
+    case 'TELEGRAM': return user.phone || String(userId); // telegram chat_id stored elsewhere
+    case 'INTERNAL':
+    case 'PUSH_WEB': return String(userId);
+    default: return String(userId);
+  }
+}
+
 // ─── Event emission ───────────────────────────────────────────────────────────
 
 async function emitEvent({
@@ -45,7 +66,7 @@ async function emitEvent({
     // 1. Insert notification_event record
     const [event_id] = await sequelize.query(
       `INSERT INTO notification_events
-         (event_code, module_code, entity_type, entity_id, payload_json, priority, created_by_user_id)
+         (event_code, module_code, entity_type, entity_id, payload_json, priority, created_by)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       {
         replacements: [
@@ -57,7 +78,7 @@ async function emitEvent({
 
     // 2. Resolve enabled channels
     const [channels] = await sequelize.query(
-      `SELECT code FROM notification_channels WHERE is_enabled = 1`
+      `SELECT code FROM notification_channels WHERE enabled = 1`
     );
 
     if (!channels.length) return event_id;
@@ -79,7 +100,7 @@ async function emitEvent({
     for (const { code: channel_code } of channels) {
       const [templates] = await sequelize.query(
         `SELECT * FROM notification_templates
-         WHERE event_code = ? AND channel_code = ? AND is_active = 1
+         WHERE event_code = ? AND channel_code = ? AND enabled = 1
          LIMIT 1`,
         { replacements: [event_code, channel_code] }
       );
@@ -89,11 +110,21 @@ async function emitEvent({
       for (const user_id of recipientIds) {
         // Check user preference (skip if opted out)
         const [prefs] = await sequelize.query(
-          `SELECT is_enabled FROM notification_preferences
+          `SELECT enabled FROM notification_preferences
            WHERE user_id = ? AND channel_code = ? AND event_code = ?`,
           { replacements: [user_id, channel_code, event_code] }
         );
-        if (prefs.length && !prefs[0].is_enabled) continue;
+        if (prefs.length && !prefs[0].enabled) continue;
+
+        // Check quiet hours
+        if (prefs.length && prefs[0].quiet_hours_start && prefs[0].quiet_hours_end) {
+          const now = new Date();
+          const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+          if (hhmm >= prefs[0].quiet_hours_start && hhmm <= prefs[0].quiet_hours_end) continue;
+        }
+
+        const recipient_address = await resolveRecipientAddress(user_id, channel_code);
+        if (!recipient_address && channel_code !== 'INTERNAL') continue;
 
         const rendered_subject = tpl.subject_template
           ? renderTemplate(tpl.subject_template, payload) : null;
@@ -101,12 +132,13 @@ async function emitEvent({
 
         await sequelize.query(
           `INSERT INTO notification_queue
-             (notification_event_id, template_id, channel_code, recipient_user_id,
-              rendered_subject, rendered_body, status, priority, scheduled_at)
+             (event_id, channel_code, recipient_user_id,
+              recipient_address, subject, body, status, priority, scheduled_at)
            VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, NOW())`,
           {
             replacements: [
-              event_id, tpl.id, channel_code, user_id,
+              event_id, channel_code, user_id,
+              recipient_address || String(user_id),
               rendered_subject, rendered_body, priority,
             ],
           }
@@ -116,17 +148,16 @@ async function emitEvent({
         if (channel_code === 'INTERNAL') {
           await sequelize.query(
             `INSERT INTO internal_notifications
-               (user_id, title, body, event_code, entity_type, entity_id, priority)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+               (user_id, title, message, type, module, entity_type, entity_id)
+             VALUES (?, ?, ?, 'info', ?, ?, ?)`,
             {
               replacements: [
                 user_id,
                 rendered_subject || event_code,
                 rendered_body,
-                event_code,
+                module_code,
                 entity_type,
                 entity_id,
-                priority,
               ],
             }
           );

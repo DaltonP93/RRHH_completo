@@ -87,6 +87,7 @@ const NAV: NavItem[] = [
   // Configuración Avanzada
   { href: '/notificaciones-config', icon: Bell,    i18nKey: 'nav.notifications_config', section: 'config_avanzada', roles: ['admin','gth'], module: 'notificaciones_config' },
   { href: '/seguridad-avanzada',    icon: Lock,    i18nKey: 'nav.security_advanced',    section: 'config_avanzada', roles: ['admin','gth'], module: 'seguridad_avanzada' },
+  { href: '/mis-notificaciones',    icon: Bell,    i18nKey: 'nav.my_notifications',     section: 'portal',          roles: [],               module: 'mis_notificaciones' },
 ]
 
 interface SidebarSettings {

@@ -436,17 +436,17 @@ router.get('/notification-delivery-logs', authorize(...ADMIN_ROLES), async (req,
     const { queue_id, status, date_from, date_to } = req.query;
     let where = 'WHERE 1=1';
     const params = [];
-    if (queue_id)  { where += ' AND ndl.queue_id = ?';     params.push(Number(queue_id)); }
-    if (status)    { where += ' AND ndl.status = ?';        params.push(status); }
-    if (date_from) { where += ' AND ndl.attempted_at >= ?'; params.push(date_from); }
-    if (date_to)   { where += ' AND ndl.attempted_at <= ?'; params.push(date_to); }
+    if (queue_id)  { where += ' AND ndl.queue_id = ?';    params.push(Number(queue_id)); }
+    if (status)    { where += ' AND ndl.status = ?';       params.push(status); }
+    if (date_from) { where += ' AND ndl.created_at >= ?';  params.push(date_from); }
+    if (date_to)   { where += ' AND ndl.created_at <= ?';  params.push(date_to); }
 
     const [rows] = await sequelize.query(
       `SELECT ndl.*, nq.channel_code, nq.recipient_address
          FROM notification_delivery_logs ndl
          LEFT JOIN notification_queue nq ON nq.id = ndl.queue_id
        ${where}
-       ORDER BY ndl.attempted_at DESC
+       ORDER BY ndl.created_at DESC
        LIMIT 200`,
       { replacements: params }
     );
@@ -454,6 +454,177 @@ router.get('/notification-delivery-logs', authorize(...ADMIN_ROLES), async (req,
   } catch (err) {
     console.error('[notificationsMulticanal] GET /notification-delivery-logs error:', err);
     res.status(500).json({ error: 'Error al listar logs de entrega' });
+  }
+});
+
+// ─── EVENT CATALOG ───────────────────────────────────────────────────────────
+
+router.get('/notification-event-catalog', authorize(...ADMIN_ROLES), async (req, res) => {
+  try {
+    const [rows] = await sequelize.query(
+      `SELECT * FROM notification_event_catalog WHERE is_active = 1
+       ORDER BY category, name`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[notificationsMulticanal] GET /notification-event-catalog error:', err);
+    res.status(500).json({ error: 'Error al listar catálogo de eventos' });
+  }
+});
+
+// ─── NOTIFICATION MATRIX (events × channels with template status) ─────────────
+
+router.get('/notification-matrix', authorize(...ADMIN_ROLES), async (req, res) => {
+  try {
+    const [events] = await sequelize.query(
+      `SELECT * FROM notification_event_catalog WHERE is_active = 1
+       ORDER BY category, name`
+    );
+    const [channels] = await sequelize.query(
+      `SELECT code, name, enabled FROM notification_channels ORDER BY id`
+    );
+    const [templates] = await sequelize.query(
+      `SELECT event_code, channel_code, id AS template_id, enabled, name
+         FROM notification_templates WHERE company_id IS NULL`
+    );
+    const [prefs] = await sequelize.query(
+      `SELECT event_code, channel_code, COUNT(*) AS user_count
+         FROM notification_preferences
+         WHERE enabled = 0
+         GROUP BY event_code, channel_code`
+    );
+
+    // Build template lookup: event_code → channel_code → template info
+    const tplMap = {};
+    for (const t of templates) {
+      if (!tplMap[t.event_code]) tplMap[t.event_code] = {};
+      tplMap[t.event_code][t.channel_code] = { template_id: t.template_id, enabled: t.enabled, name: t.name };
+    }
+    const optOutMap = {};
+    for (const p of prefs) {
+      if (!optOutMap[p.event_code]) optOutMap[p.event_code] = {};
+      optOutMap[p.event_code][p.channel_code] = p.user_count;
+    }
+
+    const matrix = events.map(ev => ({
+      event_code: ev.event_code,
+      module_code: ev.module_code,
+      category: ev.category,
+      name: ev.name,
+      description: ev.description,
+      severity: ev.severity,
+      default_channels: typeof ev.default_channels === 'string'
+        ? JSON.parse(ev.default_channels) : (ev.default_channels || []),
+      channels: channels.map(ch => ({
+        channel_code: ch.code,
+        channel_name: ch.name,
+        channel_enabled: !!ch.enabled,
+        template: tplMap[ev.event_code]?.[ch.code] || null,
+        opted_out_users: optOutMap[ev.event_code]?.[ch.code] || 0,
+      })),
+    }));
+
+    res.json({ events: matrix, channels });
+  } catch (err) {
+    console.error('[notificationsMulticanal] GET /notification-matrix error:', err);
+    res.status(500).json({ error: 'Error al obtener matriz de notificaciones' });
+  }
+});
+
+// PUT /api/notification-matrix — toggle a specific event × channel template
+router.put('/notification-matrix', authorize(...ADMIN_ROLES), async (req, res) => {
+  try {
+    const { event_code, channel_code, enabled } = req.body;
+    if (!event_code || !channel_code) return res.status(400).json({ error: 'event_code y channel_code requeridos' });
+
+    const [rows] = await sequelize.query(
+      `SELECT id FROM notification_templates
+         WHERE event_code = ? AND channel_code = ? AND company_id IS NULL LIMIT 1`,
+      { replacements: [event_code, channel_code] }
+    );
+
+    if (!rows.length) {
+      // Create minimal template if none exists
+      await sequelize.query(
+        `INSERT INTO notification_templates (company_id, channel_code, event_code, name, body_template, enabled)
+           VALUES (NULL, ?, ?, ?, '', ?)`,
+        { replacements: [channel_code, event_code, `${event_code} — ${channel_code}`, enabled ? 1 : 0] }
+      );
+    } else {
+      await sequelize.query(
+        `UPDATE notification_templates SET enabled = ? WHERE event_code = ? AND channel_code = ? AND company_id IS NULL`,
+        { replacements: [enabled ? 1 : 0, event_code, channel_code] }
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[notificationsMulticanal] PUT /notification-matrix error:', err);
+    res.status(500).json({ error: 'Error al actualizar matriz' });
+  }
+});
+
+// ─── BATCH PREFERENCES (current user) ───────────────────────────────────────
+
+// GET /api/notification-preferences/my — full preference matrix for current user
+router.get('/notification-preferences/my', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const [events] = await sequelize.query(
+      `SELECT event_code, module_code, category, name, severity FROM notification_event_catalog WHERE is_active = 1 ORDER BY category, name`
+    );
+    const [channels] = await sequelize.query(
+      `SELECT code, name, enabled FROM notification_channels WHERE enabled = 1 ORDER BY id`
+    );
+    const [prefs] = await sequelize.query(
+      `SELECT event_code, channel_code, enabled, quiet_hours_start, quiet_hours_end
+         FROM notification_preferences WHERE user_id = ?`,
+      { replacements: [userId] }
+    );
+    const prefMap = {};
+    for (const p of prefs) {
+      if (!prefMap[p.event_code]) prefMap[p.event_code] = {};
+      prefMap[p.event_code][p.channel_code] = { enabled: !!p.enabled, quiet_hours_start: p.quiet_hours_start, quiet_hours_end: p.quiet_hours_end };
+    }
+    const matrix = events.map(ev => ({
+      ...ev,
+      channels: channels.map(ch => ({
+        channel_code: ch.code,
+        channel_name: ch.name,
+        enabled: prefMap[ev.event_code]?.[ch.code]?.enabled ?? true, // default opt-in
+        quiet_hours_start: prefMap[ev.event_code]?.[ch.code]?.quiet_hours_start || null,
+        quiet_hours_end:   prefMap[ev.event_code]?.[ch.code]?.quiet_hours_end   || null,
+      })),
+    }));
+    res.json({ events: matrix, channels });
+  } catch (err) {
+    console.error('[notificationsMulticanal] GET /notification-preferences/my error:', err);
+    res.status(500).json({ error: 'Error al cargar preferencias' });
+  }
+});
+
+// PUT /api/notification-preferences/my/batch — upsert multiple preferences at once
+router.put('/notification-preferences/my/batch', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { preferences } = req.body; // [{ event_code, channel_code, enabled, quiet_hours_start, quiet_hours_end }]
+    if (!Array.isArray(preferences) || !preferences.length) {
+      return res.status(400).json({ error: 'Se requiere array de preferencias' });
+    }
+    for (const p of preferences) {
+      await sequelize.query(
+        `INSERT INTO notification_preferences (user_id, event_code, channel_code, enabled, quiet_hours_start, quiet_hours_end, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+           ON DUPLICATE KEY UPDATE enabled = VALUES(enabled),
+             quiet_hours_start = VALUES(quiet_hours_start),
+             quiet_hours_end   = VALUES(quiet_hours_end),
+             updated_at        = NOW()`,
+        { replacements: [userId, p.event_code, p.channel_code, p.enabled ? 1 : 0, p.quiet_hours_start || null, p.quiet_hours_end || null] }
+      );
+    }
+    res.json({ ok: true, updated: preferences.length });
+  } catch (err) {
+    console.error('[notificationsMulticanal] PUT /notification-preferences/my/batch error:', err);
+    res.status(500).json({ error: 'Error al guardar preferencias' });
   }
 });
 
@@ -554,9 +725,16 @@ async function processQueue() {
 
       await sequelize.query(
         `INSERT INTO notification_delivery_logs
-           (queue_id, status, provider_response, error_message, duration_ms, attempted_at)
-         VALUES (?,?,?,?,?,NOW())`,
-        { replacements: [entry.id, success ? 'delivered' : 'failed', providerResponse, errorMsg, durationMs] }
+           (queue_id, provider, response_payload, http_status, status, created_at)
+         VALUES (?, ?, ?, ?, ?, NOW())`,
+        { replacements: [
+            entry.id,
+            entry.channel_code,
+            providerResponse,
+            success ? 200 : 500,
+            success ? 'success' : 'failed',
+          ]
+        }
       );
 
       success ? processed++ : failed++;
