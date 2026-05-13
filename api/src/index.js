@@ -83,8 +83,10 @@ const server = http.createServer(app);
 
 // ─── Middleware ─────────────────────────────────────────────────
 const { requestId } = require('./middleware/requestId');
+const { metricsMiddleware, metricsHandler } = require('./middleware/metrics');
 app.set('trust proxy', 1); // Nginx reverse proxy
 app.use(requestId); // UUID por request — disponible en logs y respuesta X-Request-Id
+app.use(metricsMiddleware);
 app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {
@@ -213,6 +215,9 @@ app.get('/api/docs.json', (req, res) => res.json(swaggerSpec));
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Prometheus metrics (acceso solo desde red interna — configurable en nginx)
+app.get('/metrics', metricsHandler);
 
 // ─── Manejo de errores ──────────────────────────────────────────
 app.use((err, req, res, next) => {
