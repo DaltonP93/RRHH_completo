@@ -552,4 +552,64 @@ router.post('/document-folders', async (req, res) => {
   }
 });
 
+// ─── Firma electrónica SHA-256 ────────────────────────────────────
+
+// POST /api/documents/:id/sign-sha256 — firma con verificación de identidad y hash SHA-256
+// Tipos soportados: PASSWORD, OTP (TOTP), DRAWN, IMAGE
+// Cualquier usuario autenticado puede firmar sus propios documentos
+router.post('/:id/sign-sha256', async (req, res) => {
+  try {
+    const { signDocument } = require('../services/signatureService');
+    const result = await signDocument(req.params.id, req.user.id, req.body, req);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[documents] POST /:id/sign-sha256 error:', err);
+    const status = err.message.includes('inválido') || err.message.includes('incorrecta') ? 400 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// POST /api/documents/:id/request-signature — solicitar firma de otro usuario
+router.post('/:id/request-signature', authorize('admin', 'hr', 'super_admin'), async (req, res) => {
+  try {
+    const { requestSignature } = require('../services/signatureService');
+    const { signer_id, signer_type, expires_in_hours } = req.body;
+    if (!signer_id) return res.status(400).json({ error: 'signer_id es requerido' });
+    const result = await requestSignature(req.params.id, signer_id, signer_type || 'employee', { expiresInHours: expires_in_hours || 72 });
+    res.json(result);
+  } catch (err) {
+    console.error('[documents] POST /:id/request-signature error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/documents/:id/signatures — listar firmas con verificación de hash
+router.get('/:id/signatures', async (req, res) => {
+  try {
+    const [sigs] = await sequelize.query(`
+      SELECT ds.*, u.username, u.full_name AS signer_name
+      FROM document_signatures ds
+      LEFT JOIN users u ON u.id = ds.signer_user_id
+      WHERE ds.document_id = ?
+      ORDER BY ds.signed_at ASC
+    `, { replacements: [req.params.id] });
+    res.json(sigs);
+  } catch (err) {
+    console.error('[documents] GET /:id/signatures error:', err);
+    res.status(500).json({ error: 'Error al obtener firmas' });
+  }
+});
+
+// GET /api/documents/signatures/:sigId/verify — verificar integridad de firma
+router.get('/signatures/:sigId/verify', async (req, res) => {
+  try {
+    const { verifySignature } = require('../services/signatureService');
+    const result = await verifySignature(req.params.sigId);
+    res.json(result);
+  } catch (err) {
+    console.error('[documents] GET /signatures/:sigId/verify error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
