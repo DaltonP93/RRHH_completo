@@ -74,6 +74,7 @@ const documentsRouter            = require('./routes/documents');
 const competenciesRouter         = require('./routes/competencies');
 const notificationsMulticanalRouter = require('./routes/notificationsMulticanal');
 const securityGranularRouter     = require('./routes/securityGranular');
+const att2000SyncRouter          = require('./routes/att2000Sync');
 
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
@@ -202,6 +203,7 @@ app.use('/api', documentsRouter);
 app.use('/api', competenciesRouter);
 app.use('/api', notificationsMulticanalRouter);
 app.use('/api', securityGranularRouter);
+app.use('/api/sync/att2000', att2000SyncRouter);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

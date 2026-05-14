@@ -136,6 +136,10 @@ async function testAtt2000Connection() {
  *   { employee_code, timestamp, type, device_sensor_id }
  */
 async function writeCheckinOut(records) {
+  // ─── Guard de escritura ───────────────────────────────────────────
+  if (process.env.ATT2000_ALLOW_WRITE !== 'true') {
+    throw new Error('Escritura en att2000 deshabilitada (ATT2000_ALLOW_WRITE != true)');
+  }
   const db = await getAtt2000();
   let inserted = 0, skipped = 0, errors = 0;
   const errList = [];
@@ -189,4 +193,116 @@ async function writeCheckinOut(records) {
   return { inserted, skipped, errors, errList };
 }
 
-module.exports = { getAtt2000, queryAtt2000, testAtt2000Connection, writeCheckinOut, resetPool, getTableColumns, pickCol };
+// ─── Funciones de consulta seguras ───────────────────────────────
+async function diagnoseAtt2000Schema() {
+  // Devuelve tablas con conteo de columnas
+  const db = await getAtt2000();
+  const r = await db.request().query(`
+    SELECT TABLE_NAME, COUNT(*) AS col_count
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME IN ('CHECKINOUT','USERINFO','DEPARTMENTS','ICLOCK')
+    GROUP BY TABLE_NAME
+  `);
+  return r.recordset;
+}
+
+async function getAtt2000TableCounts() {
+  // Conteos de tablas principales
+  const db = await getAtt2000();
+  const queries = [
+    'SELECT COUNT(*) AS cnt FROM CHECKINOUT',
+    'SELECT COUNT(*) AS cnt FROM USERINFO',
+    'SELECT COUNT(*) AS cnt FROM DEPARTMENTS',
+  ];
+  const results = {};
+  for (const q of queries) {
+    try {
+      const r = await db.request().query(q);
+      const table = q.match(/FROM (\w+)/)[1];
+      results[table] = r.recordset[0].cnt;
+    } catch { results[q.match(/FROM (\w+)/)[1]] = null; }
+  }
+  return results;
+}
+
+async function fetchAttDepartments() {
+  const db = await getAtt2000();
+  const r = await db.request().query('SELECT * FROM DEPARTMENTS');
+  return r.recordset;
+}
+
+async function fetchAttUsers({ limit = 1000, offset = 0 } = {}) {
+  const db = await getAtt2000();
+  const r = await db.request()
+    .input('lim', sql.Int, limit)
+    .input('off', sql.Int, offset)
+    .query('SELECT * FROM USERINFO ORDER BY USERID OFFSET @off ROWS FETCH NEXT @lim ROWS ONLY');
+  return r.recordset;
+}
+
+async function fetchAttPunches({ from, to, limit = 10000, offset = 0 } = {}) {
+  const db = await getAtt2000();
+  const r = await db.request()
+    .input('from', sql.DateTime, new Date(from))
+    .input('to',   sql.DateTime, new Date(to))
+    .input('lim',  sql.Int, limit)
+    .input('off',  sql.Int, offset)
+    .query(`SELECT USERID, CHECKTIME, CHECKTYPE, SENSORID, VERIFYCODE
+            FROM CHECKINOUT
+            WHERE CHECKTIME >= @from AND CHECKTIME <= @to
+            ORDER BY CHECKTIME
+            OFFSET @off ROWS FETCH NEXT @lim ROWS ONLY`);
+  return r.recordset;
+}
+
+async function fetchAttPunchesSince({ since, limit = 5000 } = {}) {
+  const db = await getAtt2000();
+  const r = await db.request()
+    .input('since', sql.DateTime, new Date(since))
+    .input('lim',   sql.Int, limit)
+    .query(`SELECT TOP (@lim) USERID, CHECKTIME, CHECKTYPE, SENSORID, VERIFYCODE
+            FROM CHECKINOUT
+            WHERE CHECKTIME >= @since
+            ORDER BY CHECKTIME`);
+  return r.recordset;
+}
+
+async function fetchAttPunchesByUser({ sourceUserId, from, to } = {}) {
+  const db = await getAtt2000();
+  const r = await db.request()
+    .input('uid',  sql.Int,      parseInt(sourceUserId))
+    .input('from', sql.DateTime, new Date(from))
+    .input('to',   sql.DateTime, new Date(to))
+    .query(`SELECT USERID, CHECKTIME, CHECKTYPE, SENSORID, VERIFYCODE
+            FROM CHECKINOUT
+            WHERE USERID = @uid AND CHECKTIME >= @from AND CHECKTIME <= @to
+            ORDER BY CHECKTIME`);
+  return r.recordset;
+}
+
+async function getAtt2000DateRange() {
+  const db = await getAtt2000();
+  const r = await db.request().query(`
+    SELECT MIN(CHECKTIME) AS min_date, MAX(CHECKTIME) AS max_date,
+           COUNT(*) AS total FROM CHECKINOUT
+  `);
+  return r.recordset[0];
+}
+
+module.exports = {
+  getAtt2000,
+  queryAtt2000,
+  testAtt2000Connection,
+  writeCheckinOut,
+  resetPool,
+  getTableColumns,
+  pickCol,
+  diagnoseAtt2000Schema,
+  getAtt2000TableCounts,
+  fetchAttDepartments,
+  fetchAttUsers,
+  fetchAttPunches,
+  fetchAttPunchesSince,
+  fetchAttPunchesByUser,
+  getAtt2000DateRange,
+};

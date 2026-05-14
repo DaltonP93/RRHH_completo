@@ -204,4 +204,165 @@ router.get('/workers', authenticate, authorize('admin', 'super_admin'), async (r
   });
 });
 
+// ─── /api/health/full — smoke-test completo (sin autenticación) ──────────────
+//
+// Verifica de forma independiente (Promise.allSettled) todos los subsistemas:
+//   mysql, redis, storage (uploads write), analytics (:5000/health),
+//   bridge (:8081/health), timezone, migraciones (COUNT tablas), espacio disco.
+//
+// Un check fallido no rompe los demás. Responde 200 si todos ok, 503 si alguno
+// falla. No requiere autenticación para permitir smoke-tests externos.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/full', async (req, res) => {
+  const TIMEOUT_MS = 5000;
+
+  /** Envuelve una promesa con timeout y nombre para Promise.allSettled */
+  function withTimeout(name, promise) {
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`timeout after ${TIMEOUT_MS}ms`)), TIMEOUT_MS)
+    );
+    return Promise.race([promise, timeout])
+      .then(result => ({ name, ok: true, ...result }))
+      .catch(err  => ({ name, ok: false, error: err.message }));
+  }
+
+  // ── Checks individuales ──────────────────────────────────────────────────
+
+  async function fullCheckMysql() {
+    const t0 = Date.now();
+    await sequelize.query('SELECT 1 AS ok');
+    return { latency_ms: Date.now() - t0 };
+  }
+
+  async function fullCheckRedis() {
+    const t0 = Date.now();
+    const r = typeof getRedis === 'function' ? getRedis() : null;
+    if (!r) throw new Error('Redis no inicializado');
+    await r.ping();
+    return { latency_ms: Date.now() - t0 };
+  }
+
+  async function fullCheckStorage() {
+    const fs   = require('fs');
+    const path = require('path');
+    const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, '../../../uploads');
+    const testFile  = path.join(uploadDir, '.health_probe_full');
+    fs.mkdirSync(uploadDir, { recursive: true });
+    fs.writeFileSync(testFile, Date.now().toString());
+    fs.unlinkSync(testFile);
+    let disk = {};
+    try {
+      const stats = fs.statfsSync(uploadDir);
+      disk = {
+        total_gb: Math.round(stats.blocks * stats.bsize / 1e9 * 100) / 100,
+        free_gb:  Math.round(stats.bfree  * stats.bsize / 1e9 * 100) / 100,
+        used_pct: Math.round((1 - stats.bfree / stats.blocks) * 100),
+      };
+    } catch (_) { /* statfsSync no disponible en todas las plataformas */ }
+    return { path: uploadDir, writable: true, ...disk };
+  }
+
+  async function fullCheckAnalytics() {
+    const t0  = Date.now();
+    const url = process.env.ANALYTICS_URL || 'http://localhost:5000';
+    const ctrl = new AbortController();
+    const to  = setTimeout(() => ctrl.abort(), TIMEOUT_MS - 200);
+    try {
+      const resp = await fetch(`${url}/health`, { signal: ctrl.signal });
+      clearTimeout(to);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return { latency_ms: Date.now() - t0, http_status: resp.status };
+    } finally {
+      clearTimeout(to);
+    }
+  }
+
+  async function fullCheckBridge() {
+    const t0  = Date.now();
+    const url = process.env.BRIDGE_URL || 'http://localhost:8081';
+    const ctrl = new AbortController();
+    const to  = setTimeout(() => ctrl.abort(), TIMEOUT_MS - 200);
+    try {
+      const resp = await fetch(`${url}/health`, { signal: ctrl.signal });
+      clearTimeout(to);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return { latency_ms: Date.now() - t0, http_status: resp.status };
+    } finally {
+      clearTimeout(to);
+    }
+  }
+
+  async function fullCheckTimezone() {
+    const tz  = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
+    const now = new Date();
+    return {
+      tz,
+      server_time:  now.toISOString(),
+      utc_offset_h: -now.getTimezoneOffset() / 60,
+    };
+  }
+
+  async function fullCheckMigrations() {
+    const [[row]] = await sequelize.query(`
+      SELECT COUNT(*) AS table_count
+      FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+    `);
+    return { table_count: Number(row.table_count) };
+  }
+
+  async function fullCheckDisk() {
+    const fs   = require('fs');
+    const path = require('path');
+    const dir  = process.env.UPLOAD_DIR || path.join(__dirname, '../../../uploads');
+    // statfs puede no estar disponible en todas las versiones de Node
+    if (!fs.statfsSync) throw new Error('statfsSync no disponible en este entorno');
+    const stats = fs.statfsSync(dir);
+    const total_gb = Math.round(stats.blocks * stats.bsize / 1e9 * 100) / 100;
+    const free_gb  = Math.round(stats.bfree  * stats.bsize / 1e9 * 100) / 100;
+    const used_pct = Math.round((1 - stats.bfree / stats.blocks) * 100);
+    return { total_gb, free_gb, used_pct };
+  }
+
+  // ── Ejecutar todos en paralelo ────────────────────────────────────────────
+  const results = await Promise.allSettled([
+    withTimeout('mysql',       fullCheckMysql()),
+    withTimeout('redis',       fullCheckRedis()),
+    withTimeout('storage',     fullCheckStorage()),
+    withTimeout('analytics',   fullCheckAnalytics()),
+    withTimeout('bridge',      fullCheckBridge()),
+    withTimeout('timezone',    fullCheckTimezone()),
+    withTimeout('migrations',  fullCheckMigrations()),
+    withTimeout('disk',        fullCheckDisk()),
+  ]);
+
+  // ── Construir mapa de checks ──────────────────────────────────────────────
+  const checks = {};
+  for (const r of results) {
+    // allSettled siempre resuelve; nuestro withTimeout ya maneja errores internos
+    const { name, ok, error, ...rest } = r.value || { name: 'unknown', ok: false, error: 'internal' };
+    checks[name] = ok ? { ok: true, ...rest } : { ok: false, error };
+  }
+
+  // ── Status global: ok solo si mysql y redis están operativos ─────────────
+  const coreOk  = checks.mysql?.ok && checks.redis?.ok;
+  const allOk   = Object.values(checks).every(c => c.ok);
+  const status  = allOk ? 'ok' : 'degraded';
+
+  // ── Disco (para nivel superior de respuesta) ──────────────────────────────
+  const disk_gb = checks.disk?.ok
+    ? { total: checks.disk.total_gb, free: checks.disk.free_gb, used_pct: checks.disk.used_pct }
+    : null;
+
+  res.status(coreOk ? 200 : 503).json({
+    status,
+    environment: process.env.NODE_ENV || 'development',
+    timestamp:   new Date().toISOString(),
+    checks,
+    disk_gb,
+    timezone:    checks.timezone?.tz || null,
+  });
+});
+
 module.exports = router;
+
