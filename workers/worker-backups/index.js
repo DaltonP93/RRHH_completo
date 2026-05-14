@@ -21,14 +21,27 @@ process.env.SERVICE_NAME = 'worker-backups';
 
 const fs          = require('fs');
 const path        = require('path');
-const { exec }    = require('child_process');
-const { promisify } = require('util');
+const { execFile, spawn } = require('child_process');
 const { sequelize } = require('./src/config/database');
 const logger      = require('./src/config/logger');
 
-const execAsync = promisify(exec);
+// execFile sin shell para evitar shell injection
+function execFileAsync(cmd, args) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { shell: false }, (err, stdout, stderr) => {
+      if (err) { err.stderr = stderr; return reject(err); }
+      resolve(stdout);
+    });
+  });
+}
 
 const BACKUP_DIR  = process.env.BACKUP_DIR || path.join(__dirname, '..', '..', 'backups');
+
+// Validar BACKUP_DIR: no permitir path traversal
+if (BACKUP_DIR.includes('..')) {
+  logger.error('BACKUP_DIR contiene ".." — posible path traversal. Abortando.');
+  process.exit(1);
+}
 const BACKUP_HOUR = parseInt(process.env.BACKUP_HOUR || '2');
 
 // Política de retención en días
@@ -49,16 +62,51 @@ for (const type of ['daily', 'weekly', 'monthly', 'annual', 'uploads']) {
 async function backupMysql(outputPath) {
   const host     = process.env.DB_HOST || 'localhost';
   const port     = process.env.DB_PORT || '3306';
-  const db       = process.env.DB_NAME || 'asistencia';
+  const db_name  = process.env.DB_NAME || 'asistencia';
   const user     = process.env.DB_USER || 'asistencia_user';
   const password = process.env.DB_PASSWORD || '';
 
-  const cmd = `mysqldump -h ${host} -P ${port} -u ${user} --password='${password}' ` +
-    `--single-transaction --routines --triggers --events ` +
-    `${db} | gzip > ${outputPath}.gz`;
+  const gzPath = `${outputPath}.gz`;
 
-  await execAsync(cmd);
-  return `${outputPath}.gz`;
+  // Usar spawn para piping mysqldump | gzip sin invocar shell
+  await new Promise((resolve, reject) => {
+    const dump = spawn('mysqldump', [
+      '-h', host,
+      '-P', String(port),
+      '-u', user,
+      `--password=${password}`,
+      '--single-transaction',
+      '--routines',
+      '--triggers',
+      '--events',
+      db_name,
+    ], { shell: false });
+
+    const gzip = spawn('gzip', [], { shell: false });
+    const out  = fs.createWriteStream(gzPath);
+
+    dump.stdout.pipe(gzip.stdin);
+    gzip.stdout.pipe(out);
+
+    let dumpErr = '';
+    dump.stderr.on('data', d => { dumpErr += d.toString(); });
+    dump.on('error', reject);
+    gzip.on('error', reject);
+
+    out.on('finish', () => {
+      if (dump.exitCode !== null && dump.exitCode !== 0) {
+        return reject(new Error(`mysqldump salió con código ${dump.exitCode}: ${dumpErr}`));
+      }
+      resolve();
+    });
+    out.on('error', reject);
+
+    dump.on('close', code => {
+      if (code !== 0) gzip.stdin.destroy(new Error(`mysqldump error (${code}): ${dumpErr}`));
+    });
+  });
+
+  return gzPath;
 }
 
 // ─── Backup uploads ──────────────────────────────────────────────
@@ -67,7 +115,10 @@ async function backupUploads(outputPath) {
     path.join(__dirname, '..', '..', 'uploads');
   if (!fs.existsSync(uploadsDir)) return null;
 
-  await execAsync(`tar -czf ${outputPath} -C ${path.dirname(uploadsDir)} ${path.basename(uploadsDir)}`);
+  const parentDir  = path.dirname(uploadsDir);
+  const basename   = path.basename(uploadsDir);
+
+  await execFileAsync('tar', ['-czf', outputPath, '-C', parentDir, basename]);
   return outputPath;
 }
 

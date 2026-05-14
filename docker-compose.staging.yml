@@ -1,0 +1,342 @@
+# =============================================================================
+# docker-compose.staging.yml
+# Configuración Docker Compose para el entorno de staging de SisHoras.
+#
+# Diferencias respecto a producción:
+#   - MySQL y Redis NO expuestos públicamente (solo red interna).
+#   - API expuesta en puerto 4000 solo si STAGING_EXPOSE_API=true (profile debug).
+#   - Límites de memoria configurados por servicio.
+#   - Log rotation activada en todos los servicios.
+#   - Nginx enruta el tráfico externo (80/443) hacia api y web.
+#
+# Uso:
+#   docker compose -f docker-compose.staging.yml up -d --build
+#   docker compose -f docker-compose.staging.yml logs -f api
+#   docker compose -f docker-compose.staging.yml down -v   # borra datos
+# =============================================================================
+
+name: sishoras_staging
+
+# ── Configuración de log rotation reutilizable ────────────────────────────────
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  # ── MySQL 8 ──────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: sishoras_mysql_staging
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD no definida en .env}
+      MYSQL_DATABASE: ${DB_NAME:-asistencia}
+      MYSQL_USER: ${DB_USER:-asistencia_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD no definida en .env}
+    # NO exponer el puerto hacia el host — solo accesible por la red interna
+    expose:
+      - "3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./database/migrations:/docker-entrypoint-initdb.d/migrations:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=${DB_ROOT_PASSWORD:-rootpass}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    logging: *default-logging
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_allowed_packet=64M
+
+  # ── Redis 7 ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: sishoras_redis_staging
+    restart: always
+    # NO exponer el puerto hacia el host — solo accesible por la red interna
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    logging: *default-logging
+    command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy allkeys-lru
+
+  # ── API principal (Node.js / Express) ─────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: sishoras_api_staging
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: staging
+      PORT: 4000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-asistencia}
+      DB_USER: ${DB_USER:-asistencia_user}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD no definida}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET no definida}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+    # Puerto 4000 expuesto al host SOLO si se usa el profile "debug"
+    # Para activarlo: STAGING_EXPOSE_API=true + agregar "--profile debug"
+    profiles: []
+    expose:
+      - "4000"
+    volumes:
+      - document_uploads:/app/uploads/documents
+      - app_logs:/app/logs
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging: *default-logging
+
+  # ── API en modo debug (puerto 4000 expuesto al host) ─────────────────────────
+  # Activo solo con: docker compose --profile debug -f docker-compose.staging.yml up -d
+  api-debug:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: sishoras_api_debug
+    restart: always
+    profiles:
+      - debug
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: staging
+      PORT: 4000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-asistencia}
+      DB_USER: ${DB_USER:-asistencia_user}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD no definida}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET no definida}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+    ports:
+      - "4000:4000"
+    volumes:
+      - document_uploads:/app/uploads/documents
+      - app_logs:/app/logs
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging: *default-logging
+
+  # ── Web (Next.js) ─────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: sishoras_web_staging
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: staging
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost/api}
+      NEXT_PUBLIC_SOCKET_URL: ${NEXT_PUBLIC_SOCKET_URL:-http://localhost}
+      NEXT_PUBLIC_ANALYTICS_URL: ${NEXT_PUBLIC_ANALYTICS_URL:-http://localhost:5000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+    # Puerto 3000 solo accesible internamente (Nginx hace proxy hacia él)
+    expose:
+      - "3000"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/ || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging: *default-logging
+
+  # ── Bridge ZKTeco ─────────────────────────────────────────────────────────────
+  bridge:
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    container_name: sishoras_bridge_staging
+    restart: always
+    depends_on:
+      - redis
+      - api
+    environment:
+      NODE_ENV: staging
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      API_URL: http://api:4000
+      API_KEY: ${BRIDGE_API_KEY:-}
+      ZKTECO_PUSH_PORT: 8080
+      ZKTECO_API_PORT: 8081
+    ports:
+      # Puerto PUSH: los relojes ZKTeco envían eventos a este puerto
+      - "8080:8080"
+      # Puerto API bridge: para consultar estado y configuración del bridge
+      - "8081:8081"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    logging: *default-logging
+
+  # ── Analytics (FastAPI / Python) ───────────────────────────────────────────────
+  analytics:
+    build:
+      context: ./analytics
+      dockerfile: Dockerfile
+    container_name: sishoras_analytics_staging
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-asistencia}
+      DB_USER: ${DB_USER:-asistencia_user}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD no definida}
+      ANALYTICS_API_KEY: ${ANALYTICS_API_KEY:-}
+    # Puerto 5000 accesible desde el host para acceder a /docs (Swagger)
+    ports:
+      - "5000:5000"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    logging: *default-logging
+
+  # ── Nginx (Reverse Proxy) ─────────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: sishoras_nginx_staging
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - internal
+      - expose
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    logging: *default-logging
+
+# ── Volúmenes ─────────────────────────────────────────────────────────────────
+volumes:
+  mysql_data:
+    name: sishoras_staging_mysql_data
+  redis_data:
+    name: sishoras_staging_redis_data
+  document_uploads:
+    name: sishoras_staging_uploads
+  app_logs:
+    name: sishoras_staging_logs
+
+# ── Redes ─────────────────────────────────────────────────────────────────────
+networks:
+  # Red interna: todos los servicios se comunican entre sí sin exponerse al host
+  internal:
+    name: sishoras_staging_internal
+    driver: bridge
+    internal: false   # false para permitir salida a internet (att2000, SMTP, etc.)
+
+  # Red de exposición: solo nginx tiene acceso desde el exterior
+  expose:
+    name: sishoras_staging_expose
+    driver: bridge

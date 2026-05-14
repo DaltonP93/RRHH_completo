@@ -193,5 +193,27 @@ module.exports = {
       autorestart: true,
       restart_delay: 5000,
     },
+    {
+      name: 'worker-sync-att2000',
+      cwd: './api',
+      script: '../workers/worker-sync-att2000/index.js',
+      instances: 1,
+      exec_mode: 'fork',
+      watch: false,
+      env: {
+        NODE_ENV: 'production',
+        TZ: 'America/Asuncion',
+        SERVICE_NAME: 'worker-sync-att2000',
+        // ATT2000_INCREMENTAL_ENABLED: se lee desde BD (settings table)
+        // ATT2000_INCREMENTAL_CRON:    se lee desde BD (settings table)
+      },
+      error_file: '../logs/worker-sync-att2000-error.log',
+      out_file:   '../logs/worker-sync-att2000-out.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      max_memory_restart: '384M',
+      autorestart: true,
+      restart_delay: 10000,
+      kill_timeout: 60000,
+    },
   ],
 };
