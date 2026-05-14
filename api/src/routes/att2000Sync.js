@@ -506,6 +506,40 @@ router.get('/reconcile-results', async (req, res) => {
   }
 });
 
+// ─── POST /api/sync/att2000/employee-map/:id/assign ──────────────
+// Asigna manualmente un source_employee_map entry a un empleado local.
+router.post('/employee-map/:id/assign', async (req, res) => {
+  try {
+    const { employee_id, notes } = req.body;
+    if (!employee_id) return res.status(400).json({ error: 'employee_id requerido' });
+
+    const [[entry]] = await sequelize.query(
+      'SELECT * FROM source_employee_map WHERE id = ?',
+      { replacements: [req.params.id] }
+    );
+    if (!entry) return res.status(404).json({ error: 'Entrada no encontrada' });
+
+    // Verificar que el empleado existe
+    const [[emp]] = await sequelize.query(
+      'SELECT id, first_name, last_name, code FROM employees WHERE id = ?',
+      { replacements: [parseInt(employee_id)] }
+    );
+    if (!emp) return res.status(404).json({ error: 'Empleado no encontrado' });
+
+    await sequelize.query(`
+      UPDATE source_employee_map
+      SET employee_id = ?, match_status = 'manual',
+          notes = ?, updated_at = NOW()
+      WHERE id = ?
+    `, { replacements: [emp.id, notes || null, entry.id] });
+
+    logger.info(`employee-map ${entry.id} (${entry.raw_name}) → empleado ${emp.id} (${emp.code}) por usuario ${req.user.id}`);
+    res.json({ ok: true, source_map_id: entry.id, employee: { id: emp.id, code: emp.code, name: `${emp.first_name} ${emp.last_name}` } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GET/POST /api/sync/att2000/source-mode ───────────────────────
 router.get('/source-mode', async (req, res) => {
   try {

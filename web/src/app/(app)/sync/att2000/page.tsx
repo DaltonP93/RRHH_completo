@@ -113,6 +113,8 @@ export default function SyncAtt2000Page() {
   // Employee map
   const [empMap, setEmpMap] = useState<EmployeeMap[]>([])
   const [empMapFilter, setEmpMapFilter] = useState('unmatched')
+  const [mapAssign, setMapAssign] = useState<{ mapId: number | null; employeeId: string; notes: string }>({ mapId: null, employeeId: '', notes: '' })
+  const [mapAssignLoading, setMapAssignLoading] = useState(false)
 
   // Importación
   const [importForm, setImportForm] = useState({ from: '', to: '', limit: '10000' })
@@ -223,6 +225,21 @@ export default function SyncAtt2000Page() {
       flash(`Usuarios: ${data.inserted} importados al mapeo`)
       loadEmpMap()
     } catch (e: any) { flash(e.response?.data?.error || e.message, 'error') }
+  }
+
+  async function handleMapAssign() {
+    if (!mapAssign.mapId || !mapAssign.employeeId) { flash('Completar ID de empleado', 'error'); return }
+    setMapAssignLoading(true)
+    try {
+      const { data } = await api.post(`/api/sync/att2000/employee-map/${mapAssign.mapId}/assign`, {
+        employee_id: parseInt(mapAssign.employeeId),
+        notes: mapAssign.notes,
+      })
+      flash(`Mapeado a: ${data.employee.name} (${data.employee.code})`)
+      setMapAssign({ mapId: null, employeeId: '', notes: '' })
+      loadEmpMap()
+    } catch (e: any) { flash(e.response?.data?.error || e.message, 'error') }
+    finally { setMapAssignLoading(false) }
   }
 
   async function handleImportPunches() {
@@ -488,6 +505,39 @@ export default function SyncAtt2000Page() {
             </div>
           )}
 
+          {/* Formulario asignacion manual */}
+          {mapAssign.mapId && (
+            <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-sm font-medium text-blue-800 mb-3">
+                Asignar entrada #{mapAssign.mapId} a empleado local
+              </p>
+              <div className="flex gap-3 flex-wrap">
+                <input
+                  type="number"
+                  placeholder="ID empleado local"
+                  value={mapAssign.employeeId}
+                  onChange={e => setMapAssign(f => ({ ...f, employeeId: e.target.value }))}
+                  className="border rounded px-3 py-2 text-sm w-48"
+                />
+                <input
+                  type="text"
+                  placeholder="Notas (opcional)"
+                  value={mapAssign.notes}
+                  onChange={e => setMapAssign(f => ({ ...f, notes: e.target.value }))}
+                  className="border rounded px-3 py-2 text-sm flex-1 min-w-48"
+                />
+                <button onClick={handleMapAssign} disabled={mapAssignLoading}
+                  className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+                  {mapAssignLoading ? 'Guardando...' : 'Confirmar mapeo'}
+                </button>
+                <button onClick={() => setMapAssign({ mapId: null, employeeId: '', notes: '' })}
+                  className="border px-4 py-2 rounded text-sm hover:bg-gray-50">
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white border rounded-lg overflow-hidden">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
@@ -497,14 +547,15 @@ export default function SyncAtt2000Page() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre att2000</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Empleado local</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Accion</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {empMap.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Sin resultados</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Sin resultados</td></tr>
                 )}
                 {empMap.map(m => (
-                  <tr key={m.id} className="hover:bg-gray-50">
+                  <tr key={m.id} className={`hover:bg-gray-50 ${mapAssign.mapId === m.id ? 'bg-blue-50' : ''}`}>
                     <td className="px-4 py-2 font-mono text-xs">{m.source_user_id}</td>
                     <td className="px-4 py-2 font-mono text-xs">{m.source_badge_number}</td>
                     <td className="px-4 py-2">{m.raw_name}</td>
@@ -515,6 +566,15 @@ export default function SyncAtt2000Page() {
                       }
                     </td>
                     <td className="px-4 py-2"><StatusBadge status={m.match_status} /></td>
+                    <td className="px-4 py-2">
+                      {(m.match_status === 'unmatched' || m.match_status === 'manual_review') && (
+                        <button
+                          onClick={() => setMapAssign({ mapId: m.id, employeeId: '', notes: '' })}
+                          className="text-xs text-blue-600 hover:text-blue-800 underline">
+                          Asignar
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
