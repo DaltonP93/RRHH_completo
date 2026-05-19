@@ -10,7 +10,7 @@
 import type { MetadataRoute } from 'next'
 
 const DEFAULT_ICON = '/icons/icon.svg'
-const API_URL      = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'
+const API_URL      = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '').replace(/\/api$/i, '')
 
 async function getPwaIconUrl(): Promise<string> {
   try {

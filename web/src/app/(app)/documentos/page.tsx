@@ -1,16 +1,11 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import {
   FileText, FolderOpen, LayoutTemplate, Plus, Eye, Send, PenLine,
   XCircle, ClipboardList, Search, ChevronDown, Folder, Copy,
   Edit, RefreshCw
 } from 'lucide-react';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 type DocStatus = 'draft' | 'sent' | 'signed' | 'cancelled' | 'completed';
 
@@ -79,12 +74,8 @@ function NewDocumentModal({
     if (!form.template_id || !form.employee_id || !form.title) { setError('Todos los campos son requeridos'); return; }
     setSaving(true);
     try {
-      const res = await fetch(`${API}/api/documents`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ template_id: Number(form.template_id), employee_id: Number(form.employee_id), title: form.title }),
+      const res = await api.post(`/api/documents`, { template_id: Number(form.template_id),
       });
-      if (!res.ok) throw new Error('Error al crear documento');
       onCreated();
       onClose();
     } catch (e: any) {
@@ -141,10 +132,7 @@ function NewTemplateModal({ onClose, onCreated }: { onClose: () => void; onCreat
     if (!form.name || !form.code || !form.module) { setError('Nombre, código y módulo son requeridos'); return; }
     setSaving(true);
     try {
-      const res = await fetch(`${API}/api/document-templates`, {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify(form),
-      });
-      if (!res.ok) throw new Error('Error al crear plantilla');
+      const res = await api.post(`/api/document-templates`, form);
       onCreated(); onClose();
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
@@ -257,22 +245,22 @@ export default function DocumentosPage() {
 
   const fetchDocuments = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/documents`, { headers: authHeaders() });
-      if (res.ok) setDocuments(await res.json());
+      const res = await api.get(`/api/documents`);
+      setDocuments(res.data);
     } catch {}
   }, []);
 
   const fetchTemplates = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/document-templates`, { headers: authHeaders() });
-      if (res.ok) setTemplates(await res.json());
+      const res = await api.get(`/api/document-templates`);
+      setTemplates(res.data);
     } catch {}
   }, []);
 
   const fetchFolders = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/document-folders`, { headers: authHeaders() });
-      if (res.ok) setFolders(await res.json());
+      const res = await api.get(`/api/document-folders`);
+      setFolders(res.data);
     } catch {}
   }, []);
 
@@ -288,7 +276,7 @@ export default function DocumentosPage() {
     };
     if (!endpoints[action]) return;
     try {
-      await fetch(`${API}${endpoints[action]}`, { method: 'POST', headers: authHeaders() });
+      await api.post(endpoints[action]);
       fetchDocuments();
     } catch {}
   }

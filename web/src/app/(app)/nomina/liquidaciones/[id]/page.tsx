@@ -1,13 +1,8 @@
 'use client';
+import { api, apiUrl } from '@/lib/api';
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Download, X, ChevronDown, ChevronRight, Users, DollarSign, TrendingDown, TrendingUp, AlertCircle } from 'lucide-react';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') || localStorage.getItem('access_token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 function formatGs(n: number | string | undefined | null) {
   const num = Number(n);
@@ -94,8 +89,8 @@ export default function LiquidacionDetailPage() {
   async function fetchRun() {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/payroll-runs/${id}`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/payroll-runs/${id}`);
+      const data = res.data;
       setRun(data);
     } catch { setError('Error al cargar liquidación'); }
     finally { setLoading(false); }
@@ -104,8 +99,8 @@ export default function LiquidacionDetailPage() {
   async function fetchSettlements() {
     setSettlementsLoading(true);
     try {
-      const res = await fetch(`${API}/api/payroll-runs/${id}/settlements`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/payroll-runs/${id}/settlements`);
+      const data = res.data;
       setSettlements(Array.isArray(data) ? data : data.data || []);
     } catch {}
     finally { setSettlementsLoading(false); }
@@ -115,8 +110,8 @@ export default function LiquidacionDetailPage() {
     if (linesData[settlementId]) return;
     setLinesLoading(prev => ({ ...prev, [settlementId]: true }));
     try {
-      const res = await fetch(`${API}/api/payroll-runs/${id}/settlements/${settlementId}/lines`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/payroll-runs/${id}/settlements/${settlementId}/lines`);
+      const data = res.data;
       setLinesData(prev => ({ ...prev, [settlementId]: Array.isArray(data) ? data : data.data || [] }));
     } catch {
       setLinesData(prev => ({ ...prev, [settlementId]: [] }));
@@ -138,12 +133,12 @@ export default function LiquidacionDetailPage() {
 
   function exportCSV() {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || localStorage.getItem('token') : '';
-    window.open(`${API}/api/payroll-runs/${id}/export/csv?access_token=${token}`, '_blank');
+    window.open(apiUrl(`/api/payroll-runs/${id}/export/csv?access_token=${token}`), '_blank');
   }
 
   function exportExcel() {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || localStorage.getItem('token') : '';
-    window.open(`${API}/api/payroll-runs/${id}/export/excel?access_token=${token}`, '_blank');
+    window.open(apiUrl(`/api/payroll-runs/${id}/export/excel?access_token=${token}`), '_blank');
   }
 
   if (loading) {

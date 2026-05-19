@@ -53,7 +53,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     if (typeof fromCurrent === 'string') return interpolate(fromCurrent, vars)
     const fromDefault = getNested(DICTS[DEFAULT], key)
     if (typeof fromDefault === 'string') return interpolate(fromDefault, vars)
-    return key
+    if (process.env.NODE_ENV === 'development') console.warn(`[i18n] Missing key: ${key}`)
+    return key.split('.').pop()?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || key
   }
 
   return (
@@ -71,7 +72,9 @@ export function useI18n() {
       setLocale: () => {},
       t: (key: string, vars?: Record<string, string | number>) => {
         const v = getNested(DICTS[DEFAULT], key)
-        return typeof v === 'string' ? interpolate(v, vars) : key
+        if (typeof v === 'string') return interpolate(v, vars)
+        if (process.env.NODE_ENV === 'development') console.warn(`[i18n] Missing key: ${key}`)
+        return key.split('.').pop()?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || key
       },
     }
   }

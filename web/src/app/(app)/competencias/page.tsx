@@ -1,11 +1,7 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 const LEVEL_LABELS = ['','Inicial','Básico','Operativo','Avanzado','Experto'];
 const SEVERITY_COLORS: Record<string,string> = { CRITICAL:'bg-red-100 text-red-700', HIGH:'bg-orange-100 text-orange-700', MEDIUM:'bg-yellow-100 text-yellow-700', LOW:'bg-blue-100 text-blue-700' };
@@ -39,13 +35,13 @@ export default function CompetenciasPage() {
     setLoading(true);
     try {
       const [cats, comps, levs, pos, cyc, gps, trains] = await Promise.all([
-        fetch(`${API}/api/competency-categories`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/competencies`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/competency-levels`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/positions`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/performance-cycles`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/competency-gaps`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/training-catalog`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
+        api.get(`/api/competency-categories`).then(r => r.data).catch(() => []),
+        api.get(`/api/competencies`).then(r => r.data).catch(() => []),
+        api.get(`/api/competency-levels`).then(r => r.data).catch(() => []),
+        api.get(`/api/positions`).then(r => r.data).catch(() => []),
+        api.get(`/api/performance-cycles`).then(r => r.data).catch(() => []),
+        api.get(`/api/competency-gaps`).then(r => r.data).catch(() => []),
+        api.get(`/api/training-catalog`).then(r => r.data).catch(() => []),
       ]);
       setCategories(Array.isArray(cats) ? cats : cats.categories || []);
       setCompetencies(Array.isArray(comps) ? comps : comps.competencies || []);
@@ -57,28 +53,27 @@ export default function CompetenciasPage() {
     } finally { setLoading(false); }
   }
   async function loadPosCompetencies(posId: string) {
-    const r = await fetch(`${API}/api/position-competencies/${posId}`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setPosCompetencies(Array.isArray(d) ? d : d.competencies || []); }
+    const r = await api.get(`/api/position-competencies/${posId}`);
+    const d = r.data; setPosCompetencies(Array.isArray(d) ? d : d.competencies || []);
   }
   async function createCompetency() {
     if (!compForm.name || !compForm.category_id) return;
-    const r = await fetch(`${API}/api/competencies`, { method:'POST', headers: authHeaders(), body: JSON.stringify(compForm) });
-    if (r.ok) { setShowNewComp(false); loadAll(); }
+    const r = await api.post(`/api/competencies`, compForm);
+    setShowNewComp(false); loadAll();
   }
   async function createCycle() {
     if (!cycleForm.name || !cycleForm.period_start || !cycleForm.period_end) return;
-    const r = await fetch(`${API}/api/performance-cycles`, { method:'POST', headers: authHeaders(), body: JSON.stringify(cycleForm) });
-    if (r.ok) { setShowNewCycle(false); loadAll(); }
+    const r = await api.post(`/api/performance-cycles`, cycleForm);
+    setShowNewCycle(false); loadAll();
   }
   async function startCycle(id: number) {
     if (!confirm('¿Activar este ciclo? Se crearán evaluaciones para todos los empleados activos.')) return;
-    const r = await fetch(`${API}/api/performance-cycles/${id}/start`, { method:'POST', headers: authHeaders() });
-    if (r.ok) loadAll(); else alert('Error al activar ciclo');
+    const r = await api.post(`/api/performance-cycles/${id}/start`);
+    loadAll();
   }
   async function closeCycle(id: number) {
     if (!confirm('¿Cerrar este ciclo?')) return;
-    const r = await fetch(`${API}/api/performance-cycles/${id}/close`, { method:'POST', headers: authHeaders() });
-    if (r.ok) loadAll();
+    try { await api.post(`/api/performance-cycles/${id}/close`); loadAll(); } catch {}
   }
 
   const groupedComps = categories.map(cat => ({ ...cat, items: competencies.filter(c => c.category_id === cat.id) }));

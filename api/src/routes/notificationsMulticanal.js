@@ -628,6 +628,73 @@ router.put('/notification-preferences/my/batch', async (req, res) => {
   }
 });
 
+// ─── ALIASES for frontend compatibility ─────────────────────────────────────
+// The frontend at /notificaciones-config calls these paths directly.
+
+// GET /api/notification-events — list event catalog (alias for notification-event-catalog)
+router.get('/notification-events', authorize(...ADMIN_ROLES), async (req, res) => {
+  try {
+    const [rows] = await sequelize.query(
+      `SELECT * FROM notification_event_catalog WHERE is_active = 1
+       ORDER BY category, name`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[notificationsMulticanal] GET /notification-events error:', err);
+    res.status(500).json({ error: 'Error al listar eventos' });
+  }
+});
+
+// GET /api/notification-templates — alias for notification-templates-mgmt
+router.get('/notification-templates', authorize(...ADMIN_ROLES), async (req, res) => {
+  try {
+    const { event_code, channel_code, company_id } = req.query;
+    let where = 'WHERE nt.deleted_at IS NULL';
+    const params = [];
+    if (event_code)  { where += ' AND nt.event_code = ?';   params.push(event_code); }
+    if (channel_code){ where += ' AND nt.channel_code = ?'; params.push(channel_code); }
+    if (company_id)  { where += ' AND nt.company_id = ?';   params.push(Number(company_id)); }
+
+    const [rows] = await sequelize.query(
+      `SELECT nt.*, nc.name AS channel_name
+         FROM notification_templates nt
+         LEFT JOIN notification_channels nc ON nc.code = nt.channel_code
+       ${where}
+       ORDER BY nt.event_code ASC, nt.channel_code ASC`,
+      { replacements: params }
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[notificationsMulticanal] GET /notification-templates error:', err);
+    res.status(500).json({ error: 'Error al listar plantillas' });
+  }
+});
+
+// POST /api/notification-templates — alias for notification-templates-mgmt
+router.post('/notification-templates', authorize(...ADMIN_ROLES), async (req, res) => {
+  try {
+    const { event_code, channel_code, subject_template, body_template, company_id, enabled } = req.body;
+    if (!event_code || !channel_code || !body_template) {
+      return res.status(400).json({ error: 'event_code, channel_code y body_template son requeridos' });
+    }
+
+    const [result] = await sequelize.query(
+      `INSERT INTO notification_templates
+         (event_code, channel_code, subject_template, body_template, company_id, enabled, created_by, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,NOW(),NOW())`,
+      { replacements: [event_code, channel_code, subject_template || null, body_template, company_id || null, enabled !== false ? 1 : 0, req.user.id] }
+    );
+    const [[created]] = await sequelize.query(
+      'SELECT * FROM notification_templates WHERE id = ?',
+      { replacements: [result] }
+    );
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('[notificationsMulticanal] POST /notification-templates error:', err);
+    res.status(500).json({ error: 'Error al crear plantilla' });
+  }
+});
+
 // ─── QUEUE PROCESSOR ─────────────────────────────────────────────────────────
 
 /**

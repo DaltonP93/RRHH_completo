@@ -1,11 +1,7 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect, useCallback } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -103,29 +99,29 @@ export default function NotificacionesConfigPage() {
   const [queueStatus, setQueueStatus]       = useState('');
 
   const loadChannels   = useCallback(async () => {
-    const r = await fetch(`${API}/api/notification-channels`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setChannels(Array.isArray(d) ? d : d.channels || []); }
+    const r = await api.get(`/api/notification-channels`);
+    const d = r.data; setChannels(Array.isArray(d) ? d : d.channels || []);
   }, []);
 
   const loadMatrix = useCallback(async () => {
-    const r = await fetch(`${API}/api/notification-matrix`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setMatrix(d.events || []); setMatrixChannels(d.channels || []); }
+    const r = await api.get(`/api/notification-matrix`);
+    const d = r.data; setMatrix(d.events || []); setMatrixChannels(d.channels || []);
   }, []);
 
   const loadTemplates = useCallback(async () => {
-    const r = await fetch(`${API}/api/notification-templates-mgmt`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setTemplates(Array.isArray(d) ? d : d.templates || []); }
+    const r = await api.get(`/api/notification-templates-mgmt`);
+    const d = r.data; setTemplates(Array.isArray(d) ? d : d.templates || []);
   }, []);
 
   const loadQueue = useCallback(async () => {
     const qs = queueStatus ? `?status=${queueStatus}&limit=80` : '?limit=80';
-    const r = await fetch(`${API}/api/notification-queue${qs}`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setQueue(Array.isArray(d) ? d : d.queue || []); }
+    const r = await api.get(`/api/notification-queue${qs}`);
+    const d = r.data; setQueue(Array.isArray(d) ? d : d.queue || []);
   }, [queueStatus]);
 
   const loadLogs = useCallback(async () => {
-    const r = await fetch(`${API}/api/notification-delivery-logs`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setLogs(Array.isArray(d) ? d : []); }
+    const r = await api.get(`/api/notification-delivery-logs`);
+    const d = r.data; setLogs(Array.isArray(d) ? d : []);
   }, []);
 
   useEffect(() => {
@@ -135,7 +131,7 @@ export default function NotificacionesConfigPage() {
   }, [tab, loadChannels, loadMatrix, loadTemplates, loadQueue, loadLogs]);
 
   async function toggleChannel(code: string, enabled: boolean) {
-    await fetch(`${API}/api/notification-channels/${code}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ enabled }) });
+    await api.put(`/api/notification-channels/${code}`, { enabled });
     loadChannels();
   }
 
@@ -150,38 +146,35 @@ export default function NotificacionesConfigPage() {
   async function saveChannelConfig() {
     if (!editingChannel) return;
     setSaving(true);
-    await fetch(`${API}/api/notification-channels/${editingChannel}`, {
-      method: 'PUT', headers: authHeaders(), body: JSON.stringify({ config_json: channelConfigForm }),
-    });
+    await api.put(`/api/notification-channels/${editingChannel}`, { config_json: channelConfigForm });
     setSaving(false);
     setEditingChannel(null);
     loadChannels();
   }
 
   async function toggleMatrix(event_code: string, channel_code: string, current: boolean) {
-    await fetch(`${API}/api/notification-matrix`, {
-      method: 'PUT', headers: authHeaders(), body: JSON.stringify({ event_code, channel_code, enabled: !current }),
-    });
+    await api.put(`/api/notification-matrix`, { event_code, channel_code, enabled: !current });
     loadMatrix();
   }
 
   async function saveTemplate() {
     if (!editingTemplate) return;
     setSaving(true);
-    const method = editingTemplate.id ? 'PUT' : 'POST';
-    const url    = editingTemplate.id
-      ? `${API}/api/notification-templates-mgmt/${editingTemplate.id}`
-      : `${API}/api/notification-templates-mgmt`;
-    await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(editingTemplate) });
-    setSaving(false);
-    setEditingTemplate(null);
-    loadTemplates();
-    if (tab === 'matriz') loadMatrix();
+    try {
+      if (editingTemplate.id) {
+        await api.put(`/api/notification-templates-mgmt/${editingTemplate.id}`, editingTemplate);
+      } else {
+        await api.post('/api/notification-templates-mgmt', editingTemplate);
+      }
+      setEditingTemplate(null);
+      loadTemplates();
+      if (tab === 'matriz') loadMatrix();
+    } catch {} finally { setSaving(false); }
   }
 
   async function retryQueue(id: number) {
-    const r = await fetch(`${API}/api/notification-queue/${id}/retry`, { method: 'POST', headers: authHeaders() });
-    if (r.ok) loadQueue(); else alert('Error al reintentar');
+    const r = await api.post(`/api/notification-queue/${id}/retry`);
+    loadQueue();
   }
 
   const categories = Array.from(new Set(matrix.map((e: any) => e.category))).sort();

@@ -1,11 +1,7 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect, useCallback } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 const CHANNEL_META: Record<string, { icon: string; label: string; desc: string }> = {
   INTERNAL:  { icon: '🔔', label: 'Sistema',   desc: 'Campana y centro de notificaciones' },
@@ -47,12 +43,12 @@ export default function MisNotificacionesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await fetch(`${API}/api/notification-preferences/my`, { headers: authHeaders() });
-    if (r.ok) {
-      const d = await r.json();
+    try {
+      const r = await api.get('/api/notification-preferences/my');
+      const d = r.data;
       setMatrix(d.events || []);
       setChannels(d.channels || []);
-    }
+    } catch {}
     setLoading(false);
   }, []);
 
@@ -104,9 +100,7 @@ export default function MisNotificacionesPage() {
       }
     }
     if (preferences.length > 0) {
-      await fetch(`${API}/api/notification-preferences/my/batch`, {
-        method: 'PUT', headers: authHeaders(), body: JSON.stringify({ preferences }),
-      });
+      await api.put(`/api/notification-preferences/my/batch`, { preferences });
     }
     setSaving(false);
     setSaved(true);

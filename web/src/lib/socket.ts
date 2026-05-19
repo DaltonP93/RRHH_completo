@@ -8,7 +8,7 @@ function socketTarget(): string {
   raw = raw.replace(/\/+$/, '').replace(/\/api$/i, '')
   if (!raw) {
     if (typeof window !== 'undefined') return window.location.origin
-    return 'http://localhost:4000'
+    return process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || ''
   }
   // Forzar https si la página ya es https (evita mixed content)
   if (typeof window !== 'undefined' && window.location.protocol === 'https:' && raw.startsWith('http://')) {

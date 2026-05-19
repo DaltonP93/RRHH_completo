@@ -1,11 +1,7 @@
 'use client';
+import { api, apiUrl } from '@/lib/api';
 import { useState, useEffect } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 function fmtGs(n: number) { return 'Gs. ' + Math.round(n||0).toLocaleString('es-PY'); }
 
 const STATUS_COLORS: Record<string,string> = {
@@ -28,30 +24,32 @@ export default function AguinaldoPage() {
   async function loadRuns() {
     setLoading(true);
     try {
-      const r = await fetch(`${API}/api/aguinaldo`, { headers: authHeaders() });
-      if (r.ok) { const d = await r.json(); setRuns(Array.isArray(d) ? d : d.runs || []); }
+      const r = await api.get(`/api/aguinaldo`);
+      const d = r.data; setRuns(Array.isArray(d) ? d : d.runs || []);
     } finally { setLoading(false); }
   }
   async function loadLines(id: number) {
-    const r = await fetch(`${API}/api/aguinaldo/${id}`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setLines(d.lines || []); }
+    const r = await api.get(`/api/aguinaldo/${id}`);
+    const d = r.data; setLines(d.lines || []);
   }
   async function createRun() {
-    const r = await fetch(`${API}/api/aguinaldo`, { method:'POST', headers: authHeaders(), body: JSON.stringify({year: newYear}) });
-    if (r.ok) { setShowNew(false); loadRuns(); } else setError('Error al crear aguinaldo');
+    try {
+      await api.post(`/api/aguinaldo`, {year: newYear});
+      setShowNew(false); loadRuns();
+    } catch { setError('Error al crear aguinaldo'); }
   }
   async function calculate(id: number) {
     if (!confirm('¿Calcular aguinaldo para todos los empleados?')) return;
     setLoading(true);
-    const r = await fetch(`${API}/api/aguinaldo/${id}/calculate`, { method:'POST', headers: authHeaders() });
+    const r = await api.post(`/api/aguinaldo/${id}/calculate`);
     setLoading(false);
-    if (r.ok) { loadRuns(); if (selected?.id===id) loadLines(id); }
+    loadRuns(); if (selected?.id===id) loadLines(id);
     else alert('Error al calcular');
   }
   async function approve(id: number) {
     if (!confirm('¿Aprobar este aguinaldo? Esta acción no puede revertirse.')) return;
-    const r = await fetch(`${API}/api/aguinaldo/${id}/approve`, { method:'POST', headers: authHeaders() });
-    if (r.ok) loadRuns(); else alert('Error al aprobar');
+    const r = await api.post(`/api/aguinaldo/${id}/approve`);
+    loadRuns();
   }
 
   return (
@@ -96,7 +94,7 @@ export default function AguinaldoPage() {
                 <button onClick={() => approve(run.id)} className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700">Aprobar</button>
               )}
               {run.status==='approved' && (
-                <a href={`${API}/api/aguinaldo/${run.id}/export`} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700">Exportar CSV</a>
+                <a href={apiUrl(`/api/aguinaldo/${run.id}/export`)} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700">Exportar CSV</a>
               )}
             </div>
           </div>

@@ -1,11 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 function fmtGs(n: number) { return 'Gs. ' + Math.round(n||0).toLocaleString('es-PY'); }
 
 interface Props { employeeId: number; }
@@ -36,17 +32,17 @@ export default function EmployeeRRHHDetails({ employeeId }: Props) {
     setLoading(true);
     try {
       const [pp, bks, pos, gls, ccs, ets, fam, tit, fc, pln, sh] = await Promise.all([
-        fetch(`${API}/api/payroll/profiles/${employeeId}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : null),
-        fetch(`${API}/api/banks`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/positions`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/grade-levels`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/cost-centers`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/employee-types`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/employees/${employeeId}/family`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/employees/${employeeId}/titles`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/employee-fixed-concepts/${employeeId}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/development-plans?employee_id=${employeeId}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/salary-history/${employeeId}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
+        api.get(`/api/payroll/profiles/${employeeId}`).then(r => r.data).catch(() => null),
+        api.get('/api/banks').then(r => r.data).catch(() => []),
+        api.get('/api/positions').then(r => r.data).catch(() => []),
+        api.get('/api/grade-levels').then(r => r.data).catch(() => []),
+        api.get('/api/cost-centers').then(r => r.data).catch(() => []),
+        api.get('/api/employee-types').then(r => r.data).catch(() => []),
+        api.get(`/api/employees/${employeeId}/family`).then(r => r.data).catch(() => []),
+        api.get(`/api/employees/${employeeId}/titles`).then(r => r.data).catch(() => []),
+        api.get(`/api/employee-fixed-concepts/${employeeId}`).then(r => r.data).catch(() => []),
+        api.get('/api/development-plans', { params: { employee_id: employeeId } }).then(r => r.data).catch(() => []),
+        api.get(`/api/salary-history/${employeeId}`).then(r => r.data).catch(() => []),
       ]);
       setProfile(pp);
       setBanks(Array.isArray(bks) ? bks : bks.banks || []);
@@ -79,32 +75,35 @@ export default function EmployeeRRHHDetails({ employeeId }: Props) {
 
   async function saveLaborProfile() {
     setSaving(true);
-    const r = await fetch(`${API}/api/employees/${employeeId}`, { method:'PUT', headers: authHeaders(), body: JSON.stringify(laborForm) });
+    try {
+      await api.put(`/api/employees/${employeeId}`, laborForm);
+    } catch { alert('Error al guardar perfil laboral'); }
     setSaving(false);
-    if (!r.ok) alert('Error al guardar perfil laboral');
   }
 
   async function saveBankProfile() {
     setSaving(true);
-    const r = await fetch(`${API}/api/payroll/profiles`, {
-      method:'POST', headers: authHeaders(),
-      body: JSON.stringify({ ...bankForm, employee_id: employeeId, valid_from: new Date().toISOString().split('T')[0] })
-    });
+    try {
+      await api.post('/api/payroll/profiles', { ...bankForm, employee_id: employeeId, valid_from: new Date().toISOString().split('T')[0] });
+      loadAll();
+    } catch { alert('Error al guardar datos bancarios/salariales'); }
     setSaving(false);
-    if (!r.ok) alert('Error al guardar datos bancarios/salariales');
-    else loadAll();
   }
 
   async function addFamilyMember() {
-    const r = await fetch(`${API}/api/employees/${employeeId}/family`, { method:'POST', headers: authHeaders(), body: JSON.stringify(familyForm) });
-    if (r.ok) { setShowNewFamily(false); loadAll(); }
-    else alert('Error al agregar familiar');
+    try {
+      await api.post(`/api/employees/${employeeId}/family`, familyForm);
+      setShowNewFamily(false);
+      loadAll();
+    } catch { alert('Error al agregar familiar'); }
   }
 
   async function removeFixedConcept(id: number) {
     if (!confirm('¿Eliminar este concepto fijo?')) return;
-    const r = await fetch(`${API}/api/employee-fixed-concepts/${id}`, { method:'DELETE', headers: authHeaders() });
-    if (r.ok) loadAll();
+    try {
+      await api.delete(`/api/employee-fixed-concepts/${id}`);
+      loadAll();
+    } catch {}
   }
 
   const RELATIONSHIPS: Record<string,string> = { CONYUGE:'Cónyuge', HIJO:'Hijo', HIJA:'Hija', PADRE:'Padre', MADRE:'Madre', OTRO:'Otro' };

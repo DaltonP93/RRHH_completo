@@ -1,12 +1,8 @@
 'use client';
+import { api, apiUrl } from '@/lib/api';
 import { useState, useEffect } from 'react';
 import { Plus, X, Check, AlertCircle, Calculator, ThumbsUp, Lock, Download, Eye, RefreshCw } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') || localStorage.getItem('access_token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 function formatGs(n: number | string | undefined | null) {
   const num = Number(n);
@@ -94,8 +90,8 @@ export default function LiquidacionesPage() {
       if (filterYear) params.set('year', filterYear);
       if (filterMonth) params.set('month', filterMonth);
       if (filterStatus) params.set('status', filterStatus);
-      const res = await fetch(`${API}/api/payroll-runs?${params}`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/payroll-runs?${params}`);
+      const data = res.data;
       setRuns(Array.isArray(data) ? data : data.data || []);
     } catch { setError('Error al cargar liquidaciones'); }
     finally { setLoading(false); }
@@ -103,8 +99,8 @@ export default function LiquidacionesPage() {
 
   async function fetchSettlementTypes() {
     try {
-      const res = await fetch(`${API}/api/settlement-types`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/settlement-types`);
+      const data = res.data;
       setSettlementTypes(Array.isArray(data) ? data : data.data || []);
     } catch {}
   }
@@ -112,10 +108,7 @@ export default function LiquidacionesPage() {
   async function createRun() {
     setSaving(true);
     try {
-      const res = await fetch(`${API}/api/payroll-runs`, {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify(form),
-      });
-      if (!res.ok) throw new Error();
+      await api.post('/api/payroll-runs', form);
       setShowModal(false);
       fetchRuns();
     } catch { alert('Error al crear liquidación'); }
@@ -125,10 +118,7 @@ export default function LiquidacionesPage() {
   async function calculateRun(id: number) {
     setCalculatingId(id);
     try {
-      const res = await fetch(`${API}/api/payroll-runs/${id}/calculate`, {
-        method: 'POST', headers: authHeaders(),
-      });
-      if (!res.ok) throw new Error();
+      await api.post(`/api/payroll-runs/${id}/calculate`);
       fetchRuns();
     } catch { alert('Error al calcular liquidación'); }
     finally { setCalculatingId(null); }
@@ -137,10 +127,7 @@ export default function LiquidacionesPage() {
   async function approveRun(id: number) {
     setApprovingId(id);
     try {
-      const res = await fetch(`${API}/api/payroll-runs/${id}/approve`, {
-        method: 'POST', headers: authHeaders(),
-      });
-      if (!res.ok) throw new Error();
+      await api.post(`/api/payroll-runs/${id}/approve`);
       setConfirmApprove(null);
       fetchRuns();
     } catch { alert('Error al aprobar liquidación'); }
@@ -150,22 +137,19 @@ export default function LiquidacionesPage() {
   async function closeRun(id: number) {
     if (!confirm('¿Cerrar esta liquidación? Esta acción no se puede deshacer.')) return;
     try {
-      const res = await fetch(`${API}/api/payroll-runs/${id}/close`, {
-        method: 'POST', headers: authHeaders(),
-      });
-      if (!res.ok) throw new Error();
+      await api.post(`/api/payroll-runs/${id}/close`);
       fetchRuns();
     } catch { alert('Error al cerrar liquidación'); }
   }
 
   function exportIPS(id: number) {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || localStorage.getItem('token') : '';
-    window.open(`${API}/api/payroll-runs/${id}/export/ips?access_token=${token}`, '_blank');
+    window.open(apiUrl(`/api/payroll-runs/${id}/export/ips?access_token=${token}`), '_blank');
   }
 
   function exportMTESS(id: number) {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') || localStorage.getItem('token') : '';
-    window.open(`${API}/api/payroll-runs/${id}/export/mtess?access_token=${token}`, '_blank');
+    window.open(apiUrl(`/api/payroll-runs/${id}/export/mtess?access_token=${token}`), '_blank');
   }
 
   function StatusBadge({ status }: { status: RunStatus }) {

@@ -307,6 +307,43 @@ router.get('/module-permissions', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── Permisos por módulo basados en RBAC (roles/permissions_catalog) ─────────
+// GET /api/me/module-permissions-rbac
+// Returns module-level permissions for the current user based on their roles in the new RBAC tables.
+router.get('/module-permissions-rbac', async (req, res) => {
+  try {
+    // super_admin / admin get all modules with full access
+    if (req.user.role === 'super_admin' || req.user.role === 'admin') {
+      const [modules] = await sequelize.query(
+        'SELECT code, name, status, icon, route FROM module_catalog WHERE is_active = 1 ORDER BY sort_order'
+      ).catch(() => [[]]);
+      const perms = {};
+      for (const m of modules) {
+        perms[m.code] = { can_view: true, can_create: true, can_update: true, can_delete: true, can_export: true };
+      }
+      return res.json({ modules: perms, module_catalog: modules });
+    }
+    const { getUserPermissions } = require('../middleware/permissions');
+    const userPerms = await getUserPermissions(req.user.id);
+    const [modules] = await sequelize.query(
+      'SELECT code, name, status, icon, route FROM module_catalog WHERE is_active = 1 ORDER BY sort_order'
+    ).catch(() => [[]]);
+    const perms = {};
+    for (const m of modules) {
+      perms[m.code] = {
+        can_view:   userPerms.has(`${m.code}.view`)   || userPerms.has('people.view'),
+        can_create: userPerms.has(`${m.code}.create`),
+        can_update: userPerms.has(`${m.code}.update`),
+        can_delete: userPerms.has(`${m.code}.delete`),
+        can_export: userPerms.has(`${m.code}.export`),
+      };
+    }
+    res.json({ modules: perms, module_catalog: modules });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Notificaciones in-app ───────────────────────────────────────
 
 router.get('/notifications', async (req, res) => {
