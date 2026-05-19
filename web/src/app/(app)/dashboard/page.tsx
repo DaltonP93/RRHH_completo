@@ -6,7 +6,8 @@ import { es } from 'date-fns/locale'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts'
-import { Users, Clock, AlertTriangle, UserCheck, Activity, RefreshCw } from 'lucide-react'
+import { Users, Clock, AlertTriangle, UserCheck, Activity, RefreshCw, LayoutGrid } from 'lucide-react'
+import Link from 'next/link'
 import { attendanceApi, api } from '@/lib/api'
 import { getSocket, reconnectSocket } from '@/lib/socket'
 import { useI18n } from '@/i18n/I18nProvider'
@@ -96,6 +97,13 @@ export default function DashboardPage() {
           <p className="text-slate-500 capitalize" suppressHydrationWarning>{today || '\u00a0'}</p>
         </div>
         <div className="flex items-center gap-3">
+          <Link
+            href="/portal"
+            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-full border border-slate-200 transition-colors"
+          >
+            <LayoutGrid size={13} />
+            Ver portal de m\u00f3dulos
+          </Link>
           <button
             onClick={async () => {
               setRecalcLoading(true)
@@ -123,6 +131,20 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Empty state CTA when no employees */}
+      {(!stats || !stats.total_employees) && (
+        <div className="mb-6 bg-white border rounded-2xl p-8 text-center">
+          <Users className="mx-auto text-slate-300 mb-3" size={48} />
+          <h2 className="text-xl font-semibold text-slate-700 mb-2">No hay empleados importados todav\u00eda</h2>
+          <p className="text-slate-500 mb-6">Comienza importando desde att2000, creando un empleado o configurando los relojes ZKTeco.</p>
+          <div className="flex gap-3 justify-center flex-wrap">
+            <Link href="/sync/att2000" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">Importar desde att2000</Link>
+            <Link href="/empleados/nuevo" className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-emerald-700">Crear empleado manual</Link>
+            <Link href="/configuracion" className="border px-4 py-2 rounded-lg text-sm hover:bg-slate-50">Configurar relojes</Link>
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

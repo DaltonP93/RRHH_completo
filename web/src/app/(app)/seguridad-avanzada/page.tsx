@@ -1,11 +1,6 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 const RISK_COLORS: Record<string,string> = { low:'bg-gray-100 text-gray-600', normal:'bg-blue-100 text-blue-700', high:'bg-orange-100 text-orange-700', critical:'bg-red-100 text-red-700' };
 const RISK_LABELS: Record<string,string> = { low:'Bajo', normal:'Normal', high:'Alto', critical:'Crítico' };
@@ -33,9 +28,9 @@ export default function SeguridadAvanzadaPage() {
     setLoading(true);
     try {
       const [mods, perms, rls] = await Promise.all([
-        fetch(`${API}/api/security/modules`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/security/permissions`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/security/roles`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
+        api.get(`/api/security/modules`).then(r => r.data).catch(() => []),
+        api.get(`/api/security/permissions`).then(r => r.data).catch(() => []),
+        api.get(`/api/security/roles`).then(r => r.data).catch(() => []),
       ]);
       setModules(Array.isArray(mods) ? mods : mods.modules || []);
       setPermissions(Array.isArray(perms) ? perms : perms.permissions || []);
@@ -43,39 +38,46 @@ export default function SeguridadAvanzadaPage() {
     } finally { setLoading(false); }
   }
   async function loadRolePermissions(roleId: number) {
-    const r = await fetch(`${API}/api/security/roles/${roleId}`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setRolePermissions(d.permissions || []); }
+    try {
+      const r = await api.get(`/api/security/roles/${roleId}`);
+      setRolePermissions(r.data.permissions || []);
+    } catch {}
   }
   async function toggleModuleEnabled(code: string, enabled: boolean) {
-    const r = await fetch(`${API}/api/security/modules/${code}`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ enabled }) });
-    if (r.ok) loadAll();
+    try { await api.put(`/api/security/modules/${code}`, { enabled }); loadAll(); } catch {}
   }
   async function createRole() {
     if (!roleForm.code || !roleForm.name) return;
-    const r = await fetch(`${API}/api/security/roles`, { method:'POST', headers: authHeaders(), body: JSON.stringify(roleForm) });
-    if (r.ok) { setShowNewRole(false); loadAll(); }
+    try {
+      await api.post('/api/security/roles', roleForm);
+      setShowNewRole(false); loadAll();
+    } catch {}
   }
   async function assignPermission(roleId: number, permId: number) {
-    const r = await fetch(`${API}/api/security/roles/${roleId}/permissions`, {
-      method:'POST', headers: authHeaders(), body: JSON.stringify({ permission_ids: [permId], allow_effect: 'allow' })
-    });
-    if (r.ok && selectedRole) loadRolePermissions(roleId);
+    try {
+      await api.post(`/api/security/roles/${roleId}/permissions`, { permission_ids: [permId], allow_effect: 'allow' });
+      if (selectedRole) loadRolePermissions(roleId);
+    } catch {}
   }
   async function removePermission(roleId: number, permId: number) {
-    const r = await fetch(`${API}/api/security/roles/${roleId}/permissions/${permId}`, { method:'DELETE', headers: authHeaders() });
-    if (r.ok && selectedRole) loadRolePermissions(roleId);
+    try {
+      await api.delete(`/api/security/roles/${roleId}/permissions/${permId}`);
+      if (selectedRole) loadRolePermissions(roleId);
+    } catch {}
   }
   async function testAccess() {
     if (!testUserId || !testPermCode) return;
-    const r = await fetch(`${API}/api/security/test-access`, {
-      method:'POST', headers: authHeaders(), body: JSON.stringify({ user_id: testUserId, permission_code: testPermCode })
-    });
-    if (r.ok) setTestResult(await r.json());
+    try {
+      const r = await api.post('/api/security/test-access', { user_id: testUserId, permission_code: testPermCode });
+      setTestResult(r.data);
+    } catch {}
   }
   async function loadUserRoles() {
     if (!userSearch) return;
-    const r = await fetch(`${API}/api/security/users/${userSearch}/roles`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setUserRoles(Array.isArray(d) ? d : d.roles || []); }
+    try {
+      const r = await api.get(`/api/security/users/${userSearch}/roles`);
+      const d = r.data; setUserRoles(Array.isArray(d) ? d : d.roles || []);
+    } catch {}
   }
 
   const groupedPerms = modules.map(m => ({ ...m, perms: permissions.filter(p => p.module_code === m.code) }));

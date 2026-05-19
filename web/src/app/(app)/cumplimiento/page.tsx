@@ -1,11 +1,6 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 const COMM_TYPE_LABELS: Record<string, string> = {
   ALTA: 'Alta Personal', BAJA: 'Baja Personal', VACACIONES: 'Vacaciones',
@@ -43,10 +38,10 @@ export default function CumplimientoPage() {
     setLoading(true);
     try {
       const [cs, ip, pl, cal] = await Promise.all([
-        fetch(`${API}/api/compliance/status`, { headers: authHeaders() }).then(r => r.ok ? r.json() : null),
-        fetch(`${API}/api/compliance/ips`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/compliance/labor-planillas`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
-        fetch(`${API}/api/compliance/calendar`, { headers: authHeaders() }).then(r => r.ok ? r.json() : []),
+        api.get(`/api/compliance/status`).then(r => r.data).catch(() => null),
+        api.get(`/api/compliance/ips`).then(r => r.data).catch(() => []),
+        api.get(`/api/compliance/labor-planillas`).then(r => r.data).catch(() => []),
+        api.get(`/api/compliance/calendar`).then(r => r.data).catch(() => []),
       ]);
       setComplianceStatus(cs);
       setIpsRecords(Array.isArray(ip) ? ip : ip?.records || []);
@@ -55,24 +50,25 @@ export default function CumplimientoPage() {
     } finally { setLoading(false); }
   }
   async function loadMtess() {
-    const r = await fetch(`${API}/api/compliance/mtess?year=${filterYear}`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setMtessComms(Array.isArray(d) ? d : d?.communications || []); }
+    try {
+      const r = await api.get('/api/compliance/mtess', { params: { year: filterYear } });
+      const d = r.data; setMtessComms(Array.isArray(d) ? d : d?.communications || []);
+    } catch {}
   }
   async function saveComm() {
-    const r = await fetch(`${API}/api/compliance/mtess`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(commForm) });
-    if (r.ok) { setShowCommModal(false); loadMtess(); }
-    else alert('Error al registrar comunicación');
+    try {
+      await api.post('/api/compliance/mtess', commForm);
+      setShowCommModal(false); loadMtess();
+    } catch { alert('Error al registrar comunicación'); }
   }
   async function updateStatus(id: number, status: string) {
-    const r = await fetch(`${API}/api/compliance/mtess/${id}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ status }) });
-    if (r.ok) loadMtess();
+    try { await api.put(`/api/compliance/mtess/${id}`, { status }); loadMtess(); } catch {}
   }
   async function generatePlanilla(type: string, year: string) {
-    const r = await fetch(`${API}/api/compliance/labor-planillas`, {
-      method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ planilla_type: type, period_year: year })
-    });
-    if (r.ok) { loadAll(); alert('Planilla registrada'); }
+    try {
+      await api.post('/api/compliance/labor-planillas', { planilla_type: type, period_year: year });
+      loadAll(); alert('Planilla registrada');
+    } catch {}
   }
 
   const cs = complianceStatus ? COMPLIANCE_STATUS[complianceStatus.status] || COMPLIANCE_STATUS.EN_REVISION : null;
@@ -197,7 +193,7 @@ export default function CumplimientoPage() {
                     <td className="px-4 py-3 text-gray-500">{p.submitted_at ? new Date(p.submitted_at).toLocaleDateString('es-PY') : '-'}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
-                        {p.status!=='submitted' && p.status!=='accepted' && <button onClick={async () => { await fetch(`${API}/api/compliance/labor-planillas/${p.id}`, {method:'PUT',headers:authHeaders(),body:JSON.stringify({status:'submitted',submitted_at:new Date().toISOString()})}); loadAll(); }} className="text-xs text-blue-600 hover:underline">Marcar Presentado</button>}
+                        {p.status!=='submitted' && p.status!=='accepted' && <button onClick={async () => { try { await api.put(`/api/compliance/labor-planillas/${p.id}`, {status:'submitted',submitted_at:new Date().toISOString()}); loadAll(); } catch {} }} className="text-xs text-blue-600 hover:underline">Marcar Presentado</button>}
                       </div>
                     </td>
                   </tr>

@@ -1,12 +1,7 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 const STATUS_COLORS: Record<string,string> = {
   draft:'bg-gray-100 text-gray-700', active:'bg-blue-100 text-blue-700',
@@ -37,15 +32,15 @@ export default function DocumentDetailPage() {
     setLoading(true);
     try {
       const [docR, commR, auditR] = await Promise.all([
-        fetch(`${API}/api/documents/${id}`, { headers: authHeaders() }),
-        fetch(`${API}/api/documents/${id}/comments`, { headers: authHeaders() }),
-        fetch(`${API}/api/documents/${id}/audit`, { headers: authHeaders() }),
+        api.get(`/api/documents/${id}`),
+        api.get(`/api/documents/${id}/comments`),
+        api.get(`/api/documents/${id}/audit`),
       ]);
-      if (docR.ok) setDoc(await docR.json());
-      if (commR.ok) { const d = await commR.json(); setComments(Array.isArray(d) ? d : d.comments || []); }
-      if (auditR.ok) { const d = await auditR.json(); setAuditLog(Array.isArray(d) ? d : d.logs || []); }
+      setDoc(docR.data);
+      const commD = commR.data; setComments(Array.isArray(commD) ? commD : commD.comments || []);
+      const auditD = auditR.data; setAuditLog(Array.isArray(auditD) ? auditD : auditD.logs || []);
       // Mark as viewed
-      await fetch(`${API}/api/documents/${id}/view`, { method:'POST', headers: authHeaders() });
+      await api.post(`/api/documents/${id}/view`);
     } finally { setLoading(false); }
   }
 
@@ -76,23 +71,18 @@ export default function DocumentDetailPage() {
         signature_data = canvasRef.current.toDataURL('image/png');
       }
       const recipient = doc?.recipients?.find((r:any) => r.status==='sent'||r.status==='viewed');
-      const r = await fetch(`${API}/api/documents/${id}/sign`, {
-        method:'POST', headers: authHeaders(),
-        body: JSON.stringify({ recipient_id: recipient?.id, signature_type: signatureType, signature_image_base64: signature_data })
-      });
-      if (r.ok) { setShowSign(false); loadDocument(); }
-      else alert('Error al firmar');
+      const r = await api.post(`/api/documents/${id}/sign`, { recipient_id: recipient?.id, signature_type: signatureType, signature_image_base64: signature_data });
+      setShowSign(false); loadDocument();
     } finally { setSaving(false); }
   }
 
   async function addComment() {
     if (!comment.trim()) return;
     setSaving(true);
-    const r = await fetch(`${API}/api/documents/${id}/comments`, {
-      method:'POST', headers: authHeaders(), body: JSON.stringify({ comment, visibility:'ALL' })
-    });
-    if (r.ok) { setComment(''); loadDocument(); }
-    setSaving(false);
+    try {
+      await api.post(`/api/documents/${id}/comments`, { comment, visibility:'ALL' });
+      setComment(''); loadDocument();
+    } finally { setSaving(false); }
   }
 
   if (loading) return <div className="p-6 text-center text-gray-400">Cargando documento...</div>;
