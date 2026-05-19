@@ -64,7 +64,7 @@ export default function PortalPage() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await api.get('/api/me/module-permissions')
+        const res = await api.get('/api/me/module-permissions-rbac')
         const data = res.data
         const map: Record<string, ModuleCatalogEntry> = {}
 
