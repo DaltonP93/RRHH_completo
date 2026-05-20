@@ -232,8 +232,9 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       API_URL: http://api:4000
       API_KEY: ${BRIDGE_API_KEY:-}
-      ZKTECO_PUSH_PORT: 8080
-      ZKTECO_API_PORT: 8081
+      PUSH_PORT: ${PUSH_PORT:-8080}
+      PORT: ${BRIDGE_PORT:-8081}
+      BRIDGE_PORT: ${BRIDGE_PORT:-8081}
     ports:
       # Puerto PUSH: los relojes ZKTeco envían eventos a este puerto
       - "8080:8080"
@@ -309,7 +310,7 @@ services:
       - internal
       - expose
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/health | grep -q \"ok\" || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
