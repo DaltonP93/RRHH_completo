@@ -1,11 +1,14 @@
 'use client'
 import { usePathname } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import Sidebar from '@/components/layout/Sidebar'
 import ModuleSidebar from '@/components/layout/ModuleSidebar'
 import TopBar from '@/components/layout/TopBar'
 import DeviceAlertBanner from '@/components/layout/DeviceAlertBanner'
 import MobileBottomNav from '@/components/layout/MobileBottomNav'
 import HelpButton from '@/components/HelpButton'
+
+const ViewAsBanner = dynamic(() => import('@/components/layout/ViewAsBanner'), { ssr: false })
 
 const MODULE_MAP: Array<[string[], string]> = [
   [['/asistencia', '/sync', '/permisos', '/aprobaciones'], 'asistencia'],
@@ -40,6 +43,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
 
   return (
     <div className="flex min-h-screen bg-slate-50">
+      <ViewAsBanner />
       {moduleKey === null && (
         <main className="flex-1 overflow-auto flex flex-col pb-20 md:pb-0">
           <TopBar />
