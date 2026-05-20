@@ -30,7 +30,7 @@ export function landingFor(role: Role): string {
     case 'manager':
       return '/aprobaciones'
     case 'employee':
-      return '/mi-perfil'
+      return '/mi-portal'
     default:
       return '/dashboard'
   }
