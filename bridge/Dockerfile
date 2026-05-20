@@ -1,9 +1,11 @@
 FROM node:20-alpine
+RUN apk add --no-cache curl tzdata
+ENV TZ=America/Asuncion
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --omit=dev --no-audit --no-fund
 
 COPY src/ ./src/
 
