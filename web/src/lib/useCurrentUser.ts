@@ -30,9 +30,9 @@ export function landingFor(role: Role): string {
     case 'manager':
       return '/aprobaciones'
     case 'employee':
-      return '/mi-perfil'
+      return '/mi-portal'
     default:
-      return '/dashboard'
+      return '/portal'
   }
 }
 
@@ -47,11 +47,16 @@ function readUser(): CurrentUser | null {
 /**
  * Lee el usuario actual desde localStorage. No hace fetch — lo pueblan
  * los componentes de login en su handleSubmit.
+ *
+ * Usa lazy initializer en useState para leer localStorage de forma síncrona
+ * en el cliente — evita el render con user=null que causaba datos vacíos
+ * en navegaciones client-side (Next.js router).
  */
 export function useCurrentUser() {
-  const [user, setUser] = useState<CurrentUser | null>(null)
+  const [user, setUser] = useState<CurrentUser | null>(() => readUser())
 
   useEffect(() => {
+    // Re-sync por si el estado cambió mientras el componente no estaba montado
     setUser(readUser())
     const onStorage = (e: StorageEvent) => {
       if (e.key === 'user') setUser(readUser())

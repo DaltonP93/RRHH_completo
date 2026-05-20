@@ -1,22 +1,5 @@
-import Sidebar from '@/components/layout/Sidebar'
-import TopBar from '@/components/layout/TopBar'
-import DeviceAlertBanner from '@/components/layout/DeviceAlertBanner'
-import MobileBottomNav from '@/components/layout/MobileBottomNav'
-import HelpButton from '@/components/HelpButton'
+import LayoutShell from '@/components/layout/LayoutShell'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex min-h-screen bg-slate-50">
-      <Sidebar />
-      <main className="flex-1 overflow-auto flex flex-col pb-20 md:pb-0">
-        <TopBar />
-        <div className="flex-1">{children}</div>
-      </main>
-      <DeviceAlertBanner />
-      {/* MobileBottomNav decide internamente si renderizar (solo employee en móvil) */}
-      <MobileBottomNav />
-      {/* Botón flotante de ayuda contextual — se muestra en todos los módulos */}
-      <HelpButton />
-    </div>
-  )
+  return <LayoutShell>{children}</LayoutShell>
 }

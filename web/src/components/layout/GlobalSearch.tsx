@@ -14,7 +14,7 @@ type Result = {
 }
 
 const PAGES: { label: string; href: string; icon: any; keywords: string }[] = [
-  { label: 'Dashboard',       href: '/dashboard',       icon: BarChart2,    keywords: 'dashboard inicio kpi metricas' },
+  { label: 'Portal',          href: '/portal',          icon: BarChart2,    keywords: 'portal inicio modulos' },
   { label: 'Empleados',       href: '/empleados',       icon: Users,        keywords: 'empleados personal' },
   { label: 'Asistencia',      href: '/asistencia',      icon: Clock,        keywords: 'asistencia presencia marcacion' },
   { label: 'Permisos',        href: '/permisos',        icon: Calendar,     keywords: 'permisos solicitudes ausencia' },

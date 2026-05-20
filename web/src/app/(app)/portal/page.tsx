@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useCurrentUser } from '@/lib/useCurrentUser'
+import { getViewAs } from '@/lib/viewAs'
 
 interface ModuleDef {
   code: string
@@ -56,8 +57,20 @@ function StatusBadge({ status }: { status?: string }) {
   )
 }
 
+// Role → allowed module codes for "Ver Como" preview
+const ROLE_MODULES: Record<string, string[]> = {
+  admin:       ['personas', 'asistencia', 'nomina', 'pagos', 'documentos', 'competencias', 'cumplimiento', 'reportes', 'configuracion', 'seguridad', 'auditoria'],
+  gth:         ['personas', 'asistencia', 'nomina', 'documentos', 'competencias', 'cumplimiento', 'reportes'],
+  hr:          ['personas', 'asistencia', 'documentos', 'reportes'],
+  gestor:      ['personas', 'asistencia', 'reportes'],
+  supervisor:  ['asistencia', 'reportes'],
+  coordinator: ['asistencia'],
+  manager:     ['asistencia', 'personas'],
+}
+
 export default function PortalPage() {
   const user = useCurrentUser()
+  const viewAs = typeof window !== 'undefined' ? getViewAs() : null
   const [catalogMap, setCatalogMap] = useState<Record<string, ModuleCatalogEntry>>({})
   const [loading, setLoading] = useState(true)
 
@@ -121,7 +134,10 @@ export default function PortalPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {MODULES.map(mod => {
+          {(viewAs && user?.role === 'super_admin'
+            ? MODULES.filter(m => (ROLE_MODULES[viewAs.role] ?? []).includes(m.code))
+            : MODULES
+          ).map(mod => {
             const Icon = mod.icon
             const status = getStatus(mod.code)
             const disabled = isDisabled(mod.code)

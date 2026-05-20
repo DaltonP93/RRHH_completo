@@ -24,7 +24,7 @@ export default function MobileBottomNav() {
   if (pathname.startsWith('/login') || pathname.startsWith('/kiosk')) return null
 
   const items = [
-    { href: '/mi-perfil',     label: 'Perfil',     icon: User      },
+    { href: '/mi-portal',     label: 'Inicio',     icon: User      },
     { href: '/mi-asistencia', label: 'Asistencia', icon: Clock     },
     { href: '/marcar',        label: 'Marcar',     icon: QrCode, primary: true },
     { href: '/mis-permisos',  label: 'Permisos',   icon: BarChart2 },
