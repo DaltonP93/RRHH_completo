@@ -1,11 +1,7 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 function fmtGs(n: number) { return 'Gs. ' + Math.round(n||0).toLocaleString('es-PY'); }
 
 const STATUS_COLORS: Record<string,string> = {
@@ -28,30 +24,37 @@ export default function AnticipasPage() {
   useEffect(() => { loadAdvances(); }, [filterStatus, filterYear]);
 
   async function loadTypes() {
-    const r = await fetch(`${API}/api/salary-advance-types`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setTypes(Array.isArray(d) ? d : d.types || []); }
+    try {
+      const r = await api.get('/api/salary-advance-types');
+      const d = r.data; setTypes(Array.isArray(d) ? d : d.types || []);
+    } catch {}
   }
   async function loadAdvances() {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (filterStatus) params.append('status', filterStatus);
-      if (filterYear) params.append('year', filterYear);
-      const r = await fetch(`${API}/api/salary-advances?${params}`, { headers: authHeaders() });
-      if (r.ok) { const d = await r.json(); setAdvances(Array.isArray(d) ? d : d.advances || []); }
-    } finally { setLoading(false); }
+      const params: Record<string, string> = {};
+      if (filterStatus) params.status = filterStatus;
+      if (filterYear) params.year = filterYear;
+      const r = await api.get('/api/salary-advances', { params });
+      const d = r.data; setAdvances(Array.isArray(d) ? d : d.advances || []);
+    } catch {} finally { setLoading(false); }
   }
   async function createAdvance() {
     if (!form.employee_id || !form.salary_advance_type_id || !form.amount) { setError('Complete los campos obligatorios'); return; }
-    const r = await fetch(`${API}/api/salary-advances`, { method:'POST', headers: authHeaders(), body: JSON.stringify({ ...form, amount: parseFloat(form.amount) }) });
-    if (r.ok) { setShowNew(false); setForm({ employee_id:'', salary_advance_type_id:'', amount:'', request_date: new Date().toISOString().split('T')[0], reason:'' }); loadAdvances(); }
-    else setError('Error al crear anticipo');
+    try {
+      await api.post('/api/salary-advances', { ...form, amount: parseFloat(form.amount) });
+      setShowNew(false);
+      setForm({ employee_id:'', salary_advance_type_id:'', amount:'', request_date: new Date().toISOString().split('T')[0], reason:'' });
+      loadAdvances();
+    } catch { setError('Error al crear anticipo'); }
   }
   async function actionAdvance(id: number, action: 'approve'|'reject') {
     const msg = action==='approve' ? '¿Aprobar este anticipo?' : '¿Rechazar este anticipo?';
     if (!confirm(msg)) return;
-    const r = await fetch(`${API}/api/salary-advances/${id}/${action}`, { method:'POST', headers: authHeaders() });
-    if (r.ok) loadAdvances(); else alert('Error al procesar');
+    try {
+      await api.post(`/api/salary-advances/${id}/${action}`);
+      loadAdvances();
+    } catch { alert('Error al procesar'); }
   }
 
   const totalPending = advances.filter(a => a.status==='pending').reduce((s,a) => s + (a.amount||0), 0);

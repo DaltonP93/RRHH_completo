@@ -1,12 +1,8 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
 import { Plus, Pencil, X, Check, AlertCircle, Briefcase, Layers, DollarSign, Users } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') || localStorage.getItem('access_token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 function formatGs(n: number | string) {
   const num = Number(n);
@@ -65,8 +61,8 @@ export default function CargosPage() {
   async function fetchData(t: Tab) {
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${API}${endpoints[t]}`, { headers: authHeaders() });
-      const d = await res.json();
+      const res = await api.get(`${endpoints[t]}`);
+      const d = res.data;
       setters[t](Array.isArray(d) ? d : d.data || []);
     } catch { setError('Error al cargar datos'); }
     finally { setLoading(false); }
@@ -90,10 +86,11 @@ export default function CargosPage() {
   async function save() {
     setSaving(true);
     try {
-      const url = editingItem ? `${API}${endpoints[tab]}/${editingItem.id}` : `${API}${endpoints[tab]}`;
-      const method = editingItem ? 'PUT' : 'POST';
-      const res = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(form) });
-      if (!res.ok) throw new Error();
+      if (editingItem) {
+        await api.put(`${endpoints[tab]}/${editingItem.id}`, form);
+      } else {
+        await api.post(endpoints[tab], form);
+      }
       setShowModal(false);
       fetchData(tab);
     } catch { alert('Error al guardar'); }

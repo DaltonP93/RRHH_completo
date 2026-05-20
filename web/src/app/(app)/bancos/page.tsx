@@ -1,11 +1,7 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 function formatGs(n: number) {
   return 'Gs. ' + Math.round(n).toLocaleString('es-PY');
 }
@@ -41,56 +37,52 @@ export default function BancosPage() {
   async function loadBanks() {
     setLoading(true);
     try {
-      const r = await fetch(`${API}/api/banks`, { headers: authHeaders() });
-      if (r.ok) setBanks(await r.json());
-    } finally { setLoading(false); }
+      const r = await api.get('/api/banks');
+      setBanks(r.data);
+    } catch {} finally { setLoading(false); }
   }
   async function loadBatches() {
-    const r = await fetch(`${API}/api/payment-batches`, { headers: authHeaders() });
-    if (r.ok) setBatches(await r.json());
+    try { const r = await api.get('/api/payment-batches'); setBatches(r.data); } catch {}
   }
   async function loadLayouts(bankId: string) {
-    const r = await fetch(`${API}/api/bank-file-layouts?bank_id=${bankId}`, { headers: authHeaders() });
-    if (r.ok) setLayouts(await r.json());
+    try { const r = await api.get('/api/bank-file-layouts', { params: { bank_id: bankId } }); setLayouts(r.data); } catch {}
   }
   async function loadBatchLines(batchId: number) {
-    const r = await fetch(`${API}/api/payment-batches/${batchId}`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setBatchLines(d.lines || []); }
+    try { const r = await api.get(`/api/payment-batches/${batchId}`); setBatchLines(r.data.lines || []); } catch {}
   }
 
   async function saveBank() {
-    const r = await fetch(`${API}/api/banks`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(bankForm) });
-    if (r.ok) { setShowBankModal(false); setBankForm({ code: '', name: '', country: 'Paraguay', swift_code: '' }); loadBanks(); }
-    else setError('Error al guardar banco');
+    try {
+      await api.post('/api/banks', bankForm);
+      setShowBankModal(false); setBankForm({ code: '', name: '', country: 'Paraguay', swift_code: '' }); loadBanks();
+    } catch { setError('Error al guardar banco'); }
   }
   async function saveBatch() {
-    const r = await fetch(`${API}/api/payment-batches`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(batchForm) });
-    if (r.ok) { setShowBatchModal(false); loadBatches(); }
-    else setError('Error al crear lote');
+    try {
+      await api.post('/api/payment-batches', batchForm);
+      setShowBatchModal(false); loadBatches();
+    } catch { setError('Error al crear lote'); }
   }
   async function generateFromPayroll(batchId: number, payrollRunId: string) {
     const runId = payrollRunId || prompt('ID de liquidación:');
     if (!runId) return;
-    const r = await fetch(`${API}/api/payment-batches/${batchId}/generate-from-payroll`, {
-      method: 'POST', headers: authHeaders(), body: JSON.stringify({ payroll_run_id: runId })
-    });
-    if (r.ok) { loadBatches(); alert('Lote generado desde nómina'); }
-    else alert('Error al generar');
+    try {
+      await api.post(`/api/payment-batches/${batchId}/generate-from-payroll`, { payroll_run_id: runId });
+      loadBatches(); alert('Lote generado desde nómina');
+    } catch { alert('Error al generar'); }
   }
   async function approveBatch(batchId: number) {
     if (!confirm('¿Aprobar este lote de pago?')) return;
-    const r = await fetch(`${API}/api/payment-batches/${batchId}/approve`, { method: 'POST', headers: authHeaders() });
-    if (r.ok) loadBatches();
-    else alert('Error al aprobar');
+    try { await api.post(`/api/payment-batches/${batchId}/approve`); loadBatches(); }
+    catch { alert('Error al aprobar'); }
   }
   async function exportCSV(batchId: number) {
-    const r = await fetch(`${API}/api/payment-batches/${batchId}/export-csv`, { headers: authHeaders() });
-    if (r.ok) {
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
+    try {
+      const r = await api.get(`/api/payment-batches/${batchId}/export-csv`, { responseType: 'blob' });
+      const url = URL.createObjectURL(r.data);
       const a = document.createElement('a'); a.href = url; a.download = `pago_salarios_${batchId}.csv`; a.click();
       URL.revokeObjectURL(url);
-    }
+    } catch {}
   }
 
   return (

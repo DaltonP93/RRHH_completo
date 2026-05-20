@@ -78,7 +78,22 @@
     "section_management": "Management",
     "section_admin": "Administration",
     "attendance_live": "Live Feed",
-    "sync_att2000": "att2000 Migration"
+    "sync_att2000": "att2000 Migration",
+    "companies": "Companies",
+    "positions": "Positions",
+    "payroll_hub": "Payroll",
+    "settlements": "Settlements",
+    "salary_concepts": "Salary Concepts",
+    "aguinaldo": "Year-End Bonus",
+    "advances": "Advances",
+    "banks_payments": "Banks & Payments",
+    "compliance": "Legal Compliance",
+    "documents": "Documents",
+    "competencies": "Competencies",
+    "security": "Security",
+    "settings": "Settings",
+    "audit": "Audit",
+    "reports": "Reports"
   },
   "dashboard": {
     "title": "Main dashboard",

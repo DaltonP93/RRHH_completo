@@ -1,12 +1,7 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
 import { Plus, Pencil, ChevronDown, ChevronRight, Building2, GitBranch, X, Check, AlertCircle } from 'lucide-react';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') || localStorage.getItem('access_token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 interface Company {
   id: number;
@@ -66,8 +61,8 @@ export default function EmpresasPage() {
   async function fetchCompanies() {
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${API}/api/companies`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/companies`);
+      const data = res.data;
       setCompanies(Array.isArray(data) ? data : data.data || []);
     } catch {
       setError('Error al cargar empresas');
@@ -77,8 +72,8 @@ export default function EmpresasPage() {
   async function fetchBranches(companyId: number) {
     setBranchLoading(prev => ({ ...prev, [companyId]: true }));
     try {
-      const res = await fetch(`${API}/api/companies/${companyId}/branches`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/companies/${companyId}/branches`);
+      const data = res.data;
       setBranches(prev => ({ ...prev, [companyId]: Array.isArray(data) ? data : data.data || [] }));
     } catch {
       setBranches(prev => ({ ...prev, [companyId]: [] }));
@@ -111,15 +106,9 @@ export default function EmpresasPage() {
     setSavingCompany(true);
     try {
       if (editingCompany) {
-        const res = await fetch(`${API}/api/companies/${editingCompany.id}`, {
-          method: 'PUT', headers: authHeaders(), body: JSON.stringify(companyForm),
-        });
-        if (!res.ok) throw new Error();
+        await api.put(`/api/companies/${editingCompany.id}`, companyForm);
       } else {
-        const res = await fetch(`${API}/api/companies`, {
-          method: 'POST', headers: authHeaders(), body: JSON.stringify(companyForm),
-        });
-        if (!res.ok) throw new Error();
+        await api.post('/api/companies', companyForm);
       }
       setShowCompanyModal(false);
       fetchCompanies();
@@ -147,13 +136,9 @@ export default function EmpresasPage() {
     setSavingBranch(true);
     try {
       if (editingBranch) {
-        await fetch(`${API}/api/companies/${activeBranchCompanyId}/branches/${editingBranch.id}`, {
-          method: 'PUT', headers: authHeaders(), body: JSON.stringify(branchForm),
-        });
+        await api.put(`/api/companies/${activeBranchCompanyId}/branches/${editingBranch.id}`, branchForm);
       } else {
-        await fetch(`${API}/api/companies/${activeBranchCompanyId}/branches`, {
-          method: 'POST', headers: authHeaders(), body: JSON.stringify(branchForm),
-        });
+        await api.post(`/api/companies/${activeBranchCompanyId}/branches`, branchForm);
       }
       setShowBranchModal(false);
       fetchBranches(activeBranchCompanyId);

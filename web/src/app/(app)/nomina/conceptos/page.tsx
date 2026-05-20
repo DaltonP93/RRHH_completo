@@ -1,12 +1,8 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
 import { Plus, Pencil, X, Check, AlertCircle, Search, Tag, Layers, User } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') || localStorage.getItem('access_token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 type ConceptType = 'INCOME' | 'DEDUCTION' | 'CONTRIBUTION' | 'PROVISION';
 type TabKey = 'concepts' | 'groups' | 'fixed';
@@ -114,8 +110,8 @@ export default function ConceptosPage() {
   async function fetchConcepts() {
     setConceptsLoading(true); setError('');
     try {
-      const res = await fetch(`${API}/api/salary-concepts`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/salary-concepts`);
+      const data = res.data;
       setConcepts(Array.isArray(data) ? data : data.data || []);
     } catch { setError('Error al cargar conceptos'); }
     finally { setConceptsLoading(false); }
@@ -124,8 +120,8 @@ export default function ConceptosPage() {
   async function fetchGroups() {
     setGroupsLoading(true);
     try {
-      const res = await fetch(`${API}/api/salary-concept-groups`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/salary-concept-groups`);
+      const data = res.data;
       setGroups(Array.isArray(data) ? data : data.data || []);
     } catch {}
     finally { setGroupsLoading(false); }
@@ -134,9 +130,11 @@ export default function ConceptosPage() {
   async function saveConcept() {
     setSavingConcept(true);
     try {
-      const url = editingConcept ? `${API}/api/salary-concepts/${editingConcept.id}` : `${API}/api/salary-concepts`;
-      const res = await fetch(url, { method: editingConcept ? 'PUT' : 'POST', headers: authHeaders(), body: JSON.stringify(conceptForm) });
-      if (!res.ok) throw new Error();
+      if (editingConcept) {
+        await api.put(`/api/salary-concepts/${editingConcept.id}`, conceptForm);
+      } else {
+        await api.post('/api/salary-concepts', conceptForm);
+      }
       setShowConceptModal(false);
       fetchConcepts();
     } catch { alert('Error al guardar concepto'); }
@@ -146,9 +144,11 @@ export default function ConceptosPage() {
   async function saveGroup() {
     setSavingGroup(true);
     try {
-      const url = editingGroup ? `${API}/api/salary-concept-groups/${editingGroup.id}` : `${API}/api/salary-concept-groups`;
-      const res = await fetch(url, { method: editingGroup ? 'PUT' : 'POST', headers: authHeaders(), body: JSON.stringify(groupForm) });
-      if (!res.ok) throw new Error();
+      if (editingGroup) {
+        await api.put(`/api/salary-concept-groups/${editingGroup.id}`, groupForm);
+      } else {
+        await api.post('/api/salary-concept-groups', groupForm);
+      }
       setShowGroupModal(false);
       fetchGroups();
     } catch { alert('Error al guardar grupo'); }
@@ -158,8 +158,8 @@ export default function ConceptosPage() {
   async function searchEmployees(q: string) {
     if (q.length < 2) { setSearchResults([]); return; }
     try {
-      const res = await fetch(`${API}/api/employees?search=${encodeURIComponent(q)}&limit=10`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/employees?search=${encodeURIComponent(q)}&limit=10`);
+      const data = res.data;
       setSearchResults(Array.isArray(data) ? data : data.data || []);
     } catch {}
   }
@@ -167,8 +167,8 @@ export default function ConceptosPage() {
   async function loadFixedConcepts(empId: number) {
     setFixedLoading(true);
     try {
-      const res = await fetch(`${API}/api/employee-fixed-concepts?employee_id=${empId}`, { headers: authHeaders() });
-      const data = await res.json();
+      const res = await api.get(`/api/employee-fixed-concepts?employee_id=${empId}`);
+      const data = res.data;
       setFixedConcepts(Array.isArray(data) ? data : data.data || []);
     } catch {}
     finally { setFixedLoading(false); }
@@ -179,10 +179,7 @@ export default function ConceptosPage() {
     setSavingFixed(true);
     try {
       const body = { employee_id: selectedEmployee.id, ...fixedForm, amount: Number(fixedForm.amount) };
-      const res = await fetch(`${API}/api/employee-fixed-concepts`, {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error();
+      await api.post('/api/employee-fixed-concepts', body);
       setShowFixedModal(false);
       loadFixedConcepts(selectedEmployee.id);
     } catch { alert('Error al agregar concepto fijo'); }
@@ -192,7 +189,7 @@ export default function ConceptosPage() {
   async function removeFixedConcept(fcId: number) {
     if (!confirm('¿Eliminar este concepto fijo?')) return;
     try {
-      await fetch(`${API}/api/employee-fixed-concepts/${fcId}`, { method: 'DELETE', headers: authHeaders() });
+      await api.delete(`/api/employee-fixed-concepts/${fcId}`);
       if (selectedEmployee) loadFixedConcepts(selectedEmployee.id);
     } catch { alert('Error al eliminar'); }
   }

@@ -1,11 +1,6 @@
 'use client';
+import { api } from '@/lib/api';
 import { useState, useEffect } from 'react';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-}
 
 const ACTION_TYPES: Record<string,string> = { TRAINING:'Capacitación', MENTORING:'Mentoría', ON_THE_JOB:'En el Puesto', CERTIFICATION:'Certificación', PROJECT:'Proyecto', READING:'Lectura' };
 const ACTION_COLORS: Record<string,string> = { TRAINING:'bg-blue-100 text-blue-700', MENTORING:'bg-purple-100 text-purple-700', ON_THE_JOB:'bg-green-100 text-green-700', CERTIFICATION:'bg-yellow-100 text-yellow-700', PROJECT:'bg-indigo-100 text-indigo-700', READING:'bg-gray-100 text-gray-700' };
@@ -27,27 +22,35 @@ export default function PlanesDesarrolloPage() {
   async function loadPlans() {
     setLoading(true);
     try {
-      const r = await fetch(`${API}/api/development-plans`, { headers: authHeaders() });
-      if (r.ok) { const d = await r.json(); setPlans(Array.isArray(d) ? d : d.plans || []); }
+      const r = await api.get(`/api/development-plans`);
+      const d = r.data; setPlans(Array.isArray(d) ? d : d.plans || []);
     } finally { setLoading(false); }
   }
   async function loadActions(planId: number) {
-    const r = await fetch(`${API}/api/development-plans/${planId}`, { headers: authHeaders() });
-    if (r.ok) { const d = await r.json(); setActions(d.actions || []); }
+    try {
+      const r = await api.get(`/api/development-plans/${planId}`);
+      setActions(r.data?.actions || []);
+    } catch {}
   }
   async function createPlan() {
     if (!planForm.employee_id || !planForm.title) return;
-    const r = await fetch(`${API}/api/development-plans`, { method:'POST', headers: authHeaders(), body: JSON.stringify(planForm) });
-    if (r.ok) { setShowNew(false); loadPlans(); }
+    try {
+      await api.post(`/api/development-plans`, planForm);
+      setShowNew(false); loadPlans();
+    } catch {}
   }
   async function addAction() {
     if (!selectedPlan || !actionForm.description || !actionForm.action_type) return;
-    const r = await fetch(`${API}/api/development-plans/${selectedPlan.id}/actions`, { method:'POST', headers: authHeaders(), body: JSON.stringify(actionForm) });
-    if (r.ok) { setShowNewAction(false); loadActions(selectedPlan.id); }
+    try {
+      await api.post(`/api/development-plans/${selectedPlan.id}/actions`, actionForm);
+      setShowNewAction(false); loadActions(selectedPlan.id);
+    } catch {}
   }
   async function updateActionStatus(actionId: number, status: string) {
-    const r = await fetch(`${API}/api/development-plan-actions/${actionId}`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ status, ...(status==='completed' ? {completed_at:new Date().toISOString()} : {}) }) });
-    if (r.ok && selectedPlan) loadActions(selectedPlan.id);
+    try {
+      await api.put(`/api/development-plan-actions/${actionId}`, { status, ...(status==='completed' ? {completed_at:new Date().toISOString()} : {}) });
+      if (selectedPlan) loadActions(selectedPlan.id);
+    } catch {}
   }
 
   return (

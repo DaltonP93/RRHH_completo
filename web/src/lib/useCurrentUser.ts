@@ -25,7 +25,7 @@ export function landingFor(role: Role): string {
     case 'hr':
     case 'gestor':
     case 'supervisor':
-      return '/dashboard'
+      return '/portal'
     case 'coordinator':
     case 'manager':
       return '/aprobaciones'

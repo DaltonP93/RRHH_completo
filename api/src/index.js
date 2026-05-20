@@ -75,6 +75,8 @@ const competenciesRouter         = require('./routes/competencies');
 const notificationsMulticanalRouter = require('./routes/notificationsMulticanal');
 const securityGranularRouter     = require('./routes/securityGranular');
 const att2000SyncRouter          = require('./routes/att2000Sync');
+const rolesRouter                = require('./routes/roles');
+const userScopesRouter           = require('./routes/userScopes');
 
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
@@ -190,8 +192,8 @@ app.use('/api/appraisals',    appraisalRoutes);
 app.use('/api/onboarding',   onboardingRoutes);
 
 // RRHH Platform modules
-app.use('/api', companiesRouter);
-app.use('/api', positionsRouter);
+app.use('/api/companies', companiesRouter);
+app.use('/api/positions', positionsRouter);
 app.use('/api', payrollCoreRouter);
 app.use('/api', payrollRunsRouter);
 app.use('/api', aguinaldoRouter);
@@ -204,6 +206,8 @@ app.use('/api', competenciesRouter);
 app.use('/api', notificationsMulticanalRouter);
 app.use('/api', securityGranularRouter);
 app.use('/api/sync/att2000', att2000SyncRouter);
+app.use('/api', rolesRouter); // rolesRouter define /roles y /permissions // rolesRouter define /roles y /permissions
+app.use('/api', userScopesRouter); // userScopesRouter define rutas propias // userScopesRouter define rutas propias
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

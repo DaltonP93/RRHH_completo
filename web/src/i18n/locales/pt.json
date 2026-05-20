@@ -78,7 +78,22 @@
     "section_management": "Gestão",
     "section_admin": "Administração",
     "attendance_live": "Tempo Real",
-    "sync_att2000": "Migração att2000"
+    "sync_att2000": "Migração att2000",
+    "companies": "Empresas",
+    "positions": "Cargos",
+    "payroll_hub": "Folha de Pagamento",
+    "settlements": "Liquidações",
+    "salary_concepts": "Conceitos Salariais",
+    "aguinaldo": "Décimo Terceiro",
+    "advances": "Adiantamentos",
+    "banks_payments": "Bancos e Pagamentos",
+    "compliance": "Conformidade Legal",
+    "documents": "Documentos",
+    "competencies": "Competências",
+    "security": "Segurança",
+    "settings": "Configurações",
+    "audit": "Auditoria",
+    "reports": "Relatórios"
   },
   "dashboard": {
     "title": "Painel principal",

@@ -14,7 +14,7 @@ function socketTarget() {
   const u = apiUrl('/')
   if (u.startsWith('/')) {
     if (typeof window !== 'undefined') return window.location.origin
-    return 'http://localhost:4000'
+    return process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || ''
   }
   return u.replace(/\/$/, '')
 }
