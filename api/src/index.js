@@ -191,7 +191,10 @@ app.use('/api/face',           faceRoutes);
 app.use('/api/appraisals',    appraisalRoutes);
 app.use('/api/onboarding',   onboardingRoutes);
 
-// RRHH Platform modules
+// RRHH Platform modules — rolesRouter y userScopesRouter ANTES de companiesRouter
+// (companiesRouter tiene GET /:id que atraparía /roles, /user-scopes, /permissions, etc.)
+app.use('/api', rolesRouter);
+app.use('/api', userScopesRouter);
 app.use('/api', companiesRouter);
 app.use('/api', positionsRouter);
 app.use('/api', payrollCoreRouter);
@@ -206,9 +209,6 @@ app.use('/api', competenciesRouter);
 app.use('/api', notificationsMulticanalRouter);
 app.use('/api', securityGranularRouter);
 app.use('/api/sync/att2000', att2000SyncRouter);
-app.use('/api', rolesRouter);
-app.use('/api', userScopesRouter);
-
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
