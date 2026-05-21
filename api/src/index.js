@@ -60,6 +60,8 @@ const faceRoutes            = require('./routes/faceRecognition');
 const appraisalRoutes       = require('./routes/appraisals');
 const onboardingRoutes      = require('./routes/onboarding');
 
+
+
 // RRHH Platform modules
 const companiesRouter            = require('./routes/companies');
 const positionsRouter            = require('./routes/positions');
@@ -191,12 +193,12 @@ app.use('/api/face',           faceRoutes);
 app.use('/api/appraisals',    appraisalRoutes);
 app.use('/api/onboarding',   onboardingRoutes);
 
-// RRHH Platform modules — rolesRouter y userScopesRouter ANTES de companiesRouter
-// (companiesRouter tiene GET /:id que atraparía /roles, /user-scopes, /permissions, etc.)
+// RRHH Platform modules
+// RBAC/Security routes deben ir antes de routers RRHH con rutas comodín /:id
 app.use('/api', rolesRouter);
 app.use('/api', userScopesRouter);
-app.use('/api', companiesRouter);
-app.use('/api', positionsRouter);
+app.use('/api/companies', companiesRouter);
+app.use('/api/positions', positionsRouter);
 app.use('/api', payrollCoreRouter);
 app.use('/api', payrollRunsRouter);
 app.use('/api', aguinaldoRouter);
@@ -209,6 +211,7 @@ app.use('/api', competenciesRouter);
 app.use('/api', notificationsMulticanalRouter);
 app.use('/api', securityGranularRouter);
 app.use('/api/sync/att2000', att2000SyncRouter);
+
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
