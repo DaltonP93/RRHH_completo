@@ -14,7 +14,7 @@ export default function SistemaLayout({ children }: { children: React.ReactNode 
       if (!raw) { router.replace('/login'); return }
     }
     if (user && !isSuperAdmin(user)) {
-      router.replace('/dashboard')
+      router.replace('/portal')
     }
   }, [user, router])
 

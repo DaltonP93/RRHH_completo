@@ -35,7 +35,7 @@ const NAV: NavItem[] = [
   { href: '/seguridad',     icon: Shield,          i18nKey: 'nav.security',      section: 'portal' },
 
   // Gestión
-  { href: '/dashboard',     icon: LayoutDashboard, i18nKey: 'nav.dashboard',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'dashboard' },
+  { href: '/portal',        icon: LayoutDashboard, i18nKey: 'nav.dashboard',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'dashboard' },
   { href: '/empleados',     icon: Users,           i18nKey: 'nav.employees',    section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'empleados' },
   { href: '/asistencia',           icon: Clock,    i18nKey: 'nav.attendance',       section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'asistencia' },
   { href: '/asistencia/tiempo-real', icon: Radio,  i18nKey: 'nav.attendance_live',  section: 'gestion', roles: ['admin','gth','hr','coordinator','manager','gestor','supervisor'], module: 'asistencia' },

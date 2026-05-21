@@ -1025,8 +1025,10 @@ function SyncTab() {
   const [pushFrom, setPushFrom] = useState(firstDay)
   const [pushTo, setPushTo]     = useState(today)
 
-  const [conn, setConn] = useState<DbConn>(defaultConn)
-  useEffect(() => { setConn(loadConn()) }, [])
+  const [conn, setConn] = useState<DbConn>(() => {
+    if (typeof window === 'undefined') return defaultConn()
+    try { return JSON.parse(localStorage.getItem(CONN_KEY) || 'null') || defaultConn() } catch { return defaultConn() }
+  })
 
   const addLog   = (msg: string) => setLog(prev => [new Date().toLocaleTimeString() + ' — ' + msg, ...prev])
   const setField = (k: keyof DbConn) => (e: React.ChangeEvent<HTMLInputElement>) => setConn(c => ({ ...c, [k]: e.target.value }))
