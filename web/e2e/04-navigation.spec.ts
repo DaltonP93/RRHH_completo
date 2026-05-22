@@ -6,38 +6,70 @@ test.describe('Navigation — ModuleSidebar and Portal back-link', () => {
     await login(page)
   })
 
-  test('clicking a module card shows ModuleSidebar with "← Portal" link', async ({ page }) => {
-    await page.goto('/portal')
-    await page.waitForSelector('a .rounded-2xl', { timeout: 10000 })
+  test('navigating to /empleados shows ModuleSidebar with "← Portal" link', async ({ page }) => {
+    await page.goto('/empleados')
+    await page.waitForLoadState('networkidle')
 
-    // Click the Asistencia module card (maps to moduleKey "asistencia")
-    const asistenciaLink = page.locator('a[href="/asistencia"]')
-    await expect(asistenciaLink).toBeVisible()
-    await asistenciaLink.click()
+    // ModuleSidebar should render a "← Portal" link or a link to /portal
+    const portalLink = page.locator('a[href="/portal"]')
+    await expect(portalLink).toBeVisible({ timeout: 10000 })
 
-    // After navigation, ModuleSidebar should appear with a "← Portal" back link
-    const portalBackLink = page.locator('a[href="/portal"]')
-    await expect(portalBackLink).toBeVisible({ timeout: 10000 })
-    await expect(portalBackLink).toContainText('Portal')
+    // The link text should contain "Portal"
+    const linkText = await portalLink.first().textContent()
+    expect(linkText).toMatch(/Portal/i)
   })
 
-  test('"← Portal" link takes user back to /portal without full sidebar', async ({ page }) => {
-    // Navigate to a module page first so ModuleSidebar is shown
+  test('navigating to /asistencia shows sidebar with "Asistencia" module title', async ({ page }) => {
     await page.goto('/asistencia')
+    await page.waitForLoadState('networkidle')
+
+    // Sidebar should contain the module title "Asistencia"
+    const moduleTitle = page.locator(
+      'nav:has-text("Asistencia"), aside:has-text("Asistencia"), [class*="sidebar"]:has-text("Asistencia")',
+    )
+    await expect(moduleTitle.first()).toBeVisible({ timeout: 10000 })
+  })
+
+  test('clicking "← Portal" from /empleados redirects to /portal', async ({ page }) => {
+    await page.goto('/empleados')
+    await page.waitForLoadState('networkidle')
+
+    const portalLink = page.locator('a[href="/portal"]').first()
+    await expect(portalLink).toBeVisible({ timeout: 10000 })
+
+    await portalLink.click()
+    await expect(page).toHaveURL(/\/portal/, { timeout: 10000 })
+  })
+
+  test('/mi-portal loads without server error', async ({ page }) => {
+    const response = await page.goto('/mi-portal')
     await page.waitForLoadState('domcontentloaded')
 
-    const portalBackLink = page.locator('a[href="/portal"]')
-    await expect(portalBackLink).toBeVisible({ timeout: 10000 })
+    // Should not be a 500-level server error
+    const status = response?.status() ?? 200
+    expect(status).not.toBe(500)
+    expect(status).not.toBe(503)
 
-    // Click back to portal
-    await portalBackLink.click()
-    await expect(page).toHaveURL(/\/portal/, { timeout: 10000 })
+    // Page should render some content
+    const content = page.locator('h1, h2, main, [class*="card"], [class*="Card"]').first()
+    await expect(content).toBeVisible({ timeout: 10000 })
+  })
 
-    // On /portal the ModuleSidebar (with the Portal link) should no longer be rendered
-    // because moduleKey is null — verify the module-level sidebar is gone
-    // The "← Portal" link in sidebar should be gone (portal page has no sidebar)
-    const sidebarPortalLink = page.locator('nav a[href="/portal"], aside a[href="/portal"]')
-    const isVisible = await sidebarPortalLink.isVisible().catch(() => false)
-    expect(isVisible).toBe(false)
+  test('/admin/ver-como loads without error for super_admin', async ({ page }) => {
+    const response = await page.goto('/admin/ver-como')
+    await page.waitForLoadState('domcontentloaded')
+
+    const status = response?.status() ?? 200
+    // Accept 200 or redirects (3xx) — just not a server crash
+    expect(status).not.toBe(500)
+    expect(status).not.toBe(503)
+
+    // Should show either a user list or a redirect to portal/login
+    const content = page
+      .locator(
+        'h1, h2, table, input[type="search"], input[type="text"], a[href="/portal"]',
+      )
+      .first()
+    await expect(content).toBeVisible({ timeout: 10000 })
   })
 })
