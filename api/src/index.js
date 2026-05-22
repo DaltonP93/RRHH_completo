@@ -151,7 +151,18 @@ app.use('/api/attendance',  attendanceRoutes);
 app.use('/api/devices',     deviceRoutes);
 app.use('/api/schedules',   scheduleRoutes);
 app.use('/api/reports',     reportRoutes);
-app.use('/api/permissions', permissionRoutes);
+// RBAC explícito: no montar rolesRouter globalmente sobre todo /api.
+app.use('/api', (req, res, next) => {
+  const p = req.path || '';
+  if (p === '/roles' || p.startsWith('/roles/') || p === '/permissions') {
+    return rolesRouter(req, res, next);
+  }
+  if (p === '/user-scopes' || p.startsWith('/user-scopes/') || p === '/scopes' || p.startsWith('/scopes/')) {
+    return userScopesRouter(req, res, next);
+  }
+  return next();
+});
+app.use('/api/permissions-legacy', permissionRoutes);
 app.use('/api/sync',        syncRoutes);
 app.use('/api/webhooks',       webhookRoutes);
 app.use('/api/integration',    integrationRoutes);
@@ -194,9 +205,6 @@ app.use('/api/appraisals',    appraisalRoutes);
 app.use('/api/onboarding',   onboardingRoutes);
 
 // RRHH Platform modules
-// RBAC/Security routes deben ir antes de routers RRHH con rutas comodín /:id
-app.use('/api', rolesRouter);
-app.use('/api', userScopesRouter);
 app.use('/api/companies', companiesRouter);
 app.use('/api/positions', positionsRouter);
 app.use('/api', payrollCoreRouter);
