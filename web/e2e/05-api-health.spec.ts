@@ -1,40 +1,66 @@
 import { test, expect } from '@playwright/test'
 
-const API_BASE = process.env.PLAYWRIGHT_API_URL || 'http://localhost:4000'
-
-test.describe('API health', () => {
-  test('GET /api/health returns ok or degraded status', async ({ request }) => {
-    let response
-    try {
-      response = await request.get(`${API_BASE}/api/health`, { timeout: 5000 })
-    } catch {
-      test.skip(true, 'API server not reachable — skipping health check')
-      return
-    }
-
-    // Accept any 2xx response
-    expect(response.ok() || response.status() < 500).toBe(true)
+test.describe('API health checks', () => {
+  test('GET /api/health returns { status: "ok" }', async ({ request }) => {
+    const response = await request.get('/api/health', { timeout: 10000 })
+    expect(response.status()).toBe(200)
 
     const body = await response.json().catch(() => null)
-    if (body) {
-      // status must be "ok" or "degraded" — not a hard failure if DB is down
-      const validStatuses = ['ok', 'degraded', 'error']
-      if (body.status) {
-        expect(validStatuses).toContain(body.status)
-      }
-    }
+    expect(body).not.toBeNull()
+    expect(body).toHaveProperty('status')
+    expect(body.status).toBe('ok')
   })
 
-  test('page HTML does not expose hardcoded localhost:4000 API URLs', async ({ page }) => {
-    // Navigate to the login page (no auth required)
-    await page.goto('/login')
-    await page.waitForLoadState('domcontentloaded')
+  test('no occurrence of "localhost:4000" in /portal HTML response', async ({ page, request }) => {
+    // Check the raw HTML source of /portal (using the request context to bypass client-side rendering)
+    const response = await request.get('/portal')
+    const text = await response.text()
 
-    const html = await page.content()
+    // localhost:4000 must not leak into SSR/SSG HTML
+    expect(text).not.toContain('localhost:4000')
+  })
 
-    // Internal API URLs should not be leaked into the rendered HTML
-    // (they may appear in JS bundles fetched separately, but not inline HTML)
-    const hasHardcodedUrl = html.includes('localhost:4000')
-    expect(hasHardcodedUrl).toBe(false)
+  test('GET /api/permissions returns valid JSON (no 500)', async ({ request }) => {
+    const response = await request.get('/api/permissions', { timeout: 10000 })
+
+    expect(response.status()).not.toBe(500)
+    expect(response.status()).not.toBe(503)
+    expect(response.status()).toBe(200)
+
+    const body = await response.json().catch(() => null)
+    expect(body).not.toBeNull()
+  })
+
+  test('GET /api/roles returns valid JSON (no 500)', async ({ request }) => {
+    const response = await request.get('/api/roles', { timeout: 10000 })
+
+    expect(response.status()).not.toBe(500)
+    expect(response.status()).not.toBe(503)
+    expect(response.status()).toBe(200)
+
+    const body = await response.json().catch(() => null)
+    expect(body).not.toBeNull()
+  })
+
+  test('GET /api/companies returns valid JSON (no 500)', async ({ request }) => {
+    const response = await request.get('/api/companies', { timeout: 10000 })
+
+    expect(response.status()).not.toBe(500)
+    expect(response.status()).not.toBe(503)
+    expect(response.status()).toBe(200)
+
+    const body = await response.json().catch(() => null)
+    expect(body).not.toBeNull()
+  })
+
+  test('GET /api/audit returns valid JSON (no 500)', async ({ request }) => {
+    const response = await request.get('/api/audit', { timeout: 10000 })
+
+    expect(response.status()).not.toBe(500)
+    expect(response.status()).not.toBe(503)
+    expect(response.status()).toBe(200)
+
+    const body = await response.json().catch(() => null)
+    expect(body).not.toBeNull()
   })
 })
