@@ -121,28 +121,21 @@ function ModuleCard({
           : 'hover:shadow-lg hover:-translate-y-0.5 cursor-pointer shadow-sm'
         }`}
     >
-      {/* Gradient header */}
-      <div className={`relative h-36 bg-gradient-to-br ${mod.gradient} flex flex-col justify-between p-4`}>
-        {/* Large centered icon */}
-        <div className="flex-1 flex items-center justify-center">
-          <Icon className="text-white/90" size={40} />
+      {/* Compact header — icon + title side by side on gradient */}
+      <div className={`relative h-20 bg-gradient-to-br ${mod.gradient} flex items-center px-4 gap-3`}>
+        <Icon className="text-white/90 flex-shrink-0" size={24} />
+        <div className="flex-1 min-w-0">
+          <p className="text-white font-bold text-sm leading-tight truncate">{mod.name}</p>
+          {badgeCount != null && badgeCount > 0 && (
+            <span className="inline-block min-w-[18px] h-4 px-1 rounded-full bg-white/30 text-white text-[10px] font-bold text-center leading-4">{badgeCount}</span>
+          )}
         </div>
-        {/* White title at bottom-left */}
-        <p className="text-white font-bold text-sm leading-tight drop-shadow-sm">
-          {mod.name}
-        </p>
-        {/* Badge overlay */}
-        {badgeCount != null && badgeCount > 0 && (
-          <span className="absolute top-3 right-3 min-w-[20px] h-5 px-1.5 rounded-full bg-white/30 text-white text-xs font-bold flex items-center justify-center backdrop-blur-sm">
-            {badgeCount}
-          </span>
-        )}
       </div>
 
       {/* Body */}
-      <div className="p-4 pb-3">
-        <p className="text-xs text-slate-500 leading-relaxed line-clamp-2">{mod.desc}</p>
-        <div className="mt-2 flex items-center gap-2">
+      <div className="p-3 pb-2">
+        <p className="text-xs text-slate-500 leading-relaxed line-clamp-1">{mod.desc}</p>
+        <div className="mt-1.5 flex items-center gap-2">
           <span className="inline-block px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-semibold uppercase tracking-wide">
             Módulo activo
           </span>
@@ -151,14 +144,14 @@ function ModuleCard({
       </div>
 
       {/* Footer quick-action row */}
-      <div className="px-4 pb-3 border-t border-slate-100 pt-2 flex items-center gap-3">
+      <div className="px-3 pb-2 border-t border-slate-100 pt-1.5 flex items-center gap-3">
         <button
           type="button"
           onClick={e => e.preventDefault()}
           className="relative flex items-center gap-1 text-slate-400 hover:text-slate-600 transition-colors"
           title="Notificaciones"
         >
-          <Bell size={15} />
+          <Bell size={12} />
           {badgeCount != null && badgeCount > 0 && (
             <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
               {badgeCount}
@@ -171,7 +164,7 @@ function ModuleCard({
           className="text-slate-400 hover:text-slate-600 transition-colors"
           title="Documentos"
         >
-          <Folder size={15} />
+          <Folder size={12} />
         </button>
         <button
           type="button"
@@ -179,10 +172,10 @@ function ModuleCard({
           className="text-slate-400 hover:text-slate-600 transition-colors"
           title="Ir al módulo"
         >
-          <ExternalLink size={15} />
+          <ExternalLink size={12} />
         </button>
         <div className="flex-1" />
-        <ChevronRight size={14} className="text-slate-300 group-hover:text-slate-400 transition-colors" />
+        <ChevronRight size={12} className="text-slate-300 group-hover:text-slate-400 transition-colors" />
       </div>
     </div>
   )
@@ -192,12 +185,12 @@ function ModuleCard({
 
 function StatCard({ label, value, icon: Icon, color }: { label: string; value: string; icon: React.ElementType; color: string }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-5 py-4 flex items-center gap-4">
-      <div className={`w-10 h-10 rounded-lg ${color} flex items-center justify-center flex-shrink-0`}>
-        <Icon className="text-white" size={18} />
+    <div className="bg-white rounded-xl border border-slate-100 shadow-sm px-4 py-3 flex items-center gap-3">
+      <div className={`w-9 h-9 rounded-lg ${color} flex items-center justify-center flex-shrink-0`}>
+        <Icon className="text-white" size={16} />
       </div>
       <div>
-        <p className="text-2xl font-bold text-slate-800 leading-none">{value}</p>
+        <p className="text-xl font-bold text-slate-800 leading-none">{value}</p>
         <p className="text-xs text-slate-500 mt-0.5">{label}</p>
       </div>
     </div>
@@ -335,7 +328,7 @@ export default function PortalPage() {
       const items: PorHacerItem[] = []
 
       try {
-        const res = await api.get('/api/approvals?status=pending&limit=5')
+        const res = await api.get('/api/approvals-sla?status=pending&limit=5')
         const approvals = Array.isArray(res.data) ? res.data : (res.data?.data ?? [])
         for (const a of approvals as Record<string, unknown>[]) {
           items.push({
@@ -348,47 +341,36 @@ export default function PortalPage() {
         }
       } catch { /* graceful fallback */ }
 
-      try {
-        const res = await api.get('/api/notifications?unread=true&limit=5')
-        const notifs = Array.isArray(res.data) ? res.data : (res.data?.data ?? [])
-        for (const n of notifs as Record<string, unknown>[]) {
-          items.push({
-            id: `notif-${n.id ?? Math.random()}`,
-            title: (n.title ?? n.message ?? 'Notificación') as string,
-            module: (n.module ?? 'Sistema') as string,
-            date: (n.created_at ?? n.date ?? '') as string,
-            type: 'notification',
-          })
-        }
-      } catch { /* graceful fallback */ }
+      // Note: /api/notifications is SMTP/schedules-only — no generic unread feed endpoint exists.
+      // Approvals-sla already covers actionable items above.
 
       setPorHacer(items)
     }
     loadPorHacer()
   }, [])
 
-  // Load stats
+  // Load stats — each call is individually guarded so one 500 doesn't block others
   useEffect(() => {
     async function loadStats() {
       let totalEmployees = '--'
       let marcacionesHoy = '--'
       let pendientes = '--'
 
-      try {
-        const res = await api.get('/api/employees?limit=1')
-        const total = res.data?.total ?? res.data?.count
-        if (total != null) totalEmployees = String(total)
-      } catch { /* fallback */ }
-
+      // attendance/live returns { stats: { total_employees, present, late, … }, recentLogs, date }
+      // We use a single call to get both total employees and today's check-ins
       try {
         const res = await api.get('/api/attendance/live')
-        const count = res.data?.today ?? res.data?.count ?? res.data?.total
-        if (count != null) marcacionesHoy = String(count)
-      } catch { /* fallback */ }
+        const s = res.data?.stats ?? {}
+        // total active employees from the live stats query
+        if (s.total_employees != null) totalEmployees = String(s.total_employees)
+        // present + late = number of employees who checked in today
+        const checkedIn = (Number(s.present) || 0) + (Number(s.late) || 0)
+        marcacionesHoy = String(checkedIn)
+      } catch { /* fallback — leave '--' */ }
 
       try {
-        const res = await api.get('/api/approvals?status=pending&limit=1')
-        const total = res.data?.total ?? res.data?.count
+        const res = await api.get('/api/approvals-sla?status=pending&limit=1')
+        const total = res.data?.total ?? res.data?.count ?? (Array.isArray(res.data) ? res.data.length : null)
         if (total != null) pendientes = String(total)
       } catch { /* fallback */ }
 
@@ -413,11 +395,11 @@ export default function PortalPage() {
     : MODULES
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
+    <div className="min-h-screen bg-slate-50 p-4">
 
       {/* ── Greeting header ── */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">
+      <div className="mb-4">
+        <h1 className="text-xl font-bold text-slate-900">
           Bienvenido, {displayName}
         </h1>
         <p className="text-slate-400 text-sm mt-0.5 capitalize">
@@ -426,14 +408,14 @@ export default function PortalPage() {
       </div>
 
       {/* ── Stats strip ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         <StatCard label="Total empleados"   value={stats.totalEmployees} icon={Users}    color="bg-blue-500" />
         <StatCard label="Marcaciones hoy"   value={stats.marcacionesHoy} icon={Clock}    color="bg-emerald-500" />
         <StatCard label="Aprobaciones pend." value={stats.pendientes}    icon={Bell}     color="bg-orange-500" />
       </div>
 
       {/* ── Main layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
 
         {/* Left — Module cards */}
         <div>
@@ -442,7 +424,7 @@ export default function PortalPage() {
               <Loader2 className="animate-spin text-slate-400" size={32} />
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {visibleModules.map(mod => {
                 const disabled   = isDisabled(mod.code)
                 const status     = getStatus(mod.code)
@@ -470,7 +452,7 @@ export default function PortalPage() {
         </div>
 
         {/* Right — Por hacer + Actividad */}
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-3">
           <PorHacerPanel
             items={porHacer}
             dismissed={dismissed}
