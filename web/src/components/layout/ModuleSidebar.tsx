@@ -7,6 +7,7 @@ import {
   Shield, Database, Activity, ArrowLeft, ChevronRight,
   LayoutDashboard, Briefcase, MapPin, Radio, PiggyBank, RefreshCw,
   Layers, Plane, FolderOpen, Lock, Globe, EyeOff, Bell, Gift,
+  TrendingUp, Download,
   type LucideIcon
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -22,7 +23,7 @@ const MODULE_ITEMS: Record<string, { title: string; color: string; items: MenuIt
       { href: '/empleados',            label: 'Empleados',           icon: Users           },
       { href: '/cargos',               label: 'Cargos',              icon: Briefcase       },
       { href: '/departamentos',        label: 'Departamentos',       icon: Building2       },
-      { href: '/configuracion/sedes',  label: 'Sucursales',          icon: MapPin          },
+      { href: '/personas/sucursales',  label: 'Sucursales',           icon: MapPin          },
       { href: '/evaluaciones',         label: 'Evaluaciones',        icon: Star            },
       { href: '/onboarding',           label: 'Onboarding',          icon: UserCheck       },
     ],
@@ -40,6 +41,7 @@ const MODULE_ITEMS: Record<string, { title: string; color: string; items: MenuIt
       { href: '/aprobaciones',            label: 'Aprobaciones',          icon: CheckSquare     },
       { href: '/banco-horas',             label: 'Banco de Horas',        icon: PiggyBank       },
       { href: '/sync/att2000',            label: 'Reconciliación',        icon: RefreshCw       },
+      { href: '/asistencia/relojes/diagnostico', label: 'Diagnóstico Relojes', icon: Activity },
     ],
   },
   nomina: {
@@ -116,22 +118,26 @@ const MODULE_ITEMS: Record<string, { title: string; color: string; items: MenuIt
     title: 'Cumplimiento Legal',
     color: 'text-red-600',
     items: [
-      { href: '/cumplimiento',  label: 'Cumplimiento',  icon: CheckSquare },
+      { href: '/cumplimiento',  label: 'Panel MTESS/IPS',  icon: Shield    },
+      { href: '/reportes',      label: 'Exportaciones',    icon: Download  },
     ],
   },
   competencias: {
     title: 'Competencias',
     color: 'text-pink-600',
     items: [
-      { href: '/competencias',         label: 'Catálogo',  icon: Star      },
-      { href: '/competencias/planes',  label: 'Planes',    icon: BarChart2 },
+      { href: '/competencias',         label: 'Evaluaciones',      icon: Star        },
+      { href: '/competencias/planes',  label: 'Planes de carrera', icon: TrendingUp  },
+      { href: '/evaluaciones',         label: 'Desempeño 360°',    icon: Users       },
     ],
   },
   reportes: {
     title: 'Reportes y Analítica',
     color: 'text-cyan-600',
     items: [
-      { href: '/reportes',  label: 'Reportes',  icon: BarChart2 },
+      { href: '/reportes',               label: 'Reportes operativos',   icon: BarChart2  },
+      { href: '/reportes/personalizado', label: 'Reporte personalizado', icon: Layers     },
+      { href: '/ejecutivo',              label: 'Dashboard ejecutivo',   icon: TrendingUp },
     ],
   },
 }
