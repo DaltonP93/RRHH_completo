@@ -204,6 +204,20 @@ app.use('/api/face',           faceRoutes);
 app.use('/api/appraisals',    appraisalRoutes);
 app.use('/api/onboarding',   onboardingRoutes);
 
+// ── Prevent payrollRunsRouter /:id wildcard from swallowing these paths ────
+// /api/approvals — compatibility alias for approvals-sla
+app.get('/api/approvals', async (req, res) => {
+  try {
+    const { sequelize: db } = require('./config/database')
+    const { status, limit = 10 } = req.query
+    const safeStatus = (status || '').replace(/[^a-z_]/gi, '')
+    const safeLimit = parseInt(limit) || 10
+    const where = safeStatus ? `WHERE ar.status = '${safeStatus}'` : ''
+    const [rows] = await db.query(`SELECT ar.*, e.full_name AS employee_name FROM approval_requests ar LEFT JOIN employees e ON ar.employee_id = e.id ${where} ORDER BY ar.created_at DESC LIMIT ${safeLimit}`)
+    res.json({ data: rows, total: rows.length })
+  } catch { res.json({ data: [], total: 0 }) }
+})
+
 // RRHH Platform modules
 app.use('/api/companies', companiesRouter);
 app.use('/api/positions', positionsRouter);

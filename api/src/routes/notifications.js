@@ -12,6 +12,22 @@ const logger = require('../config/logger');
 
 router.use(authenticate, authorize('admin', 'hr'));
 
+// GET /api/notifications — list recent notifications for current user
+router.get('/', async (req, res) => {
+  try {
+    const userId = req.user?.id
+    const { limit = 20 } = req.query
+    if (!userId) return res.json([])
+    const [rows] = await sequelize.query(
+      'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+      { replacements: [userId, parseInt(limit) || 20] }
+    )
+    res.json(rows)
+  } catch {
+    res.json([])  // table may not exist yet
+  }
+})
+
 // ─── SMTP CONFIG ───────────────────────────────────────────────────
 
 // GET /api/notifications/smtp

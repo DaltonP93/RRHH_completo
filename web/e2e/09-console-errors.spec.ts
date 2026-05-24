@@ -54,6 +54,41 @@ test.describe('No console 500/502 errors during navigation', () => {
     expect(r.status()).not.toBe(502)
   })
 
+  test('GET /api/employees returns 200', async ({ request }) => {
+    const r = await request.get('/api/employees?limit=10')
+    expect(r.status(), `employees returned ${r.status()}`).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/branches returns 200', async ({ request }) => {
+    const r = await request.get('/api/branches')
+    expect(r.status(), `branches returned ${r.status()}`).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/approvals returns 200 not 500', async ({ request }) => {
+    const r = await request.get('/api/approvals?status=pending&limit=5')
+    expect(r.status()).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/notifications returns 200 not 500', async ({ request }) => {
+    const r = await request.get('/api/notifications')
+    expect(r.status()).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/hr-sources returns 200 not 500', async ({ request }) => {
+    const r = await request.get('/api/hr-sources')
+    expect(r.status()).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/departments returns 200', async ({ request }) => {
+    const r = await request.get('/api/departments')
+    expect(r.status()).not.toBe(500)
+  })
+
   test('sidebar stays in personas context when navigating to /personas/sucursales', async ({ page }) => {
     await login(page, process.env.TEST_USER || 'admin', process.env.TEST_PASS || 'admin123')
     await page.goto('/personas/sucursales')

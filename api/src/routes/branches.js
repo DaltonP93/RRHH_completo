@@ -9,18 +9,38 @@ router.use(authenticate);
 
 // GET /api/branches — lista (todos los roles)
 router.get('/', async (req, res) => {
-  const { active } = req.query;
-  const where = [];
-  const params = [];
-  if (active !== undefined) { where.push('active = ?'); params.push(active === '1' ? 1 : 0); }
-  const sql = `SELECT b.*,
-      (SELECT COUNT(*) FROM employees e WHERE e.branch_id = b.id AND e.status='active') AS employee_count,
-      (SELECT COUNT(*) FROM devices d WHERE d.branch_id = b.id) AS device_count
-    FROM branches b
-    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY b.name ASC`;
-  const [rows] = await sequelize.query(sql, { replacements: params });
-  res.json(rows);
+  try {
+    const { active } = req.query;
+    const where = [];
+    const params = [];
+    if (active !== undefined) { where.push('active = ?'); params.push(active === '1' ? 1 : 0); }
+    // branch_id on employees may not exist yet (migration 072); use a safe subquery
+    const sqlWithCount = `SELECT b.*,
+        (SELECT COUNT(*) FROM employees e WHERE e.branch_id = b.id AND e.status='active') AS employee_count,
+        (SELECT COUNT(*) FROM devices d WHERE d.branch_id = b.id) AS device_count
+      FROM branches b
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY b.name ASC`;
+    let rows;
+    try {
+      [rows] = await sequelize.query(sqlWithCount, { replacements: params });
+    } catch (colErr) {
+      if (colErr.message && colErr.message.includes('branch_id')) {
+        // branch_id column not yet created — fall back without employee_count subquery
+        const sqlNoCount = `SELECT b.*, 0 AS employee_count,
+            (SELECT COUNT(*) FROM devices d WHERE d.branch_id = b.id) AS device_count
+          FROM branches b
+          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+          ORDER BY b.name ASC`;
+        [rows] = await sequelize.query(sqlNoCount, { replacements: params });
+      } else {
+        throw colErr;
+      }
+    }
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /api/branches/:id
@@ -73,15 +93,26 @@ router.put('/:id', authorize('admin', 'super_admin'), async (req, res) => {
 
 // DELETE /api/branches/:id (soft)
 router.delete('/:id', authorize('admin', 'super_admin'), async (req, res) => {
-  const [[count]] = await sequelize.query(
-    `SELECT COUNT(*) AS n FROM employees WHERE branch_id=? AND status='active'`,
-    { replacements: [req.params.id] }
-  );
-  if (count.n > 0) {
-    return res.status(409).json({ error: `No se puede desactivar: ${count.n} empleado(s) activos asignados` });
+  try {
+    let activeCount = 0;
+    try {
+      const [[count]] = await sequelize.query(
+        `SELECT COUNT(*) AS n FROM employees WHERE branch_id=? AND status='active'`,
+        { replacements: [req.params.id] }
+      );
+      activeCount = count.n;
+    } catch (colErr) {
+      if (!(colErr.message && colErr.message.includes('branch_id'))) throw colErr;
+      // branch_id column doesn't exist yet — treat as 0 employees assigned
+    }
+    if (activeCount > 0) {
+      return res.status(409).json({ error: `No se puede desactivar: ${activeCount} empleado(s) activos asignados` });
+    }
+    await sequelize.query('UPDATE branches SET active = 0 WHERE id = ?', { replacements: [req.params.id] });
+    res.json({ message: 'Sede desactivada' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  await sequelize.query('UPDATE branches SET active = 0 WHERE id = ?', { replacements: [req.params.id] });
-  res.json({ message: 'Sede desactivada' });
 });
 
 module.exports = router;

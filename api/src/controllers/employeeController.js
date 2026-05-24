@@ -25,7 +25,9 @@ async function getAll(req, res) {
       params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
-    const [employees] = await sequelize.query(`
+    // Build query with branch_id support (migration 072 adds the column).
+    // If the column doesn't exist yet, fall back to a query without branch fields.
+    const mainSql = `
       SELECT
         e.id, e.code, e.employee_number,
         CONCAT(e.first_name, ' ', e.last_name) AS full_name,
@@ -41,7 +43,23 @@ async function getAll(req, res) {
       ${where}
       ORDER BY e.last_name, e.first_name
       LIMIT ? OFFSET ?
-    `, { replacements: [...params, parseInt(limit), parseInt(offset)] });
+    `;
+
+    let employees;
+    try {
+      [employees] = await sequelize.query(mainSql, { replacements: [...params, parseInt(limit), parseInt(offset)] });
+    } catch (branchErr) {
+      if (branchErr.message && branchErr.message.includes('branch_id')) {
+        // branch_id column not yet created — retry without branch fields
+        const fallbackSql = mainSql
+          .replace(', e.branch_id, b.name AS branch_name', '')
+          .replace('LEFT JOIN branches    b ON e.branch_id     = b.id', '');
+        [employees] = await sequelize.query(fallbackSql, { replacements: [...params, parseInt(limit), parseInt(offset)] });
+        employees = employees.map(r => ({ ...r, branch_id: null, branch_name: null }));
+      } else {
+        throw branchErr;
+      }
+    }
 
     const [[{ total }]] = await sequelize.query(
       `SELECT COUNT(*) AS total FROM employees e ${where}`,
