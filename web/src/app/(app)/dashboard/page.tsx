@@ -33,6 +33,7 @@ export default function DashboardPage() {
   const [today, setToday] = useState('')
   const [recalcLoading, setRecalcLoading] = useState(false)
   const [socketConnected, setSocketConnected] = useState(false)
+  const [socketOffline, setSocketOffline] = useState(false)
   const TYPE_LABELS: Record<string, string> = {
     in: t('attendance.in'),
     out: t('attendance.out'),
@@ -56,7 +57,7 @@ export default function DashboardPage() {
     reconnectSocket()
     const socket = getSocket()
 
-    const onConnect    = () => setSocketConnected(true)
+    const onConnect    = () => { setSocketConnected(true); setSocketOffline(false) }
     const onDisconnect = () => setSocketConnected(false)
     const onNew = (event: AttendanceEvent) => {
       setLiveEvents(prev => [event, ...prev].slice(0, 50))
@@ -71,7 +72,13 @@ export default function DashboardPage() {
     // Estado inicial
     setSocketConnected(socket.connected)
 
+    // After 10 s without a connection, surface the offline/fallback indicator
+    const offlineTimer = setTimeout(() => {
+      setSocketOffline(prev => prev || !socket.connected)
+    }, 10_000)
+
     return () => {
+      clearTimeout(offlineTimer)
       socket.off('connect',        onConnect)
       socket.off('disconnect',     onDisconnect)
       socket.off('attendance:new', onNew)
@@ -122,11 +129,17 @@ export default function DashboardPage() {
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${
             socketConnected
               ? 'bg-green-50 border-green-200'
-              : 'bg-amber-50 border-amber-200'
+              : socketOffline
+                ? 'bg-amber-50 border-amber-300'
+                : 'bg-amber-50 border-amber-200'
           }`}>
             <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500 pulse-live' : 'bg-amber-400 animate-pulse'}`} />
             <span className={`text-sm font-medium ${socketConnected ? 'text-green-700' : 'text-amber-700'}`}>
-              {socketConnected ? t('dashboard.live_feed') : 'Reconectando...'}
+              {socketConnected
+                ? t('dashboard.live_feed')
+                : socketOffline
+                  ? 'Modo offline · actualizando cada 30s'
+                  : 'Reconectando...'}
             </span>
           </div>
         </div>

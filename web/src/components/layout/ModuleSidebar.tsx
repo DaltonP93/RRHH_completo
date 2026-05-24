@@ -41,6 +41,7 @@ const MODULE_ITEMS: Record<string, { title: string; color: string; items: MenuIt
       { href: '/aprobaciones',            label: 'Aprobaciones',          icon: CheckSquare     },
       { href: '/banco-horas',             label: 'Banco de Horas',        icon: PiggyBank       },
       { href: '/sync/att2000',            label: 'Reconciliación',        icon: RefreshCw       },
+      { href: '/asistencia/relojes/diagnostico', label: 'Diagnóstico Relojes', icon: Activity },
     ],
   },
   nomina: {
