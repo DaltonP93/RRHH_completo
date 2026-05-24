@@ -23,7 +23,7 @@ const MODULE_ITEMS: Record<string, { title: string; color: string; items: MenuIt
       { href: '/empleados',            label: 'Empleados',           icon: Users           },
       { href: '/cargos',               label: 'Cargos',              icon: Briefcase       },
       { href: '/departamentos',        label: 'Departamentos',       icon: Building2       },
-      { href: '/configuracion/sedes',  label: 'Sucursales',          icon: MapPin          },
+      { href: '/personas/sucursales',  label: 'Sucursales',           icon: MapPin          },
       { href: '/evaluaciones',         label: 'Evaluaciones',        icon: Star            },
       { href: '/onboarding',           label: 'Onboarding',          icon: UserCheck       },
     ],
