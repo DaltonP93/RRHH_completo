@@ -48,10 +48,15 @@ test.describe('No console 500/502 errors during navigation', () => {
     expect([200, 401]).toContain(r.status())
   })
 
-  test('api/approvals-sla returns 200 or 404 not 500', async ({ request }) => {
+  test('api/approvals-sla returns 200 — not captured by payrollRunsRouter', async ({ request }) => {
     const r = await request.get('/api/approvals-sla?status=pending&limit=5')
+    // Must return 200 or 401 (auth), never 500 (wildcard routing bug)
     expect(r.status()).not.toBe(500)
     expect(r.status()).not.toBe(502)
+    // Body must NOT contain the payroll SQL fingerprint that proves wildcard capture
+    const body = await r.text()
+    expect(body).not.toContain("WHERE pr.id = 'approvals-sla'")
+    expect(body).not.toContain('payroll_runs')
   })
 
   test('GET /api/employees returns 200', async ({ request }) => {

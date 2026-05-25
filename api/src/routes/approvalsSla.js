@@ -14,6 +14,29 @@ const { sequelize } = require('../config/database');
 router.use(authenticate);
 router.use(authorize('admin', 'gth', 'hr', 'manager', 'coordinator', 'gestor'));
 
+// GET / — permisos pendientes de aprobación (usado por el portal como "Por hacer")
+router.get('/', async (req, res) => {
+  try {
+    const safeLimit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
+    const status = req.query.status || 'pending';
+    const safeStatus = status.replace(/[^a-z0-9_]/gi, '');
+    const [rows] = await sequelize.query(`
+      SELECT p.id, p.type, p.status, p.reason, p.date_from, p.date_to, p.created_at,
+             e.id AS employee_id, CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+             d.name AS department
+      FROM permissions p
+      JOIN employees e ON e.id = p.employee_id
+      LEFT JOIN departments d ON d.id = e.department_id
+      WHERE p.status = ?
+      ORDER BY p.created_at DESC
+      LIMIT ?
+    `, { replacements: [safeStatus, safeLimit] });
+    res.json({ data: rows, total: rows.length });
+  } catch (err) {
+    res.json({ data: [], total: 0 });
+  }
+});
+
 // GET /overdue — permisos pendientes con SLA vencido
 router.get('/overdue', async (req, res) => {
   try {

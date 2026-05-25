@@ -67,6 +67,7 @@ const companiesRouter            = require('./routes/companies');
 const positionsRouter            = require('./routes/positions');
 const payrollCoreRouter          = require('./routes/payrollCore');
 const payrollRunsRouter          = require('./routes/payrollRuns');
+const payrollExtrasRouter        = require('./routes/payrollExtras');
 const aguinaldoRouter            = require('./routes/aguinaldo');
 const salaryAdvancesRouter       = require('./routes/salaryAdvances');
 const bankingRouter              = require('./routes/banking');
@@ -204,7 +205,6 @@ app.use('/api/face',           faceRoutes);
 app.use('/api/appraisals',    appraisalRoutes);
 app.use('/api/onboarding',   onboardingRoutes);
 
-// ── Prevent payrollRunsRouter /:id wildcard from swallowing these paths ────
 // /api/approvals — compatibility alias for approvals-sla
 app.get('/api/approvals', async (req, res) => {
   try {
@@ -219,19 +219,24 @@ app.get('/api/approvals', async (req, res) => {
 })
 
 // RRHH Platform modules
+// payrollExtrasRouter: /api/settlement-types, /api/payroll-monthly-parameters (sin wildcard /:id)
+// payrollRunsRouter: montado en /api/payroll-runs — evita que /:id capture otras rutas
 app.use('/api/companies', companiesRouter);
 app.use('/api/positions', positionsRouter);
 app.use('/api', payrollCoreRouter);
-app.use('/api', payrollRunsRouter);
-app.use('/api', aguinaldoRouter);
-app.use('/api', salaryAdvancesRouter);
-app.use('/api', bankingRouter);
-app.use('/api', complianceRouter);
-app.use('/api', documentTemplatesRouter);
-app.use('/api', documentsRouter);
-app.use('/api', competenciesRouter);
-app.use('/api', notificationsMulticanalRouter);
-app.use('/api', securityGranularRouter);
+// payrollExtrasRouter: /api/settlement-types, /api/payroll-monthly-parameters, /api/salary-advance-types
+// Todos con rutas explícitas, sin wildcard /:id
+app.use('/api', payrollExtrasRouter);
+app.use('/api/payroll-runs',        payrollRunsRouter);
+app.use('/api/aguinaldo',           aguinaldoRouter);
+app.use('/api/salary-advances',     salaryAdvancesRouter);
+app.use('/api',                     bankingRouter);
+app.use('/api',                     complianceRouter);
+app.use('/api/document-templates',  documentTemplatesRouter);
+app.use('/api/documents',           documentsRouter);
+app.use('/api',                     competenciesRouter);
+app.use('/api',                     notificationsMulticanalRouter);
+app.use('/api',                     securityGranularRouter);
 app.use('/api/sync/att2000', att2000SyncRouter);
 
 // Documentación Swagger UI — http://localhost:4000/api/docs
