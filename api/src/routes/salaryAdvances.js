@@ -14,45 +14,6 @@ const { sequelize } = require('../config/database');
 
 router.use(authenticate);
 
-// ─── Salary Advance Types ────────────────────────────────────────────────────
-
-// GET /api/salary-advance-types
-router.get('/salary-advance-types', async (req, res) => {
-  try {
-    const [rows] = await sequelize.query(
-      "SELECT * FROM salary_advance_types WHERE status != 'deleted' ORDER BY name ASC"
-    );
-    res.json(rows);
-  } catch (err) {
-    console.error('GET /api/salary-advance-types error:', err);
-    res.status(500).json({ error: 'Error al obtener tipos de anticipo' });
-  }
-});
-
-// POST /api/salary-advance-types
-router.post('/salary-advance-types', authorize('admin', 'super_admin'), async (req, res) => {
-  try {
-    const { name, code, description, max_percentage, max_amount, requires_approval } = req.body;
-    if (!name) return res.status(400).json({ error: 'name es requerido' });
-
-    const [result] = await sequelize.query(`
-      INSERT INTO salary_advance_types
-        (name, code, description, max_percentage, max_amount, requires_approval, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())
-    `, { replacements: [
-      name, code || null, description || null,
-      max_percentage || null, max_amount || null,
-      requires_approval ? 1 : 1  // default: requires approval
-    ]});
-
-    const [row] = await sequelize.query('SELECT * FROM salary_advance_types WHERE id = ?', { replacements: [result] });
-    res.status(201).json(row[0]);
-  } catch (err) {
-    console.error('POST /api/salary-advance-types error:', err);
-    res.status(500).json({ error: 'Error al crear tipo de anticipo' });
-  }
-});
-
 // ─── Salary Advances ─────────────────────────────────────────────────────────
 
 // GET /api/salary-advances — list with filters

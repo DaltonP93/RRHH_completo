@@ -48,10 +48,50 @@ test.describe('No console 500/502 errors during navigation', () => {
     expect([200, 401]).toContain(r.status())
   })
 
-  test('api/approvals-sla returns 200 or 404 not 500', async ({ request }) => {
+  test('api/approvals-sla returns 200 — not captured by payrollRunsRouter', async ({ request }) => {
     const r = await request.get('/api/approvals-sla?status=pending&limit=5')
+    // Must return 200 or 401 (auth), never 500 (wildcard routing bug)
     expect(r.status()).not.toBe(500)
     expect(r.status()).not.toBe(502)
+    // Body must NOT contain the payroll SQL fingerprint that proves wildcard capture
+    const body = await r.text()
+    expect(body).not.toContain("WHERE pr.id = 'approvals-sla'")
+    expect(body).not.toContain('payroll_runs')
+  })
+
+  test('GET /api/employees returns 200', async ({ request }) => {
+    const r = await request.get('/api/employees?limit=10')
+    expect(r.status(), `employees returned ${r.status()}`).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/branches returns 200', async ({ request }) => {
+    const r = await request.get('/api/branches')
+    expect(r.status(), `branches returned ${r.status()}`).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/approvals returns 200 not 500', async ({ request }) => {
+    const r = await request.get('/api/approvals?status=pending&limit=5')
+    expect(r.status()).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/notifications returns 200 not 500', async ({ request }) => {
+    const r = await request.get('/api/notifications')
+    expect(r.status()).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/hr-sources returns 200 not 500', async ({ request }) => {
+    const r = await request.get('/api/hr-sources')
+    expect(r.status()).not.toBe(500)
+    expect(r.status()).not.toBe(502)
+  })
+
+  test('GET /api/departments returns 200', async ({ request }) => {
+    const r = await request.get('/api/departments')
+    expect(r.status()).not.toBe(500)
   })
 
   test('sidebar stays in personas context when navigating to /personas/sucursales', async ({ page }) => {
