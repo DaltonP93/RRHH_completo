@@ -235,6 +235,9 @@ services:
       PUSH_PORT: ${PUSH_PORT:-8080}
       PORT: ${BRIDGE_PORT:-8081}
       BRIDGE_PORT: ${BRIDGE_PORT:-8081}
+      ZKTECO_DEVICES: ${ZKTECO_DEVICES:-}
+      ZKTECO_AUTO_POLL: ${ZKTECO_AUTO_POLL:-true}
+      ZKTECO_POLL_INTERVAL: ${ZKTECO_POLL_INTERVAL:-30000}
     ports:
       # Puerto PUSH: los relojes ZKTeco envían eventos a este puerto
       - "8080:8080"

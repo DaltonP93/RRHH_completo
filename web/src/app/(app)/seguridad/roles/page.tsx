@@ -36,7 +36,8 @@ export default function RolesPage() {
     setLoading(true)
     try {
       const res = await api.get('/api/roles')
-      setRoles(res.data || [])
+      const data = res.data
+      setRoles(Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []))
     } catch (e: any) {
       setErr(e?.response?.data?.error || 'Error cargando roles')
     } finally { setLoading(false) }
@@ -47,7 +48,12 @@ export default function RolesPage() {
     setPermsLoading(true)
     try {
       const res = await api.get(`/api/roles/${role.id}/permissions`)
-      setPerms(res.data || [])
+      // API returns { role, permissions: [...] } — extract the array
+      const data = res.data
+      const arr = Array.isArray(data) ? data : (Array.isArray(data?.permissions) ? data.permissions : [])
+      setPerms(arr)
+    } catch {
+      setPerms([])
     } finally { setPermsLoading(false) }
   }
 
@@ -79,9 +85,10 @@ export default function RolesPage() {
     if (!selected) return
     const updated = perms.map(p => p.id === permId ? { ...p, allowed } : p)
     setPerms(updated)
-    const payload = updated.map(p => ({ permission_id: p.id, allowed: p.allowed }))
+    // API expects { permission_ids: [id1, id2, ...] } — IDs of allowed permissions
+    const permissionIds = updated.filter(p => p.allowed).map(p => p.id)
     try {
-      await api.put(`/api/roles/${selected.id}/permissions`, { permissions: payload })
+      await api.put(`/api/roles/${selected.id}/permissions`, { permission_ids: permissionIds })
     } catch {
       setPerms(perms) // revert
     }

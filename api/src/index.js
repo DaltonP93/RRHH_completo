@@ -239,6 +239,80 @@ app.use('/api',                     notificationsMulticanalRouter);
 app.use('/api',                     securityGranularRouter);
 app.use('/api/sync/att2000', att2000SyncRouter);
 
+// ── Rutas stub para módulos sin tabla propia — devuelven 200 con [] ──────────
+// Evitan que /:id wildcards de otros routers capten estas rutas devolviendo 404.
+;(function registerStubRoutes() {
+  const { authenticate } = require('./middleware/auth');
+  const { sequelize } = require('./config/database');
+
+  // /api/document-folders
+  app.get('/api/document-folders', authenticate, async (_req, res) => {
+    try {
+      const [rows] = await sequelize.query('SELECT * FROM document_folders ORDER BY name ASC');
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+
+  // /api/cost-centers
+  app.get('/api/cost-centers', authenticate, async (_req, res) => {
+    try {
+      const [rows] = await sequelize.query("SELECT * FROM cost_centers WHERE status='active' ORDER BY name ASC");
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+
+  // /api/employee-types
+  app.get('/api/employee-types', authenticate, async (_req, res) => {
+    try {
+      const [rows] = await sequelize.query("SELECT * FROM employee_types WHERE status='active' ORDER BY name ASC");
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+
+  // /api/zkteco/diagnostics — estado real bridge + relojes desde DB + env
+  app.get('/api/zkteco/diagnostics', authenticate, async (_req, res) => {
+    try {
+      const http = require('http');
+      const bridgeUrl = (process.env.BRIDGE_INTERNAL_URL || 'http://bridge:8081') + '/health';
+
+      // Consultar bridge
+      const bridgeHealth = await new Promise(resolve => {
+        const req = http.get(bridgeUrl, { timeout: 3000 }, r => {
+          let body = '';
+          r.on('data', d => body += d);
+          r.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+        });
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => { req.destroy(); resolve(null); });
+      });
+
+      // Relojes desde DB
+      const [dbDevices] = await sequelize.query(
+        'SELECT id, name, ip_address AS ip, port, last_sync_at, last_error FROM devices ORDER BY id ASC'
+      ).catch(() => [[]]);
+
+      // Relojes desde ENV
+      const envStr = process.env.ZKTECO_DEVICES || '';
+      const envDevices = envStr ? envStr.split(',').map((e, i) => {
+        const [ip, port] = e.trim().split(':');
+        return { id: `env_${i}`, name: `Reloj ENV ${i + 1}`, ip, port: parseInt(port || '4370'), source: 'env' };
+      }) : [];
+
+      res.json({
+        bridge: bridgeHealth || { status: 'unreachable', devices: 0 },
+        env_configured: envStr,
+        env_devices: envDevices,
+        db_devices: dbDevices.map(d => ({ ...d, source: 'database' })),
+        mismatch: (bridgeHealth?.devices ?? 0) !== dbDevices.length,
+        auto_poll: process.env.ZKTECO_AUTO_POLL === 'true',
+        poll_interval_ms: parseInt(process.env.ZKTECO_POLL_INTERVAL || '30000'),
+      });
+    } catch (err) {
+      res.json({ bridge: { status: 'error', devices: 0 }, error: err.message });
+    }
+  });
+})();
+
 // Documentación Swagger UI — http://localhost:4000/api/docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
