@@ -112,7 +112,7 @@ export default function CumplimientoPage() {
                 {[2024,2025,2026].map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
-            <button onClick={() => setShowCommModal(true)} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">+ Nueva Comunicación</button>
+            <button onClick={() => setShowCommModal(true)} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">+ Nueva presentación</button>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <table className="w-full text-sm">
@@ -232,7 +232,7 @@ export default function CumplimientoPage() {
       {showCommModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-            <h2 className="text-lg font-bold mb-4">Nueva Comunicación MTESS</h2>
+            <h2 className="text-lg font-bold mb-4">Nueva presentación MTESS / REOP</h2>
             <div className="mb-3">
               <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
               <select value={commForm.communication_type} onChange={e => setCommForm(p=>({...p,communication_type:e.target.value}))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
@@ -258,7 +258,7 @@ export default function CumplimientoPage() {
               <textarea value={commForm.notes} onChange={e => setCommForm(p=>({...p,notes:e.target.value}))} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none"/>
             </div>
             <div className="flex gap-3">
-              <button onClick={saveComm} className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">Registrar</button>
+              <button onClick={saveComm} className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">Registrar envío</button>
               <button onClick={() => setShowCommModal(false)} className="flex-1 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Cancelar</button>
             </div>
           </div>
