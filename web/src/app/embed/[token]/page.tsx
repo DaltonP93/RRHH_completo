@@ -16,13 +16,23 @@ interface EmbedData {
   byDept?: any[]
 }
 
-export default function EmbedPage({ params }: { params: { token: string } }) {
+interface EmbedPageProps {
+  params: Promise<{ token: string }>
+}
+
+export default async function EmbedPage({ params }: EmbedPageProps) {
+  const resolvedParams = await params
+  
+  return <EmbedPageContent token={resolvedParams.token} />
+}
+
+function EmbedPageContent({ token }: { token: string }) {
   const [data, setData] = useState<EmbedData | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function load() {
     try {
-      const r = await fetch(`/api/embed/data/${params.token}`)
+      const r = await fetch(`/api/embed/data/${token}`)
       if (!r.ok) {
         const e = await r.json().catch(() => ({}))
         throw new Error(e.error || 'No se pudo cargar')
@@ -38,8 +48,7 @@ export default function EmbedPage({ params }: { params: { token: string } }) {
     load()
     const t = setInterval(load, 60_000) // refrescar cada minuto
     return () => clearInterval(t)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.token])
+  }, [token])
 
   if (error) {
     return (
