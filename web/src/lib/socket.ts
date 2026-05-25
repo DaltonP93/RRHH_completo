@@ -2,6 +2,18 @@ import { io, Socket } from 'socket.io-client'
 
 let socket: Socket | null = null
 
+/**
+ * Tracks whether the socket has permanently given up after max reconnection
+ * attempts. Once true, callers should rely on HTTP polling fallbacks.
+ */
+let socketFailed = false
+
+/** How many connect_error events have been logged (suppress after the first). */
+let connectErrorCount = 0
+
+/** Whether the socket was ever successfully connected in this session. */
+let wasEverConnected = false
+
 function socketTarget(): string {
   // Prioridad: SOCKET_URL → API_URL normalizado → mismo origin (https en prod tras nginx)
   let raw = (process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || '').trim()
@@ -23,8 +35,20 @@ function getToken(): string | null {
   return localStorage.getItem('access_token') || localStorage.getItem('token') || null
 }
 
+/**
+ * Returns true if the socket permanently failed to connect (max retries exceeded).
+ * When true, the UI should rely on polling-based fallbacks.
+ */
+export function isSocketAvailable(): boolean {
+  return !socketFailed
+}
+
 export function getSocket(): Socket {
   if (!socket) {
+    socketFailed = false
+    connectErrorCount = 0
+    wasEverConnected = false
+
     socket = io(socketTarget(), {
       // auth como función → se evalúa en CADA intento de conexión/reconexión
       // Esto garantiza que el token esté vigente aunque se cree antes del login
@@ -32,30 +56,48 @@ export function getSocket(): Socket {
       transports: ['websocket', 'polling'],
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 3,
       reconnectionDelay: 2000,
-      reconnectionDelayMax: 30000,
+      reconnectionDelayMax: 10000,
     })
 
     socket.on('connect', () => {
-      console.log('🔌 Socket conectado:', socket?.id)
+      console.log('Socket conectado:', socket?.id)
+      socketFailed = false
+      connectErrorCount = 0
+      wasEverConnected = true
     })
 
     socket.on('disconnect', (reason) => {
-      console.log('🔌 Socket desconectado:', reason)
+      // Only log if the socket had previously connected — avoids noise for
+      // environments where WebSocket upgrades are blocked at the proxy level.
+      if (wasEverConnected) {
+        console.warn('Socket desconectado:', reason)
+      }
     })
 
     socket.on('connect_error', (err) => {
-      console.error('❌ Socket error:', err.message)
-      // Si el token es inválido, limpiar el socket para que se recree con token nuevo
-      if (err.message === 'Token inválido' || err.message === 'Token requerido') {
-        console.warn('Socket: token rechazado, se reintentará con token actualizado')
+      connectErrorCount++
+      if (connectErrorCount === 1) {
+        // Log only the first error to avoid spamming the console
+        console.warn('Socket no disponible (modo fallback a polling):', err.message)
       }
+      // Si el token es inválido, advertir una sola vez
+      if (err.message === 'Token inválido' || err.message === 'Token requerido') {
+        if (connectErrorCount === 1) {
+          console.warn('Socket: token rechazado, se reintentará con token actualizado')
+        }
+      }
+    })
+
+    socket.io.on('reconnect_failed', () => {
+      socketFailed = true
+      console.warn('Socket: máximo de reintentos alcanzado. Usando polling como fallback.')
     })
   }
 
-  // Si el socket existe pero está desconectado, reconectar con token actualizado
-  if (socket && !socket.connected) {
+  // Si el socket existe, NO forzar reconexión cuando ya falló permanentemente
+  if (socket && !socket.connected && !socketFailed) {
     socket.auth = (cb: (data: object) => void) => cb({ token: getToken() })
     socket.connect()
   }
@@ -67,11 +109,16 @@ export function getSocket(): Socket {
 export function disconnectSocket() {
   socket?.disconnect()
   socket = null
+  socketFailed = false
+  connectErrorCount = 0
+  wasEverConnected = false
 }
 
 /** Reconectar con token actualizado (usar tras login/refresh de token) */
 export function reconnectSocket() {
   if (socket) {
+    socketFailed = false
+    connectErrorCount = 0
     socket.auth = (cb: (data: object) => void) => cb({ token: getToken() })
     socket.disconnect()
     socket.connect()
