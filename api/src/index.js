@@ -269,6 +269,28 @@ app.use('/api/sync/att2000', att2000SyncRouter);
     } catch { res.json([]); }
   });
 
+  // ── Nómina stubs ──────────────────────────────────────────────────────────
+  app.get('/api/payroll/preavisos', authenticate, (_req, res) => res.json([]));
+  app.get('/api/payroll/bonuses', authenticate, (_req, res) => res.json([]));
+  app.get('/api/payroll/judicial-retentions', authenticate, (_req, res) => res.json([]));
+  app.get('/api/payroll-concepts', authenticate, async (_req, res) => {
+    try {
+      const [rows] = await sequelize.query('SELECT * FROM payroll_concepts ORDER BY code ASC');
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+
+  // ── Personas stubs ────────────────────────────────────────────────────────
+  app.get('/api/employee-contracts', authenticate, (_req, res) => res.json([]));
+  app.get('/api/employee-dependents', authenticate, (_req, res) => res.json([]));
+  app.get('/api/salary-history', authenticate, (_req, res) => res.json([]));
+  app.get('/api/employee-education', authenticate, (_req, res) => res.json([]));
+
+  // ── Bancos stubs ──────────────────────────────────────────────────────────
+  app.get('/api/payment-batches', authenticate, (_req, res) => res.json([]));
+  app.get('/api/employee-bank-accounts', authenticate, (_req, res) => res.json([]));
+  app.get('/api/payment-history', authenticate, (_req, res) => res.json([]));
+
   // /api/zkteco/diagnostics — estado real bridge + relojes desde DB + env
   app.get('/api/zkteco/diagnostics', authenticate, async (_req, res) => {
     try {
