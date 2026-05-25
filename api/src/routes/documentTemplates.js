@@ -54,6 +54,8 @@ router.get('/', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    // Return empty list if table does not exist yet (staging pre-migration)
+    if (err.original?.errno === 1146 || err.parent?.errno === 1146) return res.json([]);
     console.error('[documentTemplates] GET / error:', err);
     res.status(500).json({ error: 'Error al listar plantillas' });
   }
