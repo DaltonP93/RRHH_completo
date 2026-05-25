@@ -40,20 +40,7 @@ router.post('/purge', async (_req, res) => {
   }
 });
 
-// GET /api/backups/:filename — descargar archivo
-router.get('/:filename', async (req, res) => {
-  const f = path.basename(req.params.filename); // evita path traversal
-  if (!/^asistencia_[\w\-]+\.sql\.gz$/.test(f)) return res.status(400).json({ error: 'Nombre inválido' });
-  const fp = path.resolve(BACKUP_DIR, f);
-  // Double-check que el archivo resuelto sigue dentro de BACKUP_DIR
-  if (!fp.startsWith(path.resolve(BACKUP_DIR) + path.sep)) return res.status(400).json({ error: 'Ruta inválida' });
-  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Backup no encontrado' });
-  res.setHeader('Content-Type', 'application/gzip');
-  res.setHeader('Content-Disposition', `attachment; filename="${f}"`);
-  fs.createReadStream(fp).pipe(res);
-});
-
-// ── Backup off-site config ─────────────────────────────────────
+// ── Backup off-site config — MUST be before /:filename wildcard ──────────────
 const OFFSITE_KEYS = [
   'backup_upload_provider',
   'backup_s3_endpoint','backup_s3_bucket','backup_s3_access_key',
@@ -66,11 +53,24 @@ router.get('/offsite-config', async (_req, res) => {
   try {
     const { getUploadConfig } = require('../services/backupUpload');
     const cfg = await getUploadConfig();
-    // Mask secrets
-    if (cfg.s3?.secretKey)   cfg.s3.secretKey   = cfg.s3.secretKey   ? '***' : '';
-    if (cfg.sftp?.password)  cfg.sftp.password  = cfg.sftp.password  ? '***' : '';
-    res.json({ ok: true, ...cfg });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    if (!cfg.provider) return res.json({ ok: true, enabled: false, provider: null, status: 'not_configured' });
+    if (cfg.s3?.secretKey)  cfg.s3.secretKey  = cfg.s3.secretKey  ? '***' : '';
+    if (cfg.sftp?.password) cfg.sftp.password = cfg.sftp.password ? '***' : '';
+    res.json({ ok: true, enabled: true, ...cfg });
+  } catch { res.json({ ok: true, enabled: false, provider: null, status: 'not_configured' }); }
+});
+
+// GET /api/backups/:filename — descargar archivo
+router.get('/:filename', async (req, res) => {
+  const f = path.basename(req.params.filename); // evita path traversal
+  if (!/^asistencia_[\w\-]+\.sql\.gz$/.test(f)) return res.status(400).json({ error: 'Nombre inválido' });
+  const fp = path.resolve(BACKUP_DIR, f);
+  // Double-check que el archivo resuelto sigue dentro de BACKUP_DIR
+  if (!fp.startsWith(path.resolve(BACKUP_DIR) + path.sep)) return res.status(400).json({ error: 'Ruta inválida' });
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Backup no encontrado' });
+  res.setHeader('Content-Type', 'application/gzip');
+  res.setHeader('Content-Disposition', `attachment; filename="${f}"`);
+  fs.createReadStream(fp).pipe(res);
 });
 
 router.put('/offsite-config', async (req, res) => {

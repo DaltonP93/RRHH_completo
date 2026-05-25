@@ -64,8 +64,8 @@ export default function AuditoriaPage() {
         api.get('/api/audit/actions'),
         api.get('/api/audit/entities'),
       ])
-      setEvents(ev.rows || []); setTotal(ev.total || 0)
-      setActions(ac); setEntities(en)
+      setEvents(Array.isArray(ev?.rows) ? ev.rows : []); setTotal(Number(ev?.total) || 0)
+      setActions(Array.isArray(ac) ? ac : []); setEntities(Array.isArray(en) ? en : [])
     } catch (e: any) {
       setError(e.response?.data?.error || e.message)
     } finally { setLoading(false) }
