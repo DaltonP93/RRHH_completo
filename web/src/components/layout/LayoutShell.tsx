@@ -12,7 +12,7 @@ const ViewAsBanner = dynamic(() => import('@/components/layout/ViewAsBanner'), {
 
 const MODULE_MAP: Array<[string[], string]> = [
   [['/asistencia', '/sync', '/permisos', '/aprobaciones'], 'asistencia'],
-  [['/empleados', '/cargos', '/departamentos', '/evaluaciones', '/onboarding'], 'personas'],
+  [['/personas', '/empleados', '/cargos', '/departamentos', '/evaluaciones', '/onboarding'], 'personas'],
   [['/nomina'], 'nomina'],
   [['/bancos', '/pagos'], 'pagos'],
   [['/documentos'], 'documentos'],

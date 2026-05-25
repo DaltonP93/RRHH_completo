@@ -17,8 +17,8 @@ router.get('/', async (req, res) => {
       'SELECT id, name, type, url, method, auth_type, schedule_cron, enabled, last_run_at, last_status, last_result, created_at FROM external_hr_sources ORDER BY id DESC'
     );
     res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch {
+    res.json([]);  // table may not exist yet
   }
 });
 

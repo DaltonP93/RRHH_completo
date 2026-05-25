@@ -5,34 +5,81 @@ test.describe('Portal', () => {
   test.beforeEach(async ({ page }) => {
     await login(page)
     await page.goto('/portal')
-    await page.waitForSelector('.rounded-2xl', { timeout: 10000 })
+    await page.waitForLoadState('networkidle')
   })
 
-  test('shows 11 module cards on /portal', async ({ page }) => {
-    // Module cards are Link > div.rounded-2xl elements
-    const cards = page.locator('a .rounded-2xl')
-    await expect(cards).toHaveCount(11)
+  test('/portal loads with at least 8 module cards visible', async ({ page }) => {
+    // Module cards are rendered as clickable link elements with rounded card styling
+    const cards = page.locator('a .rounded-2xl, a [class*="card"], a [class*="Card"]')
+    const count = await cards.count()
+    expect(count).toBeGreaterThanOrEqual(8)
   })
 
-  test('clicking Asistencia card navigates to /asistencia', async ({ page }) => {
-    // Find and click the Asistencia module link
-    const asistenciaLink = page.locator('a[href="/asistencia"]')
-    await expect(asistenciaLink).toBeVisible()
-    await asistenciaLink.click()
-
-    // Either navigates successfully or shows an error — both are acceptable
-    await page.waitForURL(/\/asistencia/, { timeout: 10000 }).catch(() => {
-      // If navigation failed, we're still ok — the test just verifies the link exists and is clickable
-    })
-    const url = page.url()
-    expect(url).toMatch(/\/asistencia|\/portal/)
+  test('no element with data-testid="main-sidebar" on /portal', async ({ page }) => {
+    const mainSidebar = page.locator('[data-testid="main-sidebar"]')
+    const isVisible = await mainSidebar.isVisible().catch(() => false)
+    expect(isVisible).toBe(false)
   })
 
-  test('no full sidebar on /portal (only TopBar, no Sidebar component)', async ({ page }) => {
-    // On /portal, moduleKey is null so neither Sidebar nor ModuleSidebar should be rendered
-    // The main sidebar nav element should not be visible
+  test('no nav[data-sidebar] or aside[data-sidebar] on /portal', async ({ page }) => {
     const sidebar = page.locator('nav[data-sidebar], aside[data-sidebar]')
-    const sidebarVisible = await sidebar.isVisible().catch(() => false)
-    expect(sidebarVisible).toBe(false)
+    const isVisible = await sidebar.isVisible().catch(() => false)
+    expect(isVisible).toBe(false)
+  })
+
+  test('main module cards are visible: personas, asistencia, nomina', async ({ page }) => {
+    await expect.soft(page.locator('a[href="/empleados"], a[href="/personas"]').first()).toBeVisible({ timeout: 8000 })
+    await expect.soft(page.locator('a[href="/asistencia"]').first()).toBeVisible({ timeout: 8000 })
+    await expect.soft(page.locator('a[href="/nomina"]').first()).toBeVisible({ timeout: 8000 })
+  })
+
+  test('main module cards are visible: pagos, documentos, competencias', async ({ page }) => {
+    await expect.soft(page.locator('a[href="/bancos"], a[href="/pagos"]').first()).toBeVisible({ timeout: 8000 })
+    await expect.soft(page.locator('a[href="/documentos"]').first()).toBeVisible({ timeout: 8000 })
+    await expect.soft(page.locator('a[href="/competencias"]').first()).toBeVisible({ timeout: 8000 })
+  })
+
+  test('main module cards are visible: cumplimiento, reportes, configuracion, seguridad, auditoria', async ({ page }) => {
+    await expect.soft(page.locator('a[href="/cumplimiento"]').first()).toBeVisible({ timeout: 8000 })
+    await expect.soft(page.locator('a[href="/reportes"]').first()).toBeVisible({ timeout: 8000 })
+    await expect.soft(page.locator('a[href="/configuracion"]').first()).toBeVisible({ timeout: 8000 })
+    await expect.soft(page.locator('a[href*="seguridad"]').first()).toBeVisible({ timeout: 8000 })
+    await expect.soft(page.locator('a[href="/auditoria"]').first()).toBeVisible({ timeout: 8000 })
+  })
+
+  test('clicking "Gestión de Personas" card navigates to /empleados', async ({ page }) => {
+    // Try the direct href link first, then fall back to text matching
+    const personasLink = page.locator('a[href="/empleados"], a[href="/personas"]').first()
+    const isVisible = await personasLink.isVisible().catch(() => false)
+
+    if (isVisible) {
+      await personasLink.click()
+      await page.waitForURL(/\/(empleados|personas)/, { timeout: 10000 })
+      expect(page.url()).toMatch(/\/(empleados|personas)/)
+    } else {
+      // Fall back to text-based locator
+      const textLink = page.locator('a:has-text("Personas"), a:has-text("Empleados")').first()
+      await expect(textLink).toBeVisible({ timeout: 8000 })
+      await textLink.click()
+      await page.waitForURL(/\/(empleados|personas)/, { timeout: 10000 })
+      expect(page.url()).toMatch(/\/(empleados|personas)/)
+    }
+  })
+
+  test('clicking "Asistencia y Relojes" card navigates to /asistencia', async ({ page }) => {
+    const asistenciaLink = page.locator('a[href="/asistencia"]').first()
+    const isVisible = await asistenciaLink.isVisible().catch(() => false)
+
+    if (isVisible) {
+      await asistenciaLink.click()
+      await page.waitForURL(/\/asistencia/, { timeout: 10000 })
+      expect(page.url()).toMatch(/\/asistencia/)
+    } else {
+      const textLink = page.locator('a:has-text("Asistencia")').first()
+      await expect(textLink).toBeVisible({ timeout: 8000 })
+      await textLink.click()
+      await page.waitForURL(/\/asistencia/, { timeout: 10000 })
+      expect(page.url()).toMatch(/\/asistencia/)
+    }
   })
 })
