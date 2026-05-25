@@ -2,16 +2,89 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Design Tokens — Enterprise RRHH ─────────────────────── */
 :root {
-  --background: #f8fafc;
+  --background: #f1f5f9;
   --foreground: #0f172a;
+
+  /* Spacing scale (compact ERP) */
+  --space-page: 1.25rem;       /* p-5 — page padding */
+  --space-section: 1rem;       /* gap between sections */
+  --space-card: 0.75rem;       /* inner card padding */
+
+  /* Typography */
+  --font-data: 'JetBrains Mono', 'Fira Mono', ui-monospace, monospace;
+
+  /* Surface elevations */
+  --surface-0: #f1f5f9;        /* page bg */
+  --surface-1: #ffffff;        /* cards */
+  --surface-2: #f8fafc;        /* hover/alt rows */
+
+  /* Borders */
+  --border-subtle: #e2e8f0;    /* slate-200 */
+  --border-strong: #cbd5e1;    /* slate-300 */
+
+  /* Accent */
+  --accent: #1e293b;           /* slate-800 — primary action */
+  --accent-hover: #0f172a;     /* slate-900 */
+  --accent-muted: #64748b;     /* slate-500 — secondary text */
+
+  /* Status colors */
+  --status-ok:       #059669;  /* emerald-600 */
+  --status-warn:     #d97706;  /* amber-600 */
+  --status-error:    #dc2626;  /* red-600 */
+  --status-info:     #2563eb;  /* blue-600 */
+  --status-neutral:  #64748b;  /* slate-500 */
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  /* Evita scroll horizontal en móvil */
   overflow-x: hidden;
+  font-feature-settings: 'tnum' 1; /* tabular numbers for data */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Enterprise utility classes ────────────────────────────── */
+
+/* Compact data table */
+.ent-table th {
+  @apply px-3 py-2.5 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wide bg-slate-50;
+}
+.ent-table td {
+  @apply px-3 py-2.5 text-xs text-slate-700;
+}
+.ent-table tr:hover td {
+  @apply bg-slate-50/60;
+}
+
+/* Page shell padding */
+.ent-page {
+  @apply p-5 max-w-screen-xl;
+}
+
+/* Compact input */
+.ent-input {
+  @apply px-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-white outline-none
+         focus:ring-2 focus:ring-slate-300 placeholder:text-slate-400 transition-shadow;
+}
+
+/* Primary button */
+.ent-btn {
+  @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 text-white text-xs
+         font-medium hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+/* Secondary button */
+.ent-btn-ghost {
+  @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600
+         text-xs font-medium hover:bg-slate-50 transition-colors;
+}
+
+/* Danger button */
+.ent-btn-danger {
+  @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs
+         font-medium hover:bg-red-700 transition-colors;
 }
 
 /* iOS: texto de formularios no hace zoom automático en input focus */
@@ -32,24 +105,65 @@ body {
 ::-webkit-scrollbar-thumb   { background: #cbd5e1; border-radius: 9px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-/* Animación para marcajes en tiempo real */
+/* ─── Micro-animations ──────────────────────────────────────── */
+
 @keyframes slideIn {
-  from { opacity: 0; transform: translateY(-8px); }
+  from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+.slide-in { animation: slideIn 0.2s ease-out; }
 
-.slide-in {
-  animation: slideIn 0.3s ease-out;
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.fade-in { animation: fadeIn 0.25s ease-out; }
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.slide-in-right { animation: slideInRight 0.2s ease-out; }
+
+/* Staggered list items */
+.stagger-in > * {
+  animation: fadeIn 0.2s ease-out both;
+}
+.stagger-in > *:nth-child(1)  { animation-delay: 0ms; }
+.stagger-in > *:nth-child(2)  { animation-delay: 40ms; }
+.stagger-in > *:nth-child(3)  { animation-delay: 80ms; }
+.stagger-in > *:nth-child(4)  { animation-delay: 120ms; }
+.stagger-in > *:nth-child(5)  { animation-delay: 160ms; }
+.stagger-in > *:nth-child(6)  { animation-delay: 200ms; }
+.stagger-in > *:nth-child(7)  { animation-delay: 240ms; }
+.stagger-in > *:nth-child(8)  { animation-delay: 280ms; }
+.stagger-in > *:nth-child(n+9){ animation-delay: 300ms; }
+
+/* Card hover lift */
+.card-lift {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.card-lift:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(15,23,42,0.08);
 }
 
-/* Pulso para indicador de "en vivo" */
+/* Pulse for live indicator */
 @keyframes pulse-live {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
 }
+.pulse-live { animation: pulse-live 1.5s ease-in-out infinite; }
 
-.pulse-live {
-  animation: pulse-live 1.5s ease-in-out infinite;
+/* Skeleton shimmer */
+@keyframes shimmer {
+  from { background-position: -400px 0; }
+  to   { background-position: 400px 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.5s infinite;
 }
 
 /* ─── Accesibilidad WCAG 2.1 AA ─────────────────────────────── */
