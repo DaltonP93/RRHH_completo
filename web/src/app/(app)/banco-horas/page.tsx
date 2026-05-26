@@ -3,9 +3,11 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { PiggyBank, Plus, Minus, RefreshCw, ArrowDownCircle, ArrowUpCircle, Search, X } from 'lucide-react'
+import { PiggyBank, Plus, Minus, RefreshCw, ArrowDownCircle, ArrowUpCircle, Search, X, TrendingUp, TrendingDown } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useCurrentUser } from '@/lib/useCurrentUser'
+import EnterprisePageHeader from '@/components/ui/EnterprisePageHeader'
+import EmptyState from '@/components/ui/EmptyState'
 
 function minsToHM(m: number) {
   const sign = m < 0 ? '-' : ''
@@ -76,28 +78,68 @@ export default function BancoHorasPage() {
     }
   }
 
+  // Compute totals from summary data
+  const summaryData: any[] = summary?.data || []
+  const totalBalance = summaryData.reduce((acc: number, r: any) => acc + (r.balance_minutes || 0), 0)
+  const totalDeposited = summaryData.reduce((acc: number, r: any) => acc + (r.total_deposited || 0), 0)
+  const totalRedeemed = summaryData.reduce((acc: number, r: any) => acc + (r.total_redeemed || 0), 0)
+  const positiveCount = summaryData.filter((r: any) => r.balance_minutes > 0).length
+  const negativeCount = summaryData.filter((r: any) => r.balance_minutes < 0).length
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
-            <PiggyBank className="text-white" size={22} />
+    <div className="p-6 space-y-5 max-w-7xl">
+      <EnterprisePageHeader
+        icon={PiggyBank}
+        iconColor="bg-cyan-600"
+        title="Banco de Horas"
+        subtitle="Acumulación y canje de horas extra por empleado"
+        breadcrumbs={[
+          { label: 'Asistencia', href: '/asistencia' },
+          { label: 'Banco de Horas' },
+        ]}
+        actions={
+          isAdmin ? (
+            <button onClick={() => setShowSync(true)}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+              <RefreshCw size={14} /> Sincronizar
+            </button>
+          ) : undefined
+        }
+      />
+
+      {/* Summary strip */}
+      {summaryData.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
+            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Saldo total</p>
+            <p className={`text-xl font-bold font-mono ${totalBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {minsToHM(totalBalance)}
+            </p>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Banco de horas</h1>
-            <p className="text-sm text-slate-500">Acumulación y canje de horas extra por empleado</p>
+          <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
+            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Acumulado</p>
+            <p className="text-xl font-bold font-mono text-emerald-600">+{minsToHM(totalDeposited)}</p>
+          </div>
+          <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
+            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Canjeado</p>
+            <p className="text-xl font-bold font-mono text-rose-500">{minsToHM(totalRedeemed)}</p>
+          </div>
+          <div className="bg-white rounded-lg border border-slate-200 px-4 py-3">
+            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Empleados</p>
+            <div className="flex items-center gap-3 mt-0.5">
+              <span className="flex items-center gap-1 text-sm font-semibold text-emerald-600">
+                <TrendingUp size={14} /> {positiveCount}
+              </span>
+              <span className="flex items-center gap-1 text-sm font-semibold text-rose-500">
+                <TrendingDown size={14} /> {negativeCount}
+              </span>
+            </div>
           </div>
         </div>
-        {isAdmin && (
-          <button onClick={() => setShowSync(true)}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors">
-            <RefreshCw size={14} /> Sincronizar desde resumen diario
-          </button>
-        )}
-      </div>
+      )}
 
       {/* Lista de saldos */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
           <Search size={16} className="text-slate-400" />
           <input value={search} onChange={e => setSearch(e.target.value)}
@@ -143,7 +185,15 @@ export default function BancoHorasPage() {
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className="text-center py-8 text-slate-400">Sin datos</td></tr>
+                <tr>
+                  <td colSpan={6}>
+                    <EmptyState
+                      icon={PiggyBank}
+                      title="Sin datos en banco de horas"
+                      description={search ? `No se encontraron resultados para "${search}".` : 'No hay empleados con movimientos en el banco de horas.'}
+                    />
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>

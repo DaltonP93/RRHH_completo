@@ -1,103 +1,164 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { RefreshCw, QrCode, ArrowLeft } from 'lucide-react'
+import { QrCode, Copy, Download, RefreshCw, Settings } from 'lucide-react'
 import { api } from '@/lib/api'
+import EnterprisePageHeader from '@/components/ui/EnterprisePageHeader'
+import EmptyState from '@/components/ui/EmptyState'
+
+interface Branch {
+  id: number
+  name: string
+  code?: string
+  address?: string
+}
 
 export default function QRAsistenciaPage() {
-  const [branches, setBranches] = useState<any[]>([])
-  const [branchId, setBranchId] = useState<string>('')
-  const [token, setToken] = useState<string | null>(null)
-  const [expiresAt, setExpiresAt] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [qrDataUrl, setQrDataUrl] = useState<string>('')
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState<number | null>(null)
+  const [regenerating, setRegenerating] = useState<number | null>(null)
 
   useEffect(() => {
-    api.get('/api/branches').then(r => {
-      setBranches(r.data || [])
-      if (r.data?.[0]) setBranchId(String(r.data[0].id))
-    }).catch(() => {})
+    setLoading(true)
+    api.get('/api/branches')
+      .then(r => setBranches(r.data || []))
+      .catch(() => [])
+      .finally(() => setLoading(false))
   }, [])
 
-  async function loadCurrent(bid: string) {
-    if (!bid) return
+  function getQrLink(branch: Branch) {
+    return `${typeof window !== 'undefined' ? window.location.origin : ''}/checkin?branch=${branch.id}`
+  }
+
+  async function copyLink(branch: Branch) {
     try {
-      const r = await api.get(`/api/self-checkin/qr-token/${bid}/current`)
-      setToken(r.data.token)
-      setExpiresAt(r.data.expires_at || null)
+      await navigator.clipboard.writeText(getQrLink(branch))
+      setCopied(branch.id)
+      setTimeout(() => setCopied(null), 2000)
     } catch {}
   }
 
-  async function rotate() {
-    if (!branchId) return
-    setLoading(true)
-    try {
-      const r = await api.post('/api/self-checkin/qr-token', { branch_id: +branchId })
-      setToken(r.data.token)
-      setExpiresAt(r.data.expires_at)
-    } finally { setLoading(false) }
+  function handleRegenerate(branchId: number) {
+    setRegenerating(branchId)
+    // Disabled placeholder — future implementation
+    setTimeout(() => setRegenerating(null), 1200)
   }
 
-  useEffect(() => { loadCurrent(branchId) }, [branchId])
-
-  // Auto-rotación cada 4 min
-  useEffect(() => {
-    if (!branchId) return
-    const id = setInterval(() => rotate(), 4 * 60 * 1000)
-    return () => clearInterval(id)
-  }, [branchId])
-
-  // Generar QR vía API pública (sin dependencia extra)
-  useEffect(() => {
-    if (!token) { setQrDataUrl(''); return }
-    setQrDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(token)}`)
-  }, [token])
-
-  const timeLeft = expiresAt ? Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000)) : 0
-  const [tick, setTick] = useState(0)
-  useEffect(() => { const id = setInterval(() => setTick(t => t + 1), 1000); return () => clearInterval(id) }, [])
-
   return (
-    <div className="p-6 max-w-2xl mx-auto space-y-6">
-      <a href="/configuracion" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700">
-        <ArrowLeft size={16} /> Volver
-      </a>
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">QR de marcación</h1>
-        <p className="text-sm text-slate-500">Genera y muestra el código QR rotativo para que los empleados marquen en esta sede.</p>
+    <div className="p-6 space-y-5 max-w-6xl">
+      <EnterprisePageHeader
+        icon={QrCode}
+        iconColor="bg-indigo-600"
+        title="QR de Asistencia"
+        subtitle="Códigos QR para marcación sin reloj biométrico"
+        breadcrumbs={[
+          { label: 'Configuración', href: '/configuracion' },
+          { label: 'QR Asistencia' },
+        ]}
+      />
+
+      {/* Info banner */}
+      <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
+        <QrCode size={16} className="text-blue-500 mt-0.5 flex-shrink-0" />
+        <p className="text-xs text-blue-700">
+          <strong>Los empleados pueden escanear este QR</strong> para registrar entrada/salida desde su teléfono.
+          Cada sucursal tiene su propio código. Mantén la pantalla abierta en un monitor o tablet en la entrada.
+        </p>
       </div>
 
-      <div className="flex items-center gap-2">
-        <select value={branchId} onChange={e => setBranchId(e.target.value)}
-          className="border border-slate-200 rounded-xl px-3 py-2 text-sm flex-1">
-          <option value="">Selecciona sede...</option>
-          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
-        <button onClick={rotate} disabled={loading || !branchId}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-4 py-2 text-sm flex items-center gap-2 disabled:opacity-50">
-          <RefreshCw size={16} /> Rotar ahora
-        </button>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow border border-slate-100 p-6 flex flex-col items-center gap-4">
-        {qrDataUrl ? (
-          <img src={qrDataUrl} alt="QR de marcación" className="w-80 h-80" />
-        ) : (
-          <div className="w-80 h-80 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400">
-            <QrCode size={64} />
-          </div>
-        )}
-        {token && (
-          <>
-            <div className="text-xs text-slate-500 font-mono break-all text-center">{token}</div>
-            <div className="text-sm text-slate-600">
-              Expira en: <strong>{Math.floor((timeLeft - tick % 60) / 60)}:{String(Math.max(0, timeLeft - tick) % 60).padStart(2, '0')}</strong>
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-white rounded-lg border border-slate-200 p-5 animate-pulse">
+              <div className="h-4 bg-slate-100 rounded w-2/3 mb-3" />
+              <div className="w-full aspect-square bg-slate-100 rounded-lg mb-3" />
+              <div className="h-3 bg-slate-100 rounded w-1/2" />
             </div>
-          </>
-        )}
-      </div>
+          ))}
+        </div>
+      ) : branches.length === 0 ? (
+        <div className="bg-white rounded-lg border border-slate-200">
+          <EmptyState
+            icon={QrCode}
+            title="Sin sucursales configuradas"
+            description="Configura al menos una sucursal para generar los códigos QR de marcación."
+            action={{ label: 'Ir a configuración', onClick: () => window.location.href = '/configuracion' }}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {branches.map(branch => (
+            <div key={branch.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden flex flex-col">
+              {/* Card header */}
+              <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{branch.name}</p>
+                  {branch.code && (
+                    <p className="text-xs text-slate-400 font-mono">{branch.code}</p>
+                  )}
+                  {branch.address && (
+                    <p className="text-xs text-slate-400 truncate max-w-[180px]">{branch.address}</p>
+                  )}
+                </div>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-medium ring-1 ring-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  Activo
+                </span>
+              </div>
 
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
-        <strong>Tip:</strong> mantén esta pantalla abierta en un monitor/tablet en la entrada de la sede. El QR rota automáticamente cada 4 minutos.
+              {/* QR placeholder */}
+              <div className="p-5 flex flex-col items-center gap-3 flex-1">
+                <div className="w-full aspect-square max-w-[200px] bg-slate-50 border-2 border-dashed border-slate-200 rounded-lg flex flex-col items-center justify-center gap-2 text-slate-400">
+                  <QrCode size={48} />
+                  <span className="text-xs">Sucursal #{branch.id}</span>
+                </div>
+
+                <p className="text-[11px] text-slate-400 text-center font-mono truncate w-full px-1">
+                  /checkin?branch={branch.id}
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="px-4 pb-4 grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => copyLink(branch)}
+                  className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors text-slate-600 text-xs"
+                >
+                  <Copy size={14} />
+                  {copied === branch.id ? 'Copiado' : 'Copiar'}
+                </button>
+
+                <button
+                  disabled
+                  title="Próximamente"
+                  className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg border border-slate-100 text-slate-300 text-xs cursor-not-allowed"
+                >
+                  <Download size={14} />
+                  Descargar
+                </button>
+
+                <button
+                  onClick={() => handleRegenerate(branch.id)}
+                  disabled={regenerating === branch.id}
+                  title="Próximamente"
+                  className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg border border-slate-100 text-slate-300 text-xs cursor-not-allowed"
+                >
+                  <RefreshCw size={14} className={regenerating === branch.id ? 'animate-spin' : ''} />
+                  Regenerar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Footer note */}
+      <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3">
+        <Settings size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+        <p className="text-xs text-amber-700">
+          <strong>Tip:</strong> mantén esta pantalla abierta en un monitor/tablet en la entrada de la sede.
+          Las funciones de descarga y regeneración de QR estarán disponibles en la próxima versión.
+        </p>
       </div>
     </div>
   )
