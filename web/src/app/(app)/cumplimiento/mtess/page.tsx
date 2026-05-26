@@ -49,12 +49,8 @@ const TYPES_LEGEND = [
   { code: 'AMONESTACION', label: 'Amonestación', desc: 'Sanción disciplinaria' },
 ]
 
-function getStatus(item: MtessRecord): string {
-  return item.status ?? item.estado ?? 'pending'
-}
-function getTipo(item: MtessRecord): string {
-  return item.communication_type ?? item.tipo ?? '—'
-}
+function getStatus(item: MtessRecord): string { return item.status ?? item.estado ?? 'pending' }
+function getTipo(item: MtessRecord): string { return item.communication_type ?? item.tipo ?? '—' }
 function getPeriodo(item: MtessRecord): string {
   if (item.periodo) return item.periodo
   if (item.period_year) return `${item.period_month ?? ''}/${item.period_year}`
@@ -97,10 +93,7 @@ export default function MtessPage() {
   }
 
   async function updateStatus(id: number, newStatus: string) {
-    try {
-      await api.put(`/api/compliance/mtess/${id}`, { status: newStatus })
-      load()
-    } catch {}
+    try { await api.put(`/api/compliance/mtess/${id}`, { status: newStatus }); load() } catch {}
   }
 
   async function savePresentation() {
@@ -143,12 +136,7 @@ export default function MtessPage() {
         <Info size={14} className="mt-0.5 flex-shrink-0 text-blue-500" />
         <span>
           <strong>Flujo de presentación MTESS:</strong>{' '}
-          <span className="inline-flex items-center gap-1">
-            <StatusBadge status="pending" /> →{' '}
-            <StatusBadge status="generated" /> →{' '}
-            <StatusBadge status="submitted" /> →{' '}
-            <StatusBadge status="accepted" /> / <StatusBadge status="rejected" />
-          </span>
+          pendiente → generado → enviado → aceptado / rechazado
         </span>
       </div>
 

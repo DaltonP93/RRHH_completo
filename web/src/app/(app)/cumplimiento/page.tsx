@@ -26,52 +26,16 @@ interface KPIs {
 const PRESENTATION_TYPE_LABELS: Record<string, string> = {
   ALTA: 'Alta Personal', BAJA: 'Baja Personal', VACACIONES: 'Vacaciones',
   PERMISO: 'Permiso', SUSPENSION: 'Suspensión', ACCIDENTE: 'Accidente Laboral',
-  LIQUIDACION: 'Liquidación', AGUINALDO: 'Aguinaldo', PLANILLA_ANUAL: 'Planilla Anual', AMONESTACION: 'Amonestación'
+  LIQUIDACION: 'Liquidación', AGUINALDO: 'Aguinaldo', PLANILLA_ANUAL: 'Planilla Anual', AMONESTACION: 'Amonestación',
 }
 
 const QUICK_ACCESS = [
-  {
-    icon: FileText,
-    iconColor: 'bg-blue-600',
-    title: 'MTESS / REOP',
-    description: 'Presentaciones electrónicas al Ministerio de Trabajo, Empleo y Seguridad Social',
-    href: '/cumplimiento/mtess',
-  },
-  {
-    icon: Shield,
-    iconColor: 'bg-teal-600',
-    title: 'IPS / REI',
-    description: 'Registro de empleados en IPS y gestión de aportes patronales y personales',
-    href: '/cumplimiento/ips',
-  },
-  {
-    icon: Scale,
-    iconColor: 'bg-purple-600',
-    title: 'Planillas Laborales',
-    description: 'Planillas anuales de empleados, sueldos y jornales ante el MTESS',
-    href: '/cumplimiento/mtess',
-  },
-  {
-    icon: Calendar,
-    iconColor: 'bg-amber-600',
-    title: 'Vencimientos',
-    description: 'Calendario de fechas límite de obligaciones MTESS e IPS',
-    href: '/cumplimiento/vencimientos',
-  },
-  {
-    icon: UserPlus,
-    iconColor: 'bg-emerald-600',
-    title: 'Altas / Bajas',
-    description: 'Gestión de comunicaciones de altas y bajas de personal ante MTESS e IPS',
-    href: '/cumplimiento/mtess',
-  },
-  {
-    icon: Upload,
-    iconColor: 'bg-slate-600',
-    title: 'Exportaciones',
-    description: 'Generación de archivos para presentación ante organismos reguladores',
-    href: '/cumplimiento/mtess',
-  },
+  { icon: FileText, iconColor: 'bg-blue-600', title: 'MTESS / REOP', description: 'Presentaciones electrónicas al Ministerio de Trabajo, Empleo y Seguridad Social', href: '/cumplimiento/mtess' },
+  { icon: Shield, iconColor: 'bg-teal-600', title: 'IPS / REI', description: 'Registro de empleados en IPS y gestión de aportes patronales y personales', href: '/cumplimiento/ips' },
+  { icon: Scale, iconColor: 'bg-purple-600', title: 'Planillas Laborales', description: 'Planillas anuales de empleados, sueldos y jornales ante el MTESS', href: '/cumplimiento/mtess' },
+  { icon: Calendar, iconColor: 'bg-amber-600', title: 'Vencimientos', description: 'Calendario de fechas límite de obligaciones MTESS e IPS', href: '/cumplimiento/vencimientos' },
+  { icon: UserPlus, iconColor: 'bg-emerald-600', title: 'Altas / Bajas', description: 'Gestión de altas y bajas de personal ante MTESS e IPS', href: '/cumplimiento/mtess' },
+  { icon: Upload, iconColor: 'bg-slate-600', title: 'Exportaciones', description: 'Generación de archivos para presentación ante organismos reguladores', href: '/cumplimiento/mtess' },
 ]
 
 export default function CumplimientoPage() {
@@ -88,17 +52,17 @@ export default function CumplimientoPage() {
       }).catch(() => [] as Presentation[]),
       api.get('/api/compliance/status').then(r => r.data).catch(() => null),
     ]).then(([pres, status]) => {
-      setPresentations(pres as Presentation[])
+      const p = pres as Presentation[]
+      setPresentations(p)
       if (status) {
         setKpis({
-          presentaciones_pendientes: status.presentaciones_pendientes ?? (pres as Presentation[]).filter((p: Presentation) => p.estado === 'pending').length,
+          presentaciones_pendientes: status.presentaciones_pendientes ?? p.filter((x: Presentation) => x.estado === 'pending').length,
           vencimientos_mes: status.vencimientos_mes ?? 0,
           alertas_activas: status.alertas_activas ?? 0,
           empleados_ips: status.empleados_ips ?? 0,
         })
       } else {
-        const pending = (pres as Presentation[]).filter((p: Presentation) => p.estado === 'pending').length
-        setKpis(k => ({ ...k, presentaciones_pendientes: pending }))
+        setKpis(k => ({ ...k, presentaciones_pendientes: p.filter((x: Presentation) => x.estado === 'pending').length }))
       }
     }).finally(() => setLoading(false))
   }, [])
@@ -126,7 +90,7 @@ export default function CumplimientoPage() {
           const Icon = card.icon
           return (
             <div key={card.label} className={`rounded-xl border ring-1 ${card.ring} ${card.bg} px-5 py-4 flex items-center gap-4`}>
-              <div className={`w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 shadow-sm`}>
+              <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0 shadow-sm">
                 <Icon size={18} className={card.color} />
               </div>
               <div>
@@ -146,7 +110,7 @@ export default function CumplimientoPage() {
             const Icon = card.icon
             return (
               <Link
-                key={card.href + card.title}
+                key={card.title}
                 href={card.href}
                 className="group bg-white border border-slate-100 hover:border-slate-300 rounded-xl p-5 flex items-start gap-4 transition-all hover:shadow-sm"
               >
@@ -203,9 +167,7 @@ export default function CumplimientoPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-600">{item.periodo ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={item.estado} />
-                    </td>
+                    <td className="px-4 py-3"><StatusBadge status={item.estado} /></td>
                     <td className="px-4 py-3 text-slate-500 text-xs">
                       {item.fecha_envio ? new Date(item.fecha_envio).toLocaleDateString('es-PY') : '—'}
                     </td>
