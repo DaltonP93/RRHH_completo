@@ -40,7 +40,11 @@ router.get('/templates', async (req, res) => {
       ORDER BY t.created_at DESC
     `);
     res.json({ ok: true, data: rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json({ ok: true, data: [] });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.get('/templates/:id', async (req, res) => {
@@ -140,8 +144,9 @@ router.get('/', authorize(...MGR_ROLES), async (req, res) => {
     );
     res.json({ ok: true, data: rows, total, limit: parseInt(limit), offset: parseInt(offset) });
   } catch (err) {
-    // Table not yet created (pre-migration staging) — return empty list
-    if (err.original?.errno === 1146 || err.parent?.errno === 1146) {
+    // Table missing (1146) or column missing (1054) — pre-migration staging
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) {
       return res.json({ ok: true, data: [], total: 0, limit: parseInt(req.query.limit || 50), offset: 0 });
     }
     res.status(500).json({ error: err.message });

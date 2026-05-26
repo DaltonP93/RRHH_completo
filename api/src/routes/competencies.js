@@ -56,7 +56,8 @@ router.get('/competency-categories', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    if (err.original?.errno === 1146 || err.parent?.errno === 1146) return res.json([]);
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('[competencies] GET /competency-categories error:', err);
     res.status(500).json({ error: 'Error al listar categorías' });
   }
@@ -127,7 +128,8 @@ router.get('/competencies', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    if (err.original?.errno === 1146 || err.parent?.errno === 1146) return res.json([]);
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('[competencies] GET /competencies error:', err);
     res.status(500).json({ error: 'Error al listar competencias' });
   }
@@ -213,7 +215,8 @@ router.get('/competency-levels', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    if (err.original?.errno === 1146 || err.parent?.errno === 1146) return res.json([]);
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('[competencies] GET /competency-levels error:', err);
     res.status(500).json({ error: 'Error al listar niveles' });
   }
@@ -351,7 +354,8 @@ router.get('/performance-cycles', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    if (err.original?.errno === 1146 || err.parent?.errno === 1146) return res.json([]);
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('[competencies] GET /performance-cycles error:', err);
     res.status(500).json({ error: 'Error al listar ciclos' });
   }
