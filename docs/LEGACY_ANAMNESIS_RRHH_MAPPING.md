@@ -8,6 +8,41 @@ El sistema legacy ANAMNESIS gestiona recursos humanos en Paraguay con enfoque en
 
 ---
 
+## Mapeo detallado — pantallas legacy pendientes
+
+| Pantalla legacy | Módulo destino | Ruta destino | Estado | Prioridad | Observación funcional |
+|---|---|---|---|---|---|
+| Preaviso | Nómina/Preavisos | `/nomina/preavisos` | implementado | alta | Desvinculaciones con preaviso legal, genera liquidación parcial |
+| Premio | Nómina/Premios | `/nomina/premios` | implementado | alta | Bonificaciones y premios por desempeño |
+| Retención Judicial | Nómina/Retenciones | `/nomina/retenciones` | implementado | alta | Embargos judiciales sobre salario |
+| Anticipo | Nómina/Anticipos | `/nomina/anticipos` | implementado | alta | Anticipos de salario del periodo |
+| Período Laboral | Personas/Contratos | `/personas/contratos` | parcial | alta | Período vigente del contrato de trabajo; falta vista de vigencia activa |
+| Tipo Egreso | Nómina/Liquidación Salida | `/nomina/liquidacion-salida` | parcial | alta | Tipos de egreso (renuncia, despido, mutuo acuerdo); catálogo pendiente |
+| Tipo Nómina | Nómina/Tipos de Nómina | `/nomina/tipos-nomina` | implementado | media | Clasifica los tipos de liquidación (mensual, quincenal, eventual) |
+| Tipo Permiso | Asistencia/Permisos | `/permisos` | parcial | media | Catálogo de tipos de permisos (licencia, médico, personal); falta tabla de catálogo |
+| Tipo Preaviso | Nómina/Preavisos | `/nomina/preavisos` | pendiente | media | Catálogo de tipos de preaviso según contrato; pendiente implementar catálogo |
+| Tipo Premio | Nómina/Premios | `/nomina/premios` | pendiente | media | Catálogo de tipos de premio; pendiente implementar catálogo |
+| Tipo Vacación | Nómina/Vacaciones | `/vacaciones` | parcial | alta | Tipos de vacación (ordinaria, proporcional); ruta /vacaciones aún pendiente |
+| Título Personal | Personas/Formación | `/personas/formacion` | implementado | media | Títulos académicos registrados por el empleado |
+| Título Curriculum | Personas/Formación | `/personas/formacion` | implementado | media | Títulos declarados en CV; unificado con Título Personal |
+| Título RRHH | Personas/Formación | `/personas/formacion` | implementado | media | Validación RRHH del título académico |
+| Institución Educativa | Personas/Formación | `/personas/formacion` | pendiente | baja | Catálogo de instituciones educativas; pendiente tabla de catálogo |
+| Tipo Retención Judicial | Nómina/Retenciones | `/nomina/retenciones` | pendiente | media | Catálogo de tipos de retención (embargo, pensión alimenticia); pendiente catálogo |
+| Tipo Familia | Personas/Familiares | `/personas/familiares` | implementado | media | Tipos de familiar (cónyuge, hijo, padre, etc.) |
+| Tipo de Liquidación | Nómina/Liquidaciones | `/nomina/liquidaciones` | implementado | alta | Tipos de liquidación mensual, especial, salida |
+| Histórico de Salarios | Personas/Histórico Salarial | `/personas/historico-salarial` | implementado | alta | Evolución salarial del empleado |
+| Parámetro Preaviso | Nómina/Parámetros | `/nomina/parametros` | parcial | media | Parámetros legales del preaviso según años de servicio; falta configuración detallada |
+| Cargo | Cargos | `/cargos` | implementado | alta | Estructura jerárquica de cargos y niveles |
+| Parámetros Mensuales | Nómina/Parámetros | `/nomina/parametros` | implementado | alta | Salario mínimo, tasas IPS, tasas aguinaldo del mes |
+| Grupo Conceptos | Nómina/Conceptos | `/nomina/conceptos` | parcial | alta | Agrupadores de conceptos salariales; falta vista de grupos |
+| Liquidación Salario | Nómina/Liquidaciones | `/nomina/liquidaciones` | implementado | alta | Proceso mensual de liquidación de salarios |
+| Aguinaldo | Nómina/Aguinaldo | `/nomina/aguinaldo` | implementado | alta | Cálculo y proceso de aguinaldo (1/12 salario anual) |
+| Liquidación Salida | Nómina/Liquidación Salida | `/nomina/liquidacion-salida` | implementado | alta | Liquidación final al egreso del empleado |
+| Conceptos Fijos | Nómina/Conceptos Fijos | `/nomina/conceptos-fijos` | implementado | alta | Conceptos aplicados automáticamente cada período |
+| Vacaciones | Nómina/Vacaciones | `/vacaciones` | pendiente | alta | Cálculo de vacaciones proporcionales art.219 Código del Trabajo PY; ruta pendiente |
+
+---
+
 ## Tabla de mapeo principal
 
 | Módulo legacy (ANAMNESIS) | Módulo nuevo | Ruta nueva | Estado |

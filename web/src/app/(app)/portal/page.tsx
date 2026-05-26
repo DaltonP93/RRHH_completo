@@ -370,22 +370,121 @@ function AlertStrip({ alerts }: { alerts: { type: 'warning' | 'info'; text: stri
   )
 }
 
+// ─── ZKTeco panel ────────────────────────────────────────────────────────────
+
+interface ZKDevice { ip: string; online?: boolean; name?: string }
+
+function ZKTecoPanel() {
+  const [devices, setDevices] = useState<ZKDevice[]>([])
+  const [loaded, setLoaded]   = useState(false)
+
+  useEffect(() => {
+    api.get('/api/bridge/devices')
+      .then(res => {
+        const d = res.data
+        const list: ZKDevice[] = Array.isArray(d)
+          ? d
+          : Array.isArray(d?.devices)
+            ? d.devices
+            : d?.count != null
+              ? Array.from({ length: d.count }, (_, i) => ({ ip: `reloj-${i + 1}`, online: true }))
+              : []
+        setDevices(list)
+      })
+      .catch(() => setDevices([]))
+      .finally(() => setLoaded(true))
+  }, [])
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="px-3 py-2.5 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Radio size={12} className="text-emerald-500" />
+          <span className="text-xs font-semibold text-slate-700">Relojes ZKTeco</span>
+        </div>
+        <Link href="/asistencia/relojes/diagnostico" className="text-[10px] text-blue-600 hover:underline">
+          Diagnóstico
+        </Link>
+      </div>
+      {!loaded ? (
+        <div className="px-3 py-4 text-[11px] text-slate-400">Consultando...</div>
+      ) : devices.length === 0 ? (
+        <div className="px-3 py-4 text-[11px] text-slate-400 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-red-400" />
+          Sin dispositivos detectados
+        </div>
+      ) : (
+        <ul className="divide-y divide-slate-50">
+          {devices.map((d, i) => (
+            <li key={i} className="flex items-center gap-2 px-3 py-2">
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                d.online === false ? 'bg-red-400' : 'bg-emerald-400'
+              }`} />
+              <span className="text-[11px] text-slate-700 font-mono truncate">{d.ip}</span>
+              {d.name && <span className="text-[10px] text-slate-400 ml-auto truncate">{d.name}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 // ─── System status bar ────────────────────────────────────────────────────────
 
+interface SystemStatusState {
+  api:     'ok' | 'error' | 'loading'
+  db:      'ok' | 'error' | 'loading'
+  devices: number | null
+}
+
 function SystemStatus() {
-  const items = [
-    { label: 'API', ok: true },
-    { label: 'Relojes', ok: true },
-    { label: 'BD', ok: true },
-  ]
+  const [status, setStatus] = useState<SystemStatusState>({ api: 'loading', db: 'loading', devices: null })
+
+  useEffect(() => {
+    api.get('/api/health')
+      .then(res => {
+        const h = res.data
+        setStatus(prev => ({
+          ...prev,
+          api: h?.status === 'ok' || h?.api === 'ok' ? 'ok' : 'error',
+          db:  h?.db    === 'ok' || h?.database === 'ok' || h?.mysql === 'ok' ? 'ok' : (h?.status === 'ok' ? 'ok' : 'error'),
+        }))
+      })
+      .catch(() => setStatus(prev => ({ ...prev, api: 'error', db: 'error' })))
+
+    api.get('/api/bridge/devices')
+      .then(res => {
+        const d = res.data
+        const count = Array.isArray(d) ? d.length : (d?.count ?? d?.devices ?? null)
+        setStatus(prev => ({ ...prev, devices: typeof count === 'number' ? count : null }))
+      })
+      .catch(() => setStatus(prev => ({ ...prev, devices: null })))
+  }, [])
+
+  const dot = (s: 'ok' | 'error' | 'loading') =>
+    s === 'ok' ? 'bg-emerald-400' : s === 'error' ? 'bg-red-400' : 'bg-amber-300 animate-pulse'
+
   return (
     <div className="flex items-center gap-3">
-      {items.map(item => (
+      {[
+        { label: 'API',     ok: status.api },
+        { label: 'BD',      ok: status.db  },
+      ].map(item => (
         <div key={item.label} className="flex items-center gap-1">
-          <span className={`w-1.5 h-1.5 rounded-full ${item.ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+          <span className={`w-1.5 h-1.5 rounded-full ${dot(item.ok as 'ok' | 'error' | 'loading')}`} />
           <span className="text-[10px] text-slate-400">{item.label}</span>
         </div>
       ))}
+      <div className="flex items-center gap-1">
+        <span className={`w-1.5 h-1.5 rounded-full ${
+          status.devices === null ? 'bg-amber-300 animate-pulse' :
+          status.devices > 0 ? 'bg-emerald-400' : 'bg-red-400'
+        }`} />
+        <span className="text-[10px] text-slate-400">
+          Relojes{status.devices !== null ? ` (${status.devices})` : ''}
+        </span>
+      </div>
     </div>
   )
 }
@@ -591,6 +690,9 @@ export default function PortalPage() {
           <AlertStrip alerts={[
             { type: 'info', text: 'Presentaciones MTESS: revise vencimientos del mes' },
           ]} />
+
+          {/* ZKTeco device status */}
+          <ZKTecoPanel />
 
           {/* Compliance calendar preview */}
           <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
