@@ -24,6 +24,17 @@ const { sequelize } = require('../config/database');
 
 router.use(authenticate);
 
+// GET / — resumen de cumplimiento (usado cuando el router está montado en /api/compliance)
+router.get('/', async (_req, res) => {
+  try {
+    const [[mc]] = await sequelize.query('SELECT COUNT(*) AS total FROM mtess_communications');
+    const [[ir]] = await sequelize.query('SELECT COUNT(*) AS total FROM ips_rei_records');
+    res.json({ ok: true, mtess_total: mc?.total || 0, ips_total: ir?.total || 0 });
+  } catch {
+    res.json({ ok: true, mtess_total: 0, ips_total: 0 });
+  }
+});
+
 // ─── MTESS Communications ────────────────────────────────────────────────────
 
 // GET /api/compliance/mtess — list with filters
