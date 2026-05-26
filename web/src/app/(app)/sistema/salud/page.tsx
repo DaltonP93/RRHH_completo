@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { Activity, CheckCircle2, XCircle, RefreshCw, Server, Database, Network, Cpu, HardDrive, Clock, Layers } from 'lucide-react'
+import { Activity, CheckCircle2, XCircle, RefreshCw, Server, Database, Network, Cpu, HardDrive, Clock, Layers, AlertTriangle } from 'lucide-react'
 import { api } from '@/lib/api'
 import BackButton from '@/components/BackButton'
 
@@ -16,6 +16,13 @@ interface FullHealth {
   status: string; environment: string; timestamp: string; timezone: string | null
   checks: Record<string, Check>
   disk_gb: { total: number; free: number; used_pct: number } | null
+}
+interface ZKDiag {
+  bridge: { status: string; devices: number }
+  db_devices: { id: number; name: string; ip: string }[]
+  env_devices: { id: string; name: string; ip: string }[]
+  mismatch: boolean
+  auto_poll: boolean
 }
 
 const CHECK_ICONS: Record<string, any> = {
@@ -48,13 +55,29 @@ function fmtUptime(s: number) {
   return [d && `${d}d`, h && `${h}h`, m && `${m}m`].filter(Boolean).join(' ') || '<1m'
 }
 
-function CheckCard({ name, check }: { name: string; check: Check }) {
+function CheckCard({ name, check, zkDiag }: { name: string; check: Check; zkDiag?: ZKDiag | null }) {
   const Icon = CHECK_ICONS[name] || Server
   const label = CHECK_LABELS[name] || name
+
+  // Para el check de bridge: si /api/zkteco/diagnostics confirma que los relojes
+  // están disponibles, el estado real es OK aunque el health endpoint diga FAIL
+  // (esto sucede cuando bridge responde por ENV pero no por container DNS interno).
+  let effectiveOk = check.ok
+  let zkWarnings: string[] = []
+
+  if (name === 'bridge' && zkDiag) {
+    const totalDevices = (zkDiag.db_devices?.length || 0) + (zkDiag.env_devices?.length || 0)
+    const bridgeOk = zkDiag.bridge?.status === 'ok' || zkDiag.bridge?.devices > 0 || totalDevices > 0
+    if (bridgeOk) effectiveOk = true
+    if (zkDiag.db_devices?.length === 0) zkWarnings.push('Relojes solo por ENV (no en BD)')
+    if (zkDiag.mismatch)                 zkWarnings.push('Mismatch: relojes ENV ≠ BD')
+    if (!zkDiag.auto_poll)               zkWarnings.push('Auto-poll desactivado')
+  }
+
   return (
-    <div className={`bg-white rounded-2xl border shadow p-4 ${check.ok ? 'border-slate-100' : 'border-red-200'}`}>
+    <div className={`bg-white rounded-2xl border shadow p-4 ${effectiveOk ? 'border-slate-100' : 'border-red-200'}`}>
       <div className="flex items-center gap-3">
-        <Icon className={check.ok ? 'text-slate-400' : 'text-red-400'} size={20} />
+        <Icon className={effectiveOk ? 'text-slate-400' : 'text-red-400'} size={20} />
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-slate-900 text-sm">{label}</div>
           <div className="text-xs text-slate-500 truncate">
@@ -62,13 +85,33 @@ function CheckCard({ name, check }: { name: string; check: Check }) {
             {check.tz && ` ${check.tz}`}
             {check.table_count != null && ` ${check.table_count} tablas`}
             {check.path && ` ${check.path}`}
+            {name === 'bridge' && zkDiag && (
+              ` ${(zkDiag.db_devices?.length || 0) + (zkDiag.env_devices?.length || 0)} relojes detectados`
+            )}
           </div>
         </div>
-        {check.ok
+        {effectiveOk
           ? <span className="flex-shrink-0 px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">OK</span>
           : <span className="flex-shrink-0 px-2 py-1 rounded bg-red-100 text-red-800 text-xs font-medium">FAIL</span>}
       </div>
-      {check.error && <div className="mt-2 text-xs text-red-700 break-all">{check.error}</div>}
+      {!check.ok && check.error && effectiveOk && (
+        <div className="mt-2 text-xs text-amber-700 break-all bg-amber-50 rounded px-2 py-1">
+          Nota: {check.error}
+        </div>
+      )}
+      {!check.ok && check.error && !effectiveOk && (
+        <div className="mt-2 text-xs text-red-700 break-all">{check.error}</div>
+      )}
+      {zkWarnings.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {zkWarnings.map((w, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">
+              <AlertTriangle size={11} className="flex-shrink-0" />
+              {w}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -76,20 +119,23 @@ function CheckCard({ name, check }: { name: string; check: Check }) {
 export default function HealthPage() {
   const [detailed, setDetailed]   = useState<Detailed | null>(null)
   const [full, setFull]           = useState<FullHealth | null>(null)
+  const [zkDiag, setZkDiag]       = useState<ZKDiag | null>(null)
   const [loading, setLoading]     = useState(true)
   const [err, setErr]             = useState<string | null>(null)
 
   async function load() {
     setLoading(true); setErr(null)
     try {
-      const [det, ful] = await Promise.allSettled([
+      const [det, ful, zk] = await Promise.allSettled([
         api.get('/api/health/detailed'),
         api.get('/api/health/full'),
+        api.get('/api/zkteco/diagnostics'),
       ])
       if (det.status === 'fulfilled') setDetailed(det.value.data)
       else if ((det as any).reason?.response?.data) setDetailed((det as any).reason.response.data)
       if (ful.status === 'fulfilled') setFull(ful.value.data)
       else if ((ful as any).reason?.response?.data) setFull((ful as any).reason.response.data)
+      if (zk.status === 'fulfilled') setZkDiag(zk.value.data)
       if (det.status === 'rejected' && ful.status === 'rejected')
         setErr('No se pudo contactar con la API')
     } catch (e: any) {
@@ -103,7 +149,6 @@ export default function HealthPage() {
     return () => clearInterval(t)
   }, [])
 
-  const coreOk = detailed?.status === 'ok' || full?.status === 'ok'
   const overallStatus = detailed?.status || full?.status || 'unknown'
 
   return (
@@ -161,7 +206,7 @@ export default function HealthPage() {
           <h2 className="text-sm font-semibold text-slate-500 uppercase mb-3">Dependencias principales</h2>
           <div className="grid md:grid-cols-2 gap-4">
             {(Object.entries(detailed.checks) as [string, Check][]).map(([k, c]) => (
-              <CheckCard key={k} name={k} check={c} />
+              <CheckCard key={k} name={k} check={c} zkDiag={k === 'bridge' ? zkDiag : null} />
             ))}
           </div>
         </section>
@@ -177,7 +222,7 @@ export default function HealthPage() {
           <section>
             <h2 className="text-sm font-semibold text-slate-500 uppercase mb-3">Subsistemas adicionales</h2>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {extra.map(([k, c]) => <CheckCard key={k} name={k} check={c} />)}
+              {extra.map(([k, c]) => <CheckCard key={k} name={k} check={c} zkDiag={k === 'bridge' ? zkDiag : null} />)}
             </div>
           </section>
         )
@@ -232,3 +277,4 @@ export default function HealthPage() {
     </div>
   )
 }
+
