@@ -10,11 +10,6 @@ interface Params {
   salario_vigente_desde?: string
   ips_empleado?: number
   ips_patronal?: number
-  aguinaldo_tasa?: string
-  aguinaldo_periodo?: string
-  preaviso_menos1?: string
-  preaviso_1a5?: string
-  preaviso_mas5?: string
   [key: string]: unknown
 }
 
@@ -76,11 +71,11 @@ export default function ParametrosPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  const smd    = params.salario_minimo_diario   ?? 65283
-  const smm    = params.salario_minimo_mensual  ?? 2550307
-  const vDesde = params.salario_vigente_desde   ?? '2025-01-01'
-  const ipsEmp = params.ips_empleado            ?? 9
-  const ipsPat = params.ips_patronal            ?? 16.5
+  const smd    = (params.salario_minimo_diario  as number | undefined) ?? 65283
+  const smm    = (params.salario_minimo_mensual as number | undefined) ?? 2550307
+  const vDesde = (params.salario_vigente_desde  as string | undefined) ?? '2025-01-01'
+  const ipsEmp = (params.ips_empleado           as number | undefined) ?? 9
+  const ipsPat = (params.ips_patronal           as number | undefined) ?? 16.5
 
   return (
     <div className="p-6 space-y-5">
@@ -105,7 +100,6 @@ export default function ParametrosPage() {
         }
       />
 
-      {/* Active period strip */}
       <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
         <Calendar size={14} className="text-slate-500" />
         <span className="text-xs text-slate-600">
@@ -117,31 +111,27 @@ export default function ParametrosPage() {
         <div className="py-12 text-center text-slate-400 text-sm">Cargando parámetros...</div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Salario Mínimo Legal */}
           <SectionCard title="Salario Mínimo Legal">
-            <ParamRow label="Salario mínimo diario"   value={fmtGs(smd)} />
-            <ParamRow label="Salario mínimo mensual"  value={fmtGs(smm)} />
-            <ParamRow label="Vigente desde"           value={vDesde} />
+            <ParamRow label="Salario mínimo diario"  value={fmtGs(smd)} />
+            <ParamRow label="Salario mínimo mensual" value={fmtGs(smm)} />
+            <ParamRow label="Vigente desde"          value={vDesde} />
           </SectionCard>
 
-          {/* IPS */}
           <SectionCard title="IPS — Instituto de Previsión Social">
-            <ParamRow label="Aporte empleado (obrero)"  value={`${ipsEmp}%`} />
-            <ParamRow label="Aporte patronal"           value={`${ipsPat}%`} />
-            <ParamRow label="Aguinaldo"                 value="No aporta IPS" />
+            <ParamRow label="Aporte empleado (obrero)" value={`${ipsEmp}%`} />
+            <ParamRow label="Aporte patronal"          value={`${ipsPat}%`} />
+            <ParamRow label="Aguinaldo"                value="No aporta IPS" />
           </SectionCard>
 
-          {/* Aguinaldo */}
           <SectionCard title="Aguinaldo">
             <ParamRow label="Tasa"    value="1/12 del salario anual" />
             <ParamRow label="Período" value="Enero a diciembre" />
           </SectionCard>
 
-          {/* Preaviso */}
           <SectionCard title="Preaviso Legal">
-            <ParamRow label="Menos de 1 año"  value="No corresponde" />
-            <ParamRow label="1 a 5 años"      value="30 días" />
-            <ParamRow label="Más de 5 años"   value="45 días" />
+            <ParamRow label="Menos de 1 año" value="No corresponde" />
+            <ParamRow label="1 a 5 años"     value="30 días" />
+            <ParamRow label="Más de 5 años"  value="45 días" />
           </SectionCard>
         </div>
       )}
