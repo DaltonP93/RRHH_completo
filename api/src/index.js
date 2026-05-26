@@ -291,6 +291,24 @@ app.use('/api/sync/att2000', att2000SyncRouter);
   app.get('/api/employee-bank-accounts', authenticate, (_req, res) => res.json([]));
   app.get('/api/payment-history', authenticate, (_req, res) => res.json([]));
 
+  // /api/bridge/devices — alias para que el portal pueda consultar relojes
+  app.get('/api/bridge/devices', authenticate, async (_req, res) => {
+    try {
+      const [dbDevices] = await sequelize.query(
+        'SELECT id, name, ip_address AS ip, port, last_sync_at, last_error FROM devices ORDER BY id ASC'
+      ).catch(() => [[]]);
+      const envStr = process.env.ZKTECO_DEVICES || '';
+      const envDevices = envStr ? envStr.split(',').map((e, i) => {
+        const [ip, port] = e.trim().split(':');
+        return { id: `env_${i}`, name: `Reloj ENV ${i + 1}`, ip, port: parseInt(port || '4370'), online: true };
+      }) : [];
+      const all = [...dbDevices.map(d => ({ ...d, online: true })), ...envDevices];
+      res.json({ ok: true, devices: all, count: all.length });
+    } catch (err) {
+      res.json({ ok: true, devices: [], count: 0, error: err.message });
+    }
+  });
+
   // /api/zkteco/diagnostics — estado real bridge + relojes desde DB + env
   app.get('/api/zkteco/diagnostics', authenticate, async (_req, res) => {
     try {

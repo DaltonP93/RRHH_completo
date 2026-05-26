@@ -379,17 +379,12 @@ function ZKTecoPanel() {
   const [loaded, setLoaded]   = useState(false)
 
   useEffect(() => {
-    api.get('/api/bridge/devices')
+    api.get('/api/zkteco/diagnostics')
       .then(res => {
         const d = res.data
-        const list: ZKDevice[] = Array.isArray(d)
-          ? d
-          : Array.isArray(d?.devices)
-            ? d.devices
-            : d?.count != null
-              ? Array.from({ length: d.count }, (_, i) => ({ ip: `reloj-${i + 1}`, online: true }))
-              : []
-        setDevices(list)
+        const dbDevs: ZKDevice[] = Array.isArray(d?.db_devices) ? d.db_devices : []
+        const envDevs: ZKDevice[] = Array.isArray(d?.env_devices) ? d.env_devices : []
+        setDevices(dbDevs.length ? dbDevs : envDevs)
       })
       .catch(() => setDevices([]))
       .finally(() => setLoaded(true))
@@ -453,11 +448,12 @@ function SystemStatus() {
       })
       .catch(() => setStatus(prev => ({ ...prev, api: 'error', db: 'error' })))
 
-    api.get('/api/bridge/devices')
+    api.get('/api/zkteco/diagnostics')
       .then(res => {
         const d = res.data
-        const count = Array.isArray(d) ? d.length : (d?.count ?? d?.devices ?? null)
-        setStatus(prev => ({ ...prev, devices: typeof count === 'number' ? count : null }))
+        const count = (Array.isArray(d?.db_devices) ? d.db_devices.length : 0)
+          + (Array.isArray(d?.env_devices) ? d.env_devices.length : 0)
+        setStatus(prev => ({ ...prev, devices: count }))
       })
       .catch(() => setStatus(prev => ({ ...prev, devices: null })))
   }, [])
