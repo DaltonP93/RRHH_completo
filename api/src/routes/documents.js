@@ -89,6 +89,8 @@ router.get('/', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('[documents] GET / error:', err);
     res.status(500).json({ error: 'Error al listar documentos' });
   }
@@ -525,6 +527,8 @@ router.get('/document-folders', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('[documents] GET /document-folders error:', err);
     res.status(500).json({ error: 'Error al listar carpetas' });
   }
@@ -595,6 +599,8 @@ router.get('/:id/signatures', async (req, res) => {
     `, { replacements: [req.params.id] });
     res.json(sigs);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('[documents] GET /:id/signatures error:', err);
     res.status(500).json({ error: 'Error al obtener firmas' });
   }

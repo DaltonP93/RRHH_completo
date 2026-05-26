@@ -22,6 +22,8 @@ router.get('/settlement-types', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('GET /api/settlement-types error:', err);
     res.status(500).json({ error: 'Error al obtener tipos de liquidación' });
   }
@@ -58,6 +60,8 @@ router.get('/payroll-monthly-parameters', async (req, res) => {
     const [rows] = await sequelize.query(sql, { replacements });
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('GET /api/payroll-monthly-parameters error:', err);
     res.status(500).json({ error: 'Error al obtener parámetros mensuales' });
   }

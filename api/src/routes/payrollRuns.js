@@ -54,6 +54,8 @@ router.get('/', async (req, res) => {
     const [rows] = await sequelize.query(sql, { replacements });
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('GET /api/payroll-runs error:', err);
     res.status(500).json({ error: 'Error al obtener liquidaciones' });
   }

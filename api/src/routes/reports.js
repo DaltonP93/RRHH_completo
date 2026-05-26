@@ -90,7 +90,9 @@ router.get('/daily-detail', async (req, res) => {
       d.name AS department, s.name AS schedule,
       s.check_in AS scheduled_in, s.check_out AS scheduled_out,
       ds.first_in, ds.last_out, ds.worked_minutes, ds.late_minutes,
-      ds.overtime_minutes, ds.status, ds.justification, ds.justification_type,
+      ds.overtime_minutes, ds.status,
+      IFNULL(ds.justification, NULL) AS justification,
+      IFNULL(ds.justification_type, NULL) AS justification_type,
       GROUP_CONCAT(
         CONCAT(DATE_FORMAT(al.timestamp,'%H:%i'), '=', al.type)
         ORDER BY al.timestamp SEPARATOR '|'
@@ -300,7 +302,8 @@ router.get('/employee/:id/analytics', async (req, res) => {
       SELECT
         ds.date, ds.status, ds.worked_minutes, ds.late_minutes,
         ds.overtime_minutes, ds.first_in, ds.last_out,
-        ds.justification, ds.justification_type
+        IFNULL(ds.justification, NULL) AS justification,
+        IFNULL(ds.justification_type, NULL) AS justification_type
       FROM daily_summary ds
       WHERE ds.employee_id = ? AND ds.date BETWEEN ? AND ?
       ORDER BY ds.date
@@ -390,7 +393,7 @@ router.get('/monthly/export', async (req, res) => {
         d.name AS department,
         ds.date, ds.status, ds.first_in, ds.last_out,
         ds.worked_minutes, ds.late_minutes, ds.overtime_minutes,
-        ds.justification
+        IFNULL(ds.justification, NULL) AS justification
       FROM employees e
       LEFT JOIN departments d ON e.department_id = d.id
       LEFT JOIN daily_summary ds ON e.id = ds.employee_id AND ds.date BETWEEN ? AND ?
