@@ -4,10 +4,14 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   FileText, FolderOpen, LayoutTemplate, Plus, Eye, Send, PenLine,
   XCircle, ClipboardList, Search, ChevronDown, Folder, Copy,
-  Edit, RefreshCw
+  Edit, FileCheck, ShieldCheck,
 } from 'lucide-react';
+import StatusBadge from '@/components/ui/StatusBadge';
+import EnterprisePageHeader from '@/components/ui/EnterprisePageHeader';
+import EmptyState from '@/components/ui/EmptyState';
 
 type DocStatus = 'draft' | 'sent' | 'signed' | 'cancelled' | 'completed';
+type TabId = 'docs' | 'templates' | 'folders' | 'constancias' | 'auditoria';
 
 interface Document {
   id: number;
@@ -33,14 +37,34 @@ interface Template {
   html_template: string;
 }
 
-interface Folder {
+interface DocFolder {
   id: number;
   name: string;
+  document_count?: number;
   parent_id?: number;
-  children?: Folder[];
+  children?: DocFolder[];
 }
 
-const STATUS_CONFIG: Record<DocStatus, { label: string; cls: string }> = {
+interface Constancia {
+  id: number;
+  employee_name: string;
+  type: string;
+  motivo?: string;
+  issued_at: string;
+  signed: boolean;
+}
+
+interface AuditEntry {
+  id: number;
+  created_at: string;
+  user_name?: string;
+  action: string;
+  document_title?: string;
+  ip?: string;
+  result?: string;
+}
+
+const DOC_STATUS_CONFIG: Record<DocStatus, { label: string; cls: string }> = {
   draft:     { label: 'Borrador',   cls: 'bg-gray-100 text-gray-700' },
   sent:      { label: 'Enviado',    cls: 'bg-blue-100 text-blue-700' },
   signed:    { label: 'Firmado',    cls: 'bg-green-100 text-green-700' },
@@ -56,8 +80,16 @@ const VARIABLES_REF = [
   '{{company.ruc}}', '{{today}}', '{{salary.amount}}',
 ];
 
-function StatusBadge({ status }: { status: DocStatus }) {
-  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.draft;
+const AUDIT_ACTION_CONFIG: Record<string, { label: string; cls: string }> = {
+  visto:       { label: 'Visto',       cls: 'bg-blue-50 text-blue-700' },
+  firmado:     { label: 'Firmado',     cls: 'bg-green-50 text-green-700' },
+  editado:     { label: 'Editado',     cls: 'bg-amber-50 text-amber-700' },
+  eliminado:   { label: 'Eliminado',   cls: 'bg-red-50 text-red-700' },
+  descargado:  { label: 'Descargado',  cls: 'bg-purple-50 text-purple-700' },
+};
+
+function DocStatusBadge({ status }: { status: DocStatus }) {
+  const cfg = DOC_STATUS_CONFIG[status] || DOC_STATUS_CONFIG.draft;
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cfg.cls}`}>{cfg.label}</span>;
 }
 
@@ -74,12 +106,15 @@ function NewDocumentModal({
     if (!form.template_id || !form.employee_id || !form.title) { setError('Todos los campos son requeridos'); return; }
     setSaving(true);
     try {
-      const res = await api.post(`/api/documents`, { template_id: Number(form.template_id),
+      await api.post(`/api/documents`, {
+        template_id: Number(form.template_id),
+        employee_id: Number(form.employee_id),
+        title: form.title,
       });
       onCreated();
       onClose();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al crear documento');
     } finally {
       setSaving(false);
     }
@@ -132,10 +167,11 @@ function NewTemplateModal({ onClose, onCreated }: { onClose: () => void; onCreat
     if (!form.name || !form.code || !form.module) { setError('Nombre, código y módulo son requeridos'); return; }
     setSaving(true);
     try {
-      const res = await api.post(`/api/document-templates`, form);
+      await api.post(`/api/document-templates`, form);
       onCreated(); onClose();
-    } catch (e: any) { setError(e.message); }
-    finally { setSaving(false); }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al guardar');
+    } finally { setSaving(false); }
   }
 
   return (
@@ -201,7 +237,7 @@ function NewTemplateModal({ onClose, onCreated }: { onClose: () => void; onCreat
 }
 
 // ─── Folder Tree ──────────────────────────────────────────────────────────────
-function FolderTree({ folders, depth = 0 }: { folders: Folder[]; depth?: number }) {
+function FolderTree({ folders, depth = 0 }: { folders: DocFolder[]; depth?: number }) {
   const [open, setOpen] = useState<number[]>([]);
   return (
     <ul className="space-y-1">
@@ -213,6 +249,9 @@ function FolderTree({ folders, depth = 0 }: { folders: Folder[]; depth?: number 
             style={{ paddingLeft: `${8 + depth * 16}px` }}>
             <Folder size={15} className="text-yellow-500 shrink-0" />
             <span className="flex-1">{f.name}</span>
+            {f.document_count !== undefined && (
+              <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">{f.document_count}</span>
+            )}
             {f.children && f.children.length > 0 && (
               <ChevronDown size={13} className={`text-slate-400 transition-transform ${open.includes(f.id) ? 'rotate-180' : ''}`} />
             )}
@@ -226,12 +265,227 @@ function FolderTree({ folders, depth = 0 }: { folders: Folder[]; depth?: number 
   );
 }
 
+// ─── Templates Tab ────────────────────────────────────────────────────────────
+function TemplatesTab({ templates, onNew }: { templates: Template[]; onNew: () => void }) {
+  if (templates.length === 0) {
+    return (
+      <EmptyState
+        icon={LayoutTemplate}
+        title="No hay plantillas creadas"
+        description="Crea una plantilla para generar documentos reutilizables"
+        action={{ label: '+ Nueva plantilla', onClick: onNew }}
+      />
+    );
+  }
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-100 bg-slate-50">
+            {['Nombre','Módulo','Versión','Estado','Acciones'].map(h => (
+              <th key={h} className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wide">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-50">
+          {templates.map(tpl => (
+            <tr key={tpl.id} className="hover:bg-slate-50 transition-colors">
+              <td className="px-4 py-3">
+                <p className="font-medium text-slate-800">{tpl.name}</p>
+                <p className="text-xs text-slate-400 font-mono">{tpl.code}</p>
+              </td>
+              <td className="px-4 py-3">
+                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-xs">{tpl.module}</span>
+              </td>
+              <td className="px-4 py-3 text-slate-500 text-xs">v{tpl.version}</td>
+              <td className="px-4 py-3">
+                <StatusBadge
+                  status={tpl.status === 'active' ? 'active' : tpl.status === 'deprecated' ? 'error' : tpl.status === 'draft' ? 'draft' : 'inactive'}
+                  label={tpl.status === 'active' ? 'Activo' : tpl.status === 'deprecated' ? 'Deprecated' : tpl.status === 'draft' ? 'Borrador' : 'Inactivo'}
+                />
+              </td>
+              <td className="px-4 py-3">
+                <div className="flex gap-1">
+                  <button className="flex items-center gap-1 px-2 py-1 text-xs text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                    <Eye size={12} /> Usar
+                  </button>
+                  <button className="flex items-center gap-1 px-2 py-1 text-xs text-slate-600 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors">
+                    <Edit size={12} /> Editar
+                  </button>
+                  <button className="flex items-center gap-1 px-2 py-1 text-xs text-slate-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors">
+                    <Copy size={12} /> Clonar
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Folders Tab ──────────────────────────────────────────────────────────────
+function FoldersTab({ folders }: { folders: DocFolder[] }) {
+  if (folders.length === 0) {
+    return (
+      <EmptyState
+        icon={FolderOpen}
+        title="No hay carpetas creadas"
+        description="Organiza tus documentos en carpetas"
+      />
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+      {folders.map(f => (
+        <div key={f.id} className="bg-white rounded-2xl border border-slate-200 p-4 hover:shadow-md transition-shadow cursor-pointer">
+          <div className="w-10 h-10 rounded-xl bg-yellow-50 flex items-center justify-center mb-3">
+            <Folder size={20} className="text-yellow-500" />
+          </div>
+          <p className="font-semibold text-slate-800 text-sm truncate">{f.name}</p>
+          {f.document_count !== undefined && (
+            <p className="text-xs text-slate-400 mt-0.5">{f.document_count} documento{f.document_count !== 1 ? 's' : ''}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Constancias Tab ──────────────────────────────────────────────────────────
+const CONSTANCIA_TYPES = [
+  'Constancia de trabajo',
+  'Constancia de ingresos',
+  'Constancia de antigüedad',
+  'Certificado IPS',
+  'Liquidación',
+];
+
+function ConstanciasTab({ constancias }: { constancias: Constancia[] }) {
+  return (
+    <div>
+      {/* Quick-action buttons */}
+      <div className="flex flex-wrap gap-2 mb-5">
+        {CONSTANCIA_TYPES.map(type => (
+          <button
+            key={type}
+            disabled
+            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-500 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+          >
+            <Plus size={12} /> {type}
+          </button>
+        ))}
+        <a
+          href="/documentos/constancias"
+          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors"
+        >
+          <FileCheck size={12} /> Ver todas las constancias
+        </a>
+      </div>
+
+      {constancias.length === 0 ? (
+        <EmptyState
+          icon={FileCheck}
+          title="Sin constancias generadas"
+          description="Genera constancias laborales para tus empleados"
+        />
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50">
+                {['Empleado','Tipo constancia','Fecha emisión','Firmado','Acciones'].map(h => (
+                  <th key={h} className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wide">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {constancias.map(c => (
+                <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3 font-medium text-slate-800">{c.employee_name}</td>
+                  <td className="px-4 py-3 text-slate-600">{c.type}</td>
+                  <td className="px-4 py-3 text-slate-500">{new Date(c.issued_at).toLocaleDateString('es')}</td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={c.signed ? 'approved' : 'pending'} label={c.signed ? 'Firmado' : 'Pendiente'} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-1">
+                      <button className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Ver">
+                        <Eye size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Auditoría Tab ────────────────────────────────────────────────────────────
+function AuditoriaTab({ auditEntries }: { auditEntries: AuditEntry[] }) {
+  if (auditEntries.length === 0) {
+    return (
+      <EmptyState
+        icon={ShieldCheck}
+        title="Sin eventos de auditoría"
+        description="Los eventos de acceso y modificación de documentos aparecerán aquí"
+        secondaryAction={{ label: 'Ver auditoría completa', onClick: () => { window.location.href = '/documentos/auditoria'; } }}
+      />
+    );
+  }
+  return (
+    <div>
+      <div className="flex justify-end mb-3">
+        <a href="/documentos/auditoria" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+          <ShieldCheck size={12} /> Ver auditoría completa
+        </a>
+      </div>
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50">
+              {['Fecha','Usuario','Acción','Documento','IP'].map(h => (
+                <th key={h} className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wide">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {auditEntries.map(entry => {
+              const actionCfg = AUDIT_ACTION_CONFIG[entry.action] ?? { label: entry.action, cls: 'bg-slate-100 text-slate-600' };
+              return (
+                <tr key={entry.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
+                    {new Date(entry.created_at).toLocaleString('es')}
+                  </td>
+                  <td className="px-4 py-3 text-slate-700">{entry.user_name || '-'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${actionCfg.cls}`}>{actionCfg.label}</span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">{entry.document_title || '-'}</td>
+                  <td className="px-4 py-3 text-slate-400 text-xs font-mono">{entry.ip || '-'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function DocumentosPage() {
-  const [tab, setTab] = useState<'docs' | 'templates' | 'folders'>('docs');
+  const [tab, setTab] = useState<TabId>('docs');
   const [documents, setDocuments] = useState<Document[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [folders, setFolders] = useState<Folder[]>([]);
+  const [folders, setFolders] = useState<DocFolder[]>([]);
+  const [constancias, setConstancias] = useState<Constancia[]>([]);
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
   // Filters
@@ -244,30 +498,40 @@ export default function DocumentosPage() {
   const [showNewTpl, setShowNewTpl] = useState(false);
 
   const fetchDocuments = useCallback(async () => {
-    try {
-      const res = await api.get(`/api/documents`);
-      setDocuments(res.data);
-    } catch {}
+    const res = await api.get(`/api/documents?mine=1`).catch(() => ({ data: [] }));
+    setDocuments(Array.isArray(res.data) ? res.data : []);
   }, []);
 
   const fetchTemplates = useCallback(async () => {
-    try {
-      const res = await api.get(`/api/document-templates`);
-      setTemplates(res.data);
-    } catch {}
+    const res = await api.get(`/api/document-templates`).catch(() => ({ data: [] }));
+    setTemplates(Array.isArray(res.data) ? res.data : []);
   }, []);
 
   const fetchFolders = useCallback(async () => {
-    try {
-      const res = await api.get(`/api/document-folders`);
-      setFolders(res.data);
-    } catch {}
+    const res = await api.get(`/api/document-folders`).catch(() => ({ data: [] }));
+    setFolders(Array.isArray(res.data) ? res.data : []);
+  }, []);
+
+  const fetchConstancias = useCallback(async () => {
+    const res = await api.get(`/api/documents?type=constancia`).catch(() => ({ data: [] }));
+    setConstancias(Array.isArray(res.data) ? res.data : []);
+  }, []);
+
+  const fetchAudit = useCallback(async () => {
+    const res = await api.get(`/api/document-audit`).catch(() => ({ data: [] }));
+    setAuditEntries(Array.isArray(res.data) ? res.data : []);
   }, []);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchDocuments(), fetchTemplates(), fetchFolders()]).finally(() => setLoading(false));
-  }, [fetchDocuments, fetchTemplates, fetchFolders]);
+    Promise.all([
+      fetchDocuments(),
+      fetchTemplates(),
+      fetchFolders(),
+      fetchConstancias(),
+      fetchAudit(),
+    ]).finally(() => setLoading(false));
+  }, [fetchDocuments, fetchTemplates, fetchFolders, fetchConstancias, fetchAudit]);
 
   async function handleAction(docId: number, action: string) {
     const endpoints: Record<string, string> = {
@@ -288,38 +552,53 @@ export default function DocumentosPage() {
     return true;
   });
 
-  const tabs = [
-    { id: 'docs', label: 'Documentos', icon: FileText },
-    { id: 'templates', label: 'Plantillas', icon: LayoutTemplate },
-    { id: 'folders', label: 'Carpetas', icon: FolderOpen },
-  ] as const;
+  const tabs: { id: TabId; label: string; icon: React.ElementType }[] = [
+    { id: 'docs',        label: 'Mis documentos', icon: FileText },
+    { id: 'templates',   label: 'Plantillas',     icon: LayoutTemplate },
+    { id: 'folders',     label: 'Carpetas',       icon: FolderOpen },
+    { id: 'constancias', label: 'Constancias',    icon: FileCheck },
+    { id: 'auditoria',   label: 'Auditoría',      icon: ShieldCheck },
+  ];
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Gestión de Documentos</h1>
-          <p className="text-slate-500 text-sm mt-0.5">Documentos digitales, plantillas y firma electrónica</p>
-        </div>
-        <div className="flex gap-2">
-          {tab === 'docs' && (
-            <button onClick={() => setShowNewDoc(true)}
-              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">
-              <Plus size={16} /> Nuevo Documento
-            </button>
-          )}
-          {tab === 'templates' && (
-            <button onClick={() => setShowNewTpl(true)}
-              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">
-              <Plus size={16} /> Nueva Plantilla
-            </button>
-          )}
-        </div>
-      </div>
+      <EnterprisePageHeader
+        icon={FileText}
+        iconColor="bg-blue-600"
+        title="Gestión de Documentos"
+        subtitle="Documentos digitales, plantillas, carpetas y firma electrónica"
+        actions={
+          <>
+            {tab === 'docs' && (
+              <button onClick={() => setShowNewDoc(true)}
+                className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">
+                <Plus size={16} /> Nuevo Documento
+              </button>
+            )}
+            {tab === 'templates' && (
+              <button onClick={() => setShowNewTpl(true)}
+                className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">
+                <Plus size={16} /> Nueva Plantilla
+              </button>
+            )}
+            {tab === 'constancias' && (
+              <a href="/documentos/constancias"
+                className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors">
+                <FileCheck size={16} /> Generar constancia
+              </a>
+            )}
+            {tab === 'auditoria' && (
+              <a href="/documentos/auditoria"
+                className="flex items-center gap-2 bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-600 transition-colors">
+                <ShieldCheck size={16} /> Auditoría completa
+              </a>
+            )}
+          </>
+        }
+      />
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl mb-6 w-fit">
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl mb-6 w-fit flex-wrap">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -334,7 +613,7 @@ export default function DocumentosPage() {
         </div>
       )}
 
-      {/* Tab: Documentos */}
+      {/* Tab: Mis documentos */}
       {!loading && tab === 'docs' && (
         <div>
           <div className="flex gap-3 mb-4">
@@ -351,7 +630,7 @@ export default function DocumentosPage() {
             <select className="border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
               <option value="">Todos los estados</option>
-              {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              {Object.entries(DOC_STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </div>
 
@@ -359,22 +638,21 @@ export default function DocumentosPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50">
-                  {['Título','Empleado','Módulo','Estado','Creado','Enviado','Firmado','Acciones'].map(h => (
+                  {['Título','Empleado','Tipo','Fecha','Estado','Firma','Acciones'].map(h => (
                     <th key={h} className="text-left px-4 py-3 font-semibold text-slate-600 text-xs uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filteredDocs.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center py-12 text-slate-400">No se encontraron documentos</td></tr>
+                  <tr><td colSpan={7} className="text-center py-12 text-slate-400">No se encontraron documentos</td></tr>
                 ) : filteredDocs.map(doc => (
                   <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800">{doc.title}</td>
                     <td className="px-4 py-3 text-slate-600">{doc.employee_name || `#${doc.employee_id}`}</td>
-                    <td className="px-4 py-3 text-slate-600">{doc.module}</td>
-                    <td className="px-4 py-3"><StatusBadge status={doc.status} /></td>
+                    <td className="px-4 py-3 text-slate-500">{doc.module}</td>
                     <td className="px-4 py-3 text-slate-500">{doc.created_at ? new Date(doc.created_at).toLocaleDateString('es') : '-'}</td>
-                    <td className="px-4 py-3 text-slate-500">{doc.sent_at ? new Date(doc.sent_at).toLocaleDateString('es') : '-'}</td>
+                    <td className="px-4 py-3"><DocStatusBadge status={doc.status} /></td>
                     <td className="px-4 py-3 text-slate-500">{doc.signed_at ? new Date(doc.signed_at).toLocaleDateString('es') : '-'}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
@@ -394,7 +672,7 @@ export default function DocumentosPage() {
                             <PenLine size={14} />
                           </a>
                         )}
-                        {['draft','sent'].includes(doc.status) && (
+                        {(['draft','sent'] as DocStatus[]).includes(doc.status) && (
                           <button onClick={() => handleAction(doc.id, 'cancel')}
                             className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Cancelar">
                             <XCircle size={14} />
@@ -416,60 +694,22 @@ export default function DocumentosPage() {
 
       {/* Tab: Plantillas */}
       {!loading && tab === 'templates' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {templates.length === 0 ? (
-            <div className="col-span-3 text-center py-16 text-slate-400">
-              <LayoutTemplate size={40} className="mx-auto mb-3 opacity-30" />
-              <p>No hay plantillas creadas</p>
-            </div>
-          ) : templates.map(tpl => (
-            <div key={tpl.id} className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h3 className="font-semibold text-slate-800">{tpl.name}</h3>
-                  <p className="text-xs text-slate-400 font-mono mt-0.5">{tpl.code}</p>
-                </div>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${tpl.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                  {tpl.status === 'active' ? 'Activa' : 'Inactiva'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-lg text-xs">{tpl.module}</span>
-                <span className="text-xs text-slate-400">v{tpl.version}</span>
-              </div>
-              {tpl.description && <p className="text-xs text-slate-500 mb-4 line-clamp-2">{tpl.description}</p>}
-              <div className="flex gap-2 pt-2 border-t border-slate-100">
-                <button className="flex-1 flex items-center justify-center gap-1.5 text-xs text-slate-600 hover:text-blue-600 hover:bg-blue-50 py-1.5 rounded-lg transition-colors">
-                  <Edit size={12} /> Editar
-                </button>
-                <button className="flex-1 flex items-center justify-center gap-1.5 text-xs text-slate-600 hover:text-green-600 hover:bg-green-50 py-1.5 rounded-lg transition-colors">
-                  <Copy size={12} /> Clonar
-                </button>
-                <button className="flex-1 flex items-center justify-center gap-1.5 text-xs text-slate-600 hover:text-purple-600 hover:bg-purple-50 py-1.5 rounded-lg transition-colors">
-                  <Eye size={12} /> Vista previa
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <TemplatesTab templates={templates} onNew={() => setShowNewTpl(true)} />
       )}
 
       {/* Tab: Carpetas */}
       {!loading && tab === 'folders' && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 max-w-md">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-slate-700">Árbol de carpetas</h2>
-            <button className="flex items-center gap-1.5 text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg">
-              <Plus size={12} /> Nueva carpeta
-            </button>
-          </div>
-          {folders.length === 0 ? (
-            <div className="text-center py-8 text-slate-400">
-              <FolderOpen size={32} className="mx-auto mb-2 opacity-30" />
-              <p className="text-sm">No hay carpetas creadas</p>
-            </div>
-          ) : <FolderTree folders={folders} />}
-        </div>
+        <FoldersTab folders={folders} />
+      )}
+
+      {/* Tab: Constancias */}
+      {!loading && tab === 'constancias' && (
+        <ConstanciasTab constancias={constancias} />
+      )}
+
+      {/* Tab: Auditoría */}
+      {!loading && tab === 'auditoria' && (
+        <AuditoriaTab auditEntries={auditEntries} />
       )}
 
       {/* Modals */}
