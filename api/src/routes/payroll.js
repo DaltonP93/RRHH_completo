@@ -31,7 +31,7 @@ async function fetchRows(year, month, branchId) {
     SELECT
       e.code                 AS codigo,
       CONCAT(e.first_name, ' ', e.last_name) AS nombre,
-      COALESCE(e.document_number, e.employee_number, '') AS cedula,
+      COALESCE(e.document_number, '') AS cedula,
       COALESCE(d.name, '')   AS departamento,
       COALESCE(b.name, '')   AS sede,
       SUM(CASE WHEN ds.status IN ('present','late') THEN 1 ELSE 0 END) AS dias_trab,
@@ -117,6 +117,8 @@ router.get('/export', async (req, res) => {
     await wb.xlsx.write(res);
     res.end();
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.status(200).json({ rows: [], total: 0 });
     res.status(500).json({ error: err.message });
   }
 });
@@ -131,6 +133,8 @@ router.get('/preview', async (req, res) => {
     const rows = await fetchRows(year, month, branchId);
     res.json({ period: { year, month, branch_id: branchId }, rows, total: rows.length });
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json({ period: { year: +req.query.year || new Date().getFullYear(), month: +req.query.month || (new Date().getMonth() + 1) }, rows: [], total: 0 });
     res.status(500).json({ error: err.message });
   }
 });
