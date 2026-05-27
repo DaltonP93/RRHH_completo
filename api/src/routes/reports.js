@@ -75,6 +75,52 @@ router.get('/marcadas', async (req, res) => {
   }
 });
 
+// ─── GET /api/reports/daily?date=YYYY-MM-DD ───────────────────────
+// Resumen del día: totales presentes/ausentes/tarde + detalle por empleado.
+router.get('/daily', async (req, res) => {
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  const EMPTY = { ok: true, date, summary: { employees: 0, present: 0, absent: 0, late: 0, overtime_hours: 0 }, data: [] };
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT
+        e.id AS employee_id,
+        CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+        d.name AS department,
+        ds.first_in, ds.last_out, ds.worked_minutes,
+        ds.late_minutes, ds.overtime_minutes,
+        COALESCE(ds.status, 'absent') AS status
+      FROM employees e
+      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN daily_summary ds ON e.id = ds.employee_id AND ds.date = ?
+      WHERE e.status = 'active'
+      ORDER BY d.name, e.last_name
+    `, { replacements: [date] });
+
+    const present  = rows.filter(r => r.status === 'present').length;
+    const late     = rows.filter(r => r.status === 'late').length;
+    const absent   = rows.filter(r => r.status === 'absent').length;
+    const otMins   = rows.reduce((s, r) => s + (r.overtime_minutes || 0), 0);
+
+    res.json({
+      ok: true,
+      date,
+      summary: {
+        employees:      rows.length,
+        present:        present + late,
+        absent,
+        late,
+        overtime_hours: Math.round(otMins / 60 * 10) / 10,
+      },
+      data: rows,
+    });
+  } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json(EMPTY);
+    console.error('[reports] GET /daily error:', err);
+    res.status(500).json({ error: 'Error al obtener reporte diario' });
+  }
+});
+
 // ─── GET /api/reports/daily-detail?date= ─────────────────────────
 // Reporte del día con todos los logs crudos por empleado
 router.get('/daily-detail', async (req, res) => {
