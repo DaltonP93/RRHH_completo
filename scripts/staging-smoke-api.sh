@@ -6,11 +6,15 @@
 #   BASE_URL=http://10.81.28.24 bash scripts/staging-smoke-api.sh
 #   BASE_URL=http://localhost TOKEN=xxx bash scripts/staging-smoke-api.sh
 #
-# Si no se provee TOKEN, el script intenta autenticarse contra $BASE_URL/api/auth/login
-# usando SMOKE_USER (default: admin) y SMOKE_PASS (default: Admin1234!).
+# Variables de entorno:
+#   BASE_URL    (default: http://localhost)  — URL base SIN puerto (va por Nginx :80)
+#   SMOKE_USER  (default: admin)
+#   SMOKE_PASS  (default: Admin1234!)
+#   TOKEN       — si se provee, omite el login automático
+#   ORIGIN      (default: http://10.81.28.24) — header Origin para CORS
 #
 # Requiere: curl
-# Salida:   PASS/FAIL por endpoint + resumen final con exit code
+# Salida:   PASS/FAIL por endpoint + resumen final con exit code 1 si hay FAILs
 
 set -euo pipefail
 
@@ -18,6 +22,7 @@ BASE_URL="${BASE_URL:-http://localhost}"
 SMOKE_USER="${SMOKE_USER:-admin}"
 SMOKE_PASS="${SMOKE_PASS:-Admin1234!}"
 TOKEN="${TOKEN:-}"
+ORIGIN="${ORIGIN:-http://10.81.28.24}"
 
 PASS=0
 FAIL=0
@@ -27,19 +32,27 @@ if [ -z "$TOKEN" ]; then
   echo "Autenticando como '${SMOKE_USER}' en ${BASE_URL}/api/auth/login ..."
   LOGIN_RESP=$(curl -s -X POST "${BASE_URL}/api/auth/login" \
     -H "Content-Type: application/json" \
+    -H "Origin: ${ORIGIN}" \
     -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\"}" 2>/dev/null || true)
 
-  TOKEN=$(echo "$LOGIN_RESP" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p' | head -1)
+  # Extraer accessToken — soporta con o sin espacio tras los dos puntos
+  TOKEN=$(echo "$LOGIN_RESP" | grep -oP '"accessToken"\s*:\s*"\K[^"]+' | head -1 || true)
 
   if [ -z "$TOKEN" ]; then
-    TOKEN=$(echo "$LOGIN_RESP" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' | head -1)
+    # Fallback: campo "token"
+    TOKEN=$(echo "$LOGIN_RESP" | grep -oP '"token"\s*:\s*"\K[^"]+' | head -1 || true)
   fi
 
   if [ -z "$TOKEN" ]; then
-    echo "WARN: No se pudo obtener token. Los endpoints protegidos devolverán 401."
-  else
-    echo "Token obtenido OK (primeros 20 chars): ${TOKEN:0:20}..."
+    echo ""
+    echo "ERROR: No se pudo obtener token de autenticación."
+    echo "Respuesta del servidor:"
+    echo "$LOGIN_RESP" | head -c 500
+    echo ""
+    exit 1
   fi
+
+  echo "Token obtenido OK (primeros 20 chars): ${TOKEN:0:20}..."
 fi
 echo ""
 
@@ -49,21 +62,41 @@ check() {
   local url="$2"
   local expected_status="${3:-200}"
 
-  local http_args=(-s -o /tmp/smoke_resp.txt -w "%{http_code}")
-  if [ -n "$TOKEN" ]; then
-    http_args+=(-H "Authorization: Bearer $TOKEN")
-  fi
-
   local status
-  status=$(curl "${http_args[@]}" "$url" 2>/dev/null || echo "000")
+  status=$(curl -s -o /tmp/smoke_resp.txt -w "%{http_code}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Origin: ${ORIGIN}" \
+    "$url" 2>/dev/null || echo "000")
 
   if [ "$status" = "$expected_status" ]; then
     echo "PASS  [$status] $label"
     PASS=$((PASS + 1))
   else
     local preview
-    preview=$(head -c 120 /tmp/smoke_resp.txt 2>/dev/null | tr '\n' ' ' || true)
-    echo "FAIL  [$status] $label  (expected $expected_status)  $preview"
+    preview=$(head -c 200 /tmp/smoke_resp.txt 2>/dev/null | tr '\n' ' ' || true)
+    echo "FAIL  [$status] $label  (expected $expected_status)  ${preview}"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# Health público (sin token)
+check_public() {
+  local label="$1"
+  local url="$2"
+  local expected_status="${3:-200}"
+
+  local status
+  status=$(curl -s -o /tmp/smoke_resp.txt -w "%{http_code}" \
+    -H "Origin: ${ORIGIN}" \
+    "$url" 2>/dev/null || echo "000")
+
+  if [ "$status" = "$expected_status" ]; then
+    echo "PASS  [$status] $label"
+    PASS=$((PASS + 1))
+  else
+    local preview
+    preview=$(head -c 200 /tmp/smoke_resp.txt 2>/dev/null | tr '\n' ' ' || true)
+    echo "FAIL  [$status] $label  (expected $expected_status)  ${preview}"
     FAIL=$((FAIL + 1))
   fi
 }
@@ -71,8 +104,8 @@ check() {
 echo "=== Staging smoke test — ${BASE_URL} ==="
 echo ""
 
-echo "--- Health ---"
-check "GET /api/health"                                        "${BASE_URL}/api/health"
+echo "--- Health (público) ---"
+check_public "GET /api/health"                                 "${BASE_URL}/api/health"
 
 echo ""
 echo "--- ZKTeco / Bridge ---"

@@ -65,14 +65,18 @@ async function login(req, res) {
 
     const { accessToken, refreshToken } = generateTokens(user);
 
-    // Guardar refresh token hasheado
-    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    await sequelize.query(
-      'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
-      { replacements: [user.id, tokenHash, expiresAt] }
-    );
+    // Guardar refresh token hasheado (tabla puede no existir en staging — no bloquear login)
+    try {
+      const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await sequelize.query(
+        'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+        { replacements: [user.id, tokenHash, expiresAt] }
+      );
+    } catch (rtErr) {
+      const no = rtErr.original?.errno ?? rtErr.parent?.errno;
+      if (no !== 1146 && no !== 1054) throw rtErr;
+    }
 
     // Actualizar último login
     await sequelize.query('UPDATE users SET last_login = NOW() WHERE id = ?', { replacements: [user.id] });
