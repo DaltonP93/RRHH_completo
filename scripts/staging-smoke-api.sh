@@ -63,7 +63,7 @@ check() {
   local expected_status="${3:-200}"
 
   local status
-  status=$(curl -s -o /tmp/smoke_resp.txt -w "%{http_code}" \
+  status=$(curl -s --max-time 20 -o /tmp/smoke_resp.txt -w "%{http_code}" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Origin: ${ORIGIN}" \
     "$url" 2>/dev/null || echo "000")
@@ -77,6 +77,7 @@ check() {
     echo "FAIL  [$status] $label  (expected $expected_status)  ${preview}"
     FAIL=$((FAIL + 1))
   fi
+  sleep 0.3
 }
 
 # Health público (sin token)
@@ -86,7 +87,7 @@ check_public() {
   local expected_status="${3:-200}"
 
   local status
-  status=$(curl -s -o /tmp/smoke_resp.txt -w "%{http_code}" \
+  status=$(curl -s --max-time 20 -o /tmp/smoke_resp.txt -w "%{http_code}" \
     -H "Origin: ${ORIGIN}" \
     "$url" 2>/dev/null || echo "000")
 
@@ -99,6 +100,7 @@ check_public() {
     echo "FAIL  [$status] $label  (expected $expected_status)  ${preview}"
     FAIL=$((FAIL + 1))
   fi
+  sleep 0.3
 }
 
 echo "=== Staging smoke test — ${BASE_URL} ==="

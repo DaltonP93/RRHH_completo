@@ -13,6 +13,15 @@ const { initRedis } = require('./config/redis');
 const { initSocket } = require('./socket/socketServer');
 const logger = require('./config/logger');
 
+// Evitar que unhandledRejection/uncaughtException mate el proceso (PM2 lo reiniciaría
+// igual, pero así el error queda en logs en lugar de causar un crash silencioso).
+process.on('unhandledRejection', (reason) => {
+  logger.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  logger.error('[uncaughtException]', err);
+});
+
 // Rutas
 const authRoutes       = require('./routes/auth');
 const employeeRoutes   = require('./routes/employees');
@@ -231,9 +240,8 @@ app.use('/api/payroll-runs',        payrollRunsRouter);
 app.use('/api/aguinaldo',           aguinaldoRouter);
 app.use('/api/salary-advances',     salaryAdvancesRouter);
 app.use('/api',                     bankingRouter);
-// compliance: montado en /api/compliance Y en /api (legado) para máxima compatibilidad
+// compliance: montado SOLO en /api/compliance (el mount dual /api causaba respuestas dobles en handlers async)
 app.use('/api/compliance',          complianceRouter);
-app.use('/api',                     complianceRouter);
 app.use('/api/document-templates',  documentTemplatesRouter);
 app.use('/api/documents',           documentsRouter);
 app.use('/api',                     competenciesRouter);
@@ -335,6 +343,14 @@ app.use('/api/sync/att2000', att2000SyncRouter);
   };
   app.get('/api/payroll-params',      authenticate, _payrollParamsHandler);
   app.get('/api/payroll-parameters',  authenticate, _payrollParamsHandler);
+
+  // /api/payroll-types — catálogo de tipos de nómina (tabla payroll_types si existe)
+  app.get('/api/payroll-types', authenticate, async (_req, res) => {
+    try {
+      const [rows] = await sequelize.query('SELECT * FROM payroll_types ORDER BY name ASC');
+      res.json(rows);
+    } catch { res.json([]); }
+  });
 
   // /api/bridge/devices — alias para que el portal pueda consultar relojes
   app.get('/api/bridge/devices', authenticate, async (_req, res) => {
