@@ -4,17 +4,19 @@
 # Uso:
 #   bash scripts/staging-smoke-api.sh
 #   BASE_URL=http://10.81.28.24 bash scripts/staging-smoke-api.sh
+#   SMOKE_SLEEP=1.5 BASE_URL=http://localhost bash scripts/staging-smoke-api.sh
 #   BASE_URL=http://localhost TOKEN=xxx bash scripts/staging-smoke-api.sh
 #
 # Variables de entorno:
-#   BASE_URL    (default: http://localhost)  — URL base SIN puerto (va por Nginx :80)
-#   SMOKE_USER  (default: admin)
-#   SMOKE_PASS  (default: Admin1234!)
-#   TOKEN       — si se provee, omite el login automático
-#   ORIGIN      (default: http://10.81.28.24) — header Origin para CORS
+#   BASE_URL     (default: http://localhost)   URL base SIN puerto (API via Nginx :80)
+#   SMOKE_USER   (default: admin)
+#   SMOKE_PASS   (default: Admin1234!)
+#   TOKEN        si se provee, omite el login automático
+#   ORIGIN       (default: http://10.81.28.24) header Origin para CORS
+#   SMOKE_SLEEP  (default: 1.2)  segundos entre requests (evita rate-limit Nginx)
 #
 # Requiere: curl
-# Salida:   PASS/FAIL por endpoint + resumen final con exit code 1 si hay FAILs
+# Salida:   PASS/FAIL por endpoint + resumen final; exit 1 si hay FAILs
 
 set -euo pipefail
 
@@ -23,6 +25,7 @@ SMOKE_USER="${SMOKE_USER:-admin}"
 SMOKE_PASS="${SMOKE_PASS:-Admin1234!}"
 TOKEN="${TOKEN:-}"
 ORIGIN="${ORIGIN:-http://10.81.28.24}"
+SMOKE_SLEEP="${SMOKE_SLEEP:-1.2}"
 
 PASS=0
 FAIL=0
@@ -30,7 +33,8 @@ FAIL=0
 # ─── Obtener token si no fue provisto ────────────────────────────────────────
 if [ -z "$TOKEN" ]; then
   echo "Autenticando como '${SMOKE_USER}' en ${BASE_URL}/api/auth/login ..."
-  LOGIN_RESP=$(curl -s -X POST "${BASE_URL}/api/auth/login" \
+  LOGIN_RESP=$(curl -s --max-time 20 --connect-timeout 5 \
+    -X POST "${BASE_URL}/api/auth/login" \
     -H "Content-Type: application/json" \
     -H "Origin: ${ORIGIN}" \
     -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\"}" 2>/dev/null || true)
@@ -39,7 +43,6 @@ if [ -z "$TOKEN" ]; then
   TOKEN=$(echo "$LOGIN_RESP" | grep -oP '"accessToken"\s*:\s*"\K[^"]+' | head -1 || true)
 
   if [ -z "$TOKEN" ]; then
-    # Fallback: campo "token"
     TOKEN=$(echo "$LOGIN_RESP" | grep -oP '"token"\s*:\s*"\K[^"]+' | head -1 || true)
   fi
 
@@ -53,17 +56,22 @@ if [ -z "$TOKEN" ]; then
   fi
 
   echo "Token obtenido OK (primeros 20 chars): ${TOKEN:0:20}..."
+  sleep "$SMOKE_SLEEP"
 fi
 echo ""
 
-# ─── Helper de check ─────────────────────────────────────────────────────────
+# ─── Helper de check (con token) ─────────────────────────────────────────────
 check() {
   local label="$1"
   local url="$2"
   local expected_status="${3:-200}"
 
+  local body_file
+  body_file="$(mktemp)"
+
   local status
-  status=$(curl -s --max-time 20 -o /tmp/smoke_resp.txt -w "%{http_code}" \
+  status=$(curl -s --max-time 20 --connect-timeout 5 \
+    -o "$body_file" -w "%{http_code}" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Origin: ${ORIGIN}" \
     "$url" 2>/dev/null || echo "000")
@@ -73,21 +81,27 @@ check() {
     PASS=$((PASS + 1))
   else
     local preview
-    preview=$(head -c 200 /tmp/smoke_resp.txt 2>/dev/null | tr '\n' ' ' || true)
+    preview=$(tr '\n' ' ' < "$body_file" 2>/dev/null | head -c 250 || true)
     echo "FAIL  [$status] $label  (expected $expected_status)  ${preview}"
     FAIL=$((FAIL + 1))
   fi
-  sleep 0.3
+
+  rm -f "$body_file"
+  sleep "$SMOKE_SLEEP"
 }
 
-# Health público (sin token)
+# ─── Helper para endpoints públicos (sin token) ───────────────────────────────
 check_public() {
   local label="$1"
   local url="$2"
   local expected_status="${3:-200}"
 
+  local body_file
+  body_file="$(mktemp)"
+
   local status
-  status=$(curl -s --max-time 20 -o /tmp/smoke_resp.txt -w "%{http_code}" \
+  status=$(curl -s --max-time 20 --connect-timeout 5 \
+    -o "$body_file" -w "%{http_code}" \
     -H "Origin: ${ORIGIN}" \
     "$url" 2>/dev/null || echo "000")
 
@@ -96,14 +110,16 @@ check_public() {
     PASS=$((PASS + 1))
   else
     local preview
-    preview=$(head -c 200 /tmp/smoke_resp.txt 2>/dev/null | tr '\n' ' ' || true)
+    preview=$(tr '\n' ' ' < "$body_file" 2>/dev/null | head -c 250 || true)
     echo "FAIL  [$status] $label  (expected $expected_status)  ${preview}"
     FAIL=$((FAIL + 1))
   fi
-  sleep 0.3
+
+  rm -f "$body_file"
+  sleep "$SMOKE_SLEEP"
 }
 
-echo "=== Staging smoke test — ${BASE_URL} ==="
+echo "=== Staging smoke test — ${BASE_URL}  (sleep ${SMOKE_SLEEP}s entre requests) ==="
 echo ""
 
 echo "--- Health (público) ---"
