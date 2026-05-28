@@ -252,21 +252,25 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   const attLastEventAt = att2000Available ? (attLastEvent?.[0]?.ts ?? null) : null;
 
   // ── 2. Bridge ZKTeco ────────────────────────────────────────────
-  // Devices come from BOTH the DB `devices` table AND ZKTECO_DEVICES env var (ip:port CSV)
-  let bridgeDevicesDetected = 0;
+  let devicesDb = 0;
   let bridgeLastPoll = null;
   try {
     const [devRows] = await sequelize.query(
-      'SELECT COUNT(*) AS cnt, MAX(last_sync_at) AS last_sync FROM devices'
+      'SELECT COUNT(*) AS cnt, MAX(last_sync) AS last_poll FROM devices'
     );
-    bridgeDevicesDetected = devRows[0]?.cnt || 0;
-    bridgeLastPoll        = devRows[0]?.last_sync || null;
-  } catch {}
+    devicesDb    = devRows[0]?.cnt || 0;
+    bridgeLastPoll = devRows[0]?.last_poll || null;
+  } catch {
+    try {
+      const [devRows] = await sequelize.query('SELECT COUNT(*) AS cnt FROM devices');
+      devicesDb = devRows[0]?.cnt || 0;
+    } catch {}
+  }
   const envDevicesStr = process.env.ZKTECO_DEVICES || '';
-  const bridgeDevicesExpected = envDevicesStr
+  const devicesEnv = envDevicesStr
     ? envDevicesStr.split(',').filter(s => s.trim()).length
     : 0;
-  const totalDevices = Math.max(bridgeDevicesDetected, bridgeDevicesExpected);
+  const devicesDetected = Math.max(devicesDb, devicesEnv);
 
   const rawTodayRow = await qLocalOne(
     'SELECT COUNT(*) AS cnt FROM attendance_logs WHERE DATE(timestamp) = ? AND source = ?',
@@ -389,8 +393,8 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   if (activeEmployees > 0 && (dsTodayRow?.cnt || 0) === 0) {
     warnings.push(`daily_summary vacío para ${date} — ejecutar POST /api/attendance/recalc-summary`);
   }
-  if (bridgeDevicesExpected > 0 && bridgeDevicesDetected === 0) {
-    warnings.push(`Bridge: ${bridgeDevicesExpected} dispositivos en ENV pero 0 detectados en BD (tabla devices vacía)`);
+  if (devicesEnv > 0 && devicesDb === 0) {
+    warnings.push(`Bridge: ${devicesEnv} dispositivos configurados en ZKTECO_DEVICES pero tabla devices vacía — ejecutar POST /api/sync/devices`);
   }
   if (syncLagHours !== null && syncLagHours > 24) {
     warnings.push(`Sin marcaciones nuevas hace ${syncLagHours}h — verificar bridge y sync att2000`);
@@ -423,12 +427,12 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
         last_event_user: att2000Available ? (attLastEvent?.[0]?.USERID ?? null) : null,
       },
       zkteco_bridge: {
-        available:               totalDevices > 0,
-        devices:                 totalDevices,
-        bridge_devices_expected: bridgeDevicesExpected,
-        bridge_devices_detected: bridgeDevicesDetected,
-        last_poll_at:            bridgeLastPoll,
-        raw_events_today:        rawToday,
+        available:         devicesDetected > 0,
+        devices_env:       devicesEnv,
+        devices_db:        devicesDb,
+        devices_detected:  devicesDetected,
+        last_poll_at:      bridgeLastPoll,
+        raw_events_today:  rawToday,
       },
       local_raw: {
         total:     logTotalRow?.cnt || 0,
@@ -462,5 +466,191 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
     },
   });
 });
+
+// ─── GET /api/attendance/punch-time-audit ─────────────────────────────────
+// Diagnóstico de desfase horario: compara att2000.CHECKTIME crudo vs
+// attendance_logs.timestamp crudo para los mismos empleados/día.
+// Query params:
+//   date=YYYY-MM-DD  (default: hoy)
+//   employee=texto   (nombre parcial o código — omitir para todos del día)
+router.get('/punch-time-audit', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
+  const { sequelize } = require('../config/database');
+  const date      = req.query.date || new Date().toISOString().split('T')[0];
+  const empFilter = (req.query.employee || '').trim();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ ok: false, error: 'date debe ser YYYY-MM-DD' });
+  }
+
+  // ── 1. Empleados que coincidan con el filtro ────────────────────────
+  let empSql = `SELECT id, code, first_name, last_name FROM employees WHERE status = 'active'`;
+  const empRepl = [];
+  if (empFilter) {
+    empSql += ` AND (CONCAT(first_name,' ',last_name) LIKE ? OR code LIKE ?)`;
+    empRepl.push(`%${empFilter}%`, `%${empFilter}%`);
+  }
+  empSql += ' LIMIT 20';
+
+  let employees = [];
+  try {
+    [employees] = await sequelize.query(empSql, { replacements: empRepl });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+  if (!employees.length) {
+    return res.json({
+      ok: true, date, employee_filter: empFilter || null,
+      records: [], total: 0, timezone_info: _auditTzInfo(),
+      message: 'No se encontraron empleados con ese filtro',
+    });
+  }
+
+  // ── 2. att2000: CHECKTIME como string crudo via CONVERT(varchar, 120) ──
+  // CONVERT(varchar(19), CHECKTIME, 120) → "YYYY-MM-DD HH:MI:SS" sin timezone.
+  // Filtramos en JS por código para evitar interpolación de datos de la BD en SQL.
+  let att2000Rows = null; // null = att2000 no disponible
+  try {
+    const { getAtt2000 } = require('../config/att2000');
+    const mssql = require('mssql');
+    const db = await getAtt2000();
+    const r = await db.request()
+      .input('d', mssql.VarChar(10), date)
+      .query(`
+        SELECT
+          CAST(c.USERID AS varchar(20))            AS USERID,
+          CONVERT(varchar(19), c.CHECKTIME, 120)   AS raw_checktime,
+          c.CHECKTYPE
+        FROM CHECKINOUT c
+        WHERE CONVERT(date, c.CHECKTIME) = @d
+        ORDER BY c.CHECKTIME
+      `);
+    const codeSet = new Set(employees.map(e => String(e.code)).filter(Boolean));
+    att2000Rows = r.recordset.filter(a => codeSet.has(a.USERID));
+  } catch {}
+
+  // ── 3. attendance_logs: timestamp crudo via DATE_FORMAT (sin conversión Sequelize) ──
+  const empIds      = employees.map(e => e.id);
+  const placeholders = empIds.map(() => '?').join(',');
+  let localRows = [];
+  try {
+    [localRows] = await sequelize.query(
+      `SELECT al.id, al.employee_id,
+              DATE_FORMAT(al.timestamp, '%Y-%m-%d %H:%i:%s') AS raw_timestamp,
+              al.type, al.source
+       FROM attendance_logs al
+       WHERE DATE(al.timestamp) = ?
+         AND al.employee_id IN (${placeholders})
+       ORDER BY al.timestamp`,
+      { replacements: [date, ...empIds] }
+    );
+  } catch {}
+
+  // ── 4. Cruzar registros por empleado y parear por proximidad ≤15 min ──
+  const records = [];
+
+  for (const emp of employees) {
+    const codeStr   = String(emp.code || '');
+    const attPunches = att2000Rows ? att2000Rows.filter(a => a.USERID === codeStr) : null;
+    const locPunches = localRows.filter(l => l.employee_id === emp.id);
+    if (!attPunches?.length && !locPunches.length) continue;
+
+    const usedLocal = new Set();
+
+    if (attPunches) {
+      for (const att of attPunches) {
+        // Ambos strings se parsean como UTC para que el diff revele el desfase de timezone
+        const attMs = Date.parse(att.raw_checktime.replace(' ', 'T') + 'Z');
+        let bestLoc = null, bestDelta = Infinity;
+        for (const loc of locPunches) {
+          if (usedLocal.has(loc.id)) continue;
+          const locMs = Date.parse(loc.raw_timestamp.replace(' ', 'T') + 'Z');
+          const delta = Math.abs(attMs - locMs);
+          if (delta < bestDelta && delta <= 15 * 60000) { bestDelta = delta; bestLoc = loc; }
+        }
+        if (bestLoc) usedLocal.add(bestLoc.id);
+
+        const diffMin = bestLoc
+          ? Math.round(
+              (Date.parse(bestLoc.raw_timestamp.replace(' ', 'T') + 'Z') - attMs) / 60000
+            )
+          : null;
+
+        records.push({
+          employee_id:   emp.id,
+          employee_name: `${emp.first_name} ${emp.last_name}`,
+          employee_code: emp.code,
+          att2000: {
+            raw_checktime: att.raw_checktime,
+            checktype:     att.CHECKTYPE,
+            userid:        att.USERID,
+          },
+          local: bestLoc ? {
+            attendance_logs_id:        bestLoc.id,
+            attendance_logs_timestamp: bestLoc.raw_timestamp,
+            type:   bestLoc.type,
+            source: bestLoc.source,
+          } : null,
+          diff_minutes: diffMin,
+          status: diffMin === null ? 'no_match_local'
+                : diffMin === 0   ? 'exact'
+                : `offset_${diffMin > 0 ? '+' : ''}${diffMin}m`,
+        });
+      }
+    }
+
+    // Locales sin pareja en att2000
+    for (const loc of locPunches) {
+      if (usedLocal.has(loc.id)) continue;
+      records.push({
+        employee_id:   emp.id,
+        employee_name: `${emp.first_name} ${emp.last_name}`,
+        employee_code: emp.code,
+        att2000: null,
+        local: {
+          attendance_logs_id:        loc.id,
+          attendance_logs_timestamp: loc.raw_timestamp,
+          type:   loc.type,
+          source: loc.source,
+        },
+        diff_minutes: null,
+        status: 'no_match_att2000',
+      });
+    }
+  }
+
+  // ── 5. Resumen del desfase ─────────────────────────────────────────
+  const diffs = records.filter(r => r.diff_minutes !== null).map(r => r.diff_minutes);
+  const offsetSummary = diffs.length ? {
+    count:            diffs.length,
+    min_diff_minutes: Math.min(...diffs),
+    max_diff_minutes: Math.max(...diffs),
+    avg_diff_minutes: Math.round(diffs.reduce((a, b) => a + b, 0) / diffs.length),
+    all_same_offset:  new Set(diffs).size === 1 ? diffs[0] : null,
+  } : null;
+
+  res.json({
+    ok: true,
+    date,
+    employee_filter:   empFilter || null,
+    att2000_available: att2000Rows !== null,
+    timezone_info:     _auditTzInfo(),
+    offset_summary:    offsetSummary,
+    records,
+    total:             records.length,
+  });
+});
+
+function _auditTzInfo() {
+  const { sequelize } = require('../config/database');
+  return {
+    process_tz:     process.env.TZ || '(not set)',
+    node_version:   process.version,
+    sequelize_tz:   sequelize.options.timezone || '(not set)',
+    server_now_utc: new Date().toISOString(),
+    server_now_py:  new Date().toLocaleString('es-PY', { timeZone: 'America/Asuncion' }),
+    note: 'raw_checktime y raw_timestamp se comparan tratando ambos como UTC ' +
+          'para que diff_minutes revele el desfase exacto de timezone entre att2000 y MySQL',
+  };
+}
 
 module.exports = router;

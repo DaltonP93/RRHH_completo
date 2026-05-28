@@ -174,6 +174,7 @@ check "GET /api/reports/monthly?year=2026&month=5"            "${BASE_URL}/api/r
 echo ""
 echo "--- Conciliación ---"
 check "GET /api/attendance/reconciliation-diagnostics"        "${BASE_URL}/api/attendance/reconciliation-diagnostics?date=${TODAY}"
+check "GET /api/attendance/punch-time-audit"                  "${BASE_URL}/api/attendance/punch-time-audit?date=${TODAY}"
 
 # POST endpoints: verificar routing (body válido → 200, no 404/500)
 LAST_WEEK=$(date -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -v-7d +%Y-%m-%d 2>/dev/null || echo "$TODAY")
