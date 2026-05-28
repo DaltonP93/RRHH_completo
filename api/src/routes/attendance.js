@@ -344,6 +344,27 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   );
   const unmatchedCount = await qLocalOne('SELECT COUNT(*) AS cnt FROM unknown_attendance_events', null);
 
+  // ── 8. Duplicados en attendance_logs para la fecha ────────────────
+  const dupCountRow = await qLocalOne(
+    `SELECT COUNT(*) AS cnt FROM (
+       SELECT employee_id, \`timestamp\`
+       FROM attendance_logs
+       WHERE DATE(\`timestamp\`) = ?
+       GROUP BY employee_id, \`timestamp\`
+       HAVING COUNT(*) > 1
+     ) sub`, [date]
+  );
+  const dupCount = dupCountRow?.cnt || 0;
+  const dupSamples = dupCount > 0 ? await qLocal(
+    `SELECT employee_id, \`timestamp\`, COUNT(*) AS copies
+     FROM attendance_logs
+     WHERE DATE(\`timestamp\`) = ?
+     GROUP BY employee_id, \`timestamp\`
+     HAVING COUNT(*) > 1
+     ORDER BY copies DESC
+     LIMIT 10`, [date]
+  ) : [];
+
   // ── 7. Fuente con más marcaciones HOY ───────────────────────────
   const sourceBreakdown = await qLocal(
     'SELECT source, COUNT(*) AS cnt FROM attendance_logs WHERE DATE(timestamp) = ? GROUP BY source', [date]
@@ -383,6 +404,7 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   if (cntOnlyOut  > 0) warnings.push(`${cntOnlyOut} empleado(s) con solo salida (sin entrada) para ${date}`);
   if (cntNoDept   > 0) warnings.push(`${cntNoDept} empleado(s) activo(s) sin departamento asignado — ejecutar POST /api/sync/departments`);
   if (cntNoName   > 0) warnings.push(`${cntNoName} empleado(s) activo(s) sin nombre completo — reimportar desde att2000`);
+  if (dupCount    > 0) warnings.push(`${dupCount} par(es) de marcaciones duplicadas en attendance_logs para ${date} — aplicar migración 086`);
 
   res.json({
     ok: true,
@@ -428,6 +450,10 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
       employees_no_department:   cntNoDept,
       employees_no_name:         cntNoName,
       unmatched_punches_total:   unmatchedCount?.cnt || 0,
+    },
+    duplicates: {
+      attendance_logs_duplicates_today: dupCount,
+      top_duplicate_samples:            dupSamples,
     },
     samples: {
       latest_raw:       latestRaw,

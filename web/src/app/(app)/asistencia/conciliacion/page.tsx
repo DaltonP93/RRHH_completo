@@ -11,6 +11,10 @@ interface DiagnosticData {
   last_raw_event_at: string | null
   last_processed_event_at: string | null
   warnings: string[]
+  duplicates?: {
+    attendance_logs_duplicates_today: number
+    top_duplicate_samples: Array<{ employee_id: number; timestamp: string; copies: number }>
+  }
   sources: {
     att2000: {
       available: boolean
@@ -489,6 +493,37 @@ export default function ConciliacionPage() {
             )}
           </Card>
         </div>
+      )}
+
+      {/* Duplicados en attendance_logs */}
+      {data && (data.duplicates?.attendance_logs_duplicates_today ?? 0) > 0 && (
+        <Card title={`Duplicados en attendance_logs — ${data.duplicates!.attendance_logs_duplicates_today} par(es)`}>
+          <div className="flex items-start gap-2 mb-3 p-2 bg-red-50 rounded text-xs text-red-700">
+            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            Hay marcaciones duplicadas. Aplicar la migración 086 para limpiarlos y agregar la restricción única.
+            <code className="ml-1 font-mono">mysql asistencia &lt; database/migrations/086_fix_attendance_logs_deduplication.sql</code>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 border-b border-gray-100">
+                  <th className="text-left pb-2 pr-3">Empleado ID</th>
+                  <th className="text-left pb-2 pr-3">Timestamp</th>
+                  <th className="text-left pb-2">Copias</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {data.duplicates!.top_duplicate_samples.map((d, i) => (
+                  <tr key={i}>
+                    <td className="py-1.5 pr-3 text-gray-900">#{d.employee_id}</td>
+                    <td className="py-1.5 pr-3 text-gray-600">{fmtTs(d.timestamp)}</td>
+                    <td className="py-1.5 font-bold text-red-600">{d.copies}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       {/* Marcaciones sin mapeo */}
