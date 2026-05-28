@@ -252,21 +252,25 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   const attLastEventAt = att2000Available ? (attLastEvent?.[0]?.ts ?? null) : null;
 
   // ── 2. Bridge ZKTeco ────────────────────────────────────────────
-  // Devices come from BOTH the DB `devices` table AND ZKTECO_DEVICES env var (ip:port CSV)
-  let bridgeDevicesDetected = 0;
+  let devicesDb = 0;
   let bridgeLastPoll = null;
   try {
     const [devRows] = await sequelize.query(
-      'SELECT COUNT(*) AS cnt, MAX(last_sync_at) AS last_sync FROM devices'
+      'SELECT COUNT(*) AS cnt, MAX(last_sync) AS last_poll FROM devices'
     );
-    bridgeDevicesDetected = devRows[0]?.cnt || 0;
-    bridgeLastPoll        = devRows[0]?.last_sync || null;
-  } catch {}
+    devicesDb    = devRows[0]?.cnt || 0;
+    bridgeLastPoll = devRows[0]?.last_poll || null;
+  } catch {
+    try {
+      const [devRows] = await sequelize.query('SELECT COUNT(*) AS cnt FROM devices');
+      devicesDb = devRows[0]?.cnt || 0;
+    } catch {}
+  }
   const envDevicesStr = process.env.ZKTECO_DEVICES || '';
-  const bridgeDevicesExpected = envDevicesStr
+  const devicesEnv = envDevicesStr
     ? envDevicesStr.split(',').filter(s => s.trim()).length
     : 0;
-  const totalDevices = Math.max(bridgeDevicesDetected, bridgeDevicesExpected);
+  const devicesDetected = Math.max(devicesDb, devicesEnv);
 
   const rawTodayRow = await qLocalOne(
     'SELECT COUNT(*) AS cnt FROM attendance_logs WHERE DATE(timestamp) = ? AND source = ?',
@@ -389,8 +393,8 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   if (activeEmployees > 0 && (dsTodayRow?.cnt || 0) === 0) {
     warnings.push(`daily_summary vacío para ${date} — ejecutar POST /api/attendance/recalc-summary`);
   }
-  if (bridgeDevicesExpected > 0 && bridgeDevicesDetected === 0) {
-    warnings.push(`Bridge: ${bridgeDevicesExpected} dispositivos en ENV pero 0 detectados en BD (tabla devices vacía)`);
+  if (devicesEnv > 0 && devicesDb === 0) {
+    warnings.push(`Bridge: ${devicesEnv} dispositivos configurados en ZKTECO_DEVICES pero tabla devices vacía — ejecutar POST /api/sync/devices`);
   }
   if (syncLagHours !== null && syncLagHours > 24) {
     warnings.push(`Sin marcaciones nuevas hace ${syncLagHours}h — verificar bridge y sync att2000`);
@@ -423,12 +427,12 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
         last_event_user: att2000Available ? (attLastEvent?.[0]?.USERID ?? null) : null,
       },
       zkteco_bridge: {
-        available:               totalDevices > 0,
-        devices:                 totalDevices,
-        bridge_devices_expected: bridgeDevicesExpected,
-        bridge_devices_detected: bridgeDevicesDetected,
-        last_poll_at:            bridgeLastPoll,
-        raw_events_today:        rawToday,
+        available:         devicesDetected > 0,
+        devices_env:       devicesEnv,
+        devices_db:        devicesDb,
+        devices_detected:  devicesDetected,
+        last_poll_at:      bridgeLastPoll,
+        raw_events_today:  rawToday,
       },
       local_raw: {
         total:     logTotalRow?.cnt || 0,

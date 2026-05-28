@@ -166,6 +166,72 @@ router.post('/machines', async (req, res) => {
   }
 });
 
+// ─── POST /api/sync/devices — Sincronizar relojes desde ZKTECO_DEVICES ──────
+// Lee la variable de entorno ZKTECO_DEVICES (formato "IP:PUERTO,IP:PUERTO,...")
+// y hace upsert en la tabla devices.  Idempotente — seguro de re-ejecutar.
+router.post('/devices', async (req, res) => {
+  const envStr = (process.env.ZKTECO_DEVICES || '').trim();
+  if (!envStr) {
+    return res.status(400).json({
+      ok: false,
+      error: 'ZKTECO_DEVICES no está configurado en las variables de entorno',
+    });
+  }
+
+  // Parsear "IP[:PUERTO], ..." — puerto por defecto 4370
+  const entries = envStr.split(',').map(s => s.trim()).filter(Boolean);
+  const parsed = entries.map((entry, i) => {
+    const colonIdx = entry.lastIndexOf(':');
+    let ip = entry, port = 4370;
+    if (colonIdx > 0) {
+      ip   = entry.slice(0, colonIdx).trim();
+      port = parseInt(entry.slice(colonIdx + 1)) || 4370;
+    }
+    return { name: `Reloj ZKTeco ${i + 1}`, ip_address: ip, port, source: 'env' };
+  });
+
+  const invalid = parsed.filter(d => !d.ip_address || !/^[a-zA-Z0-9._-]+$/.test(d.ip_address));
+  if (invalid.length) {
+    return res.status(400).json({
+      ok: false,
+      error: `Entradas inválidas en ZKTECO_DEVICES: ${invalid.map(d => d.ip_address).join(', ')}`,
+    });
+  }
+
+  let upserted = 0, errors = 0;
+  const errList = [];
+  for (const d of parsed) {
+    try {
+      await sequelize.query(`
+        INSERT INTO devices (name, ip_address, port, source, status)
+        VALUES (?, ?, ?, 'env', 'offline')
+        ON DUPLICATE KEY UPDATE
+          port      = VALUES(port),
+          source    = 'env',
+          name      = IF(source = 'env' OR name = '', VALUES(name), name)
+      `, { replacements: [d.name, d.ip_address, d.port] });
+      upserted++;
+    } catch (e) {
+      errors++;
+      errList.push({ ip: d.ip_address, error: e.message });
+    }
+  }
+
+  const [[dbCount]] = await sequelize.query(
+    'SELECT COUNT(*) AS cnt FROM devices'
+  ).catch(() => [[{ cnt: null }]]);
+
+  res.json({
+    ok:             errors === 0,
+    from_env:       parsed.length,
+    upserted,
+    errors,
+    ...(errList.length ? { error_list: errList } : {}),
+    devices_in_db:  dbCount?.cnt ?? null,
+    devices:        parsed,
+  });
+});
+
 // ─── GET /api/sync/checkinout — Ver CHECKINOUT crudo ─────────────
 router.get('/checkinout', async (req, res) => {
   const { from, to, limit = 50 } = req.query;

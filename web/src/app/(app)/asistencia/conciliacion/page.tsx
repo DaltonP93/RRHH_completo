@@ -26,9 +26,9 @@ interface DiagnosticData {
     }
     zkteco_bridge: {
       available: boolean
-      devices: number
-      bridge_devices_expected: number
-      bridge_devices_detected: number
+      devices_env: number
+      devices_db: number
+      devices_detected: number
       last_poll_at: string | null
       raw_events_today: number
     }
@@ -341,15 +341,22 @@ export default function ConciliacionPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <StatusBadge ok={data.sources.zkteco_bridge.available} label={data.sources.zkteco_bridge.available ? 'Disponible' : 'Sin dispositivos'} />
-                {data.sources.zkteco_bridge.devices > 0 && (
+                {data.sources.zkteco_bridge.devices_detected > 0 && (
                   <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-                    <Wifi className="w-3 h-3" />{data.sources.zkteco_bridge.devices} reloj(es)
+                    <Wifi className="w-3 h-3" />{data.sources.zkteco_bridge.devices_detected} reloj(es)
                   </span>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-3 pt-1">
-                <Stat label="Esperados (ENV)" value={data.sources.zkteco_bridge.bridge_devices_expected} />
-                <Stat label="En BD" value={data.sources.zkteco_bridge.bridge_devices_detected} />
+                <Stat label="ENV (ZKTECO_DEVICES)" value={data.sources.zkteco_bridge.devices_env} />
+                <Stat label="En BD (devices)"
+                  value={
+                    <span className={data.sources.zkteco_bridge.devices_db === 0 && data.sources.zkteco_bridge.devices_env > 0 ? 'text-amber-600' : ''}>
+                      {data.sources.zkteco_bridge.devices_db}
+                    </span>
+                  }
+                  sub={data.sources.zkteco_bridge.devices_db === 0 && data.sources.zkteco_bridge.devices_env > 0 ? 'Ejecutar POST /api/sync/devices' : undefined}
+                />
                 <Stat label="Eventos hoy (device)" value={data.sources.zkteco_bridge.raw_events_today} />
                 <Stat label="Última poll" value={fmtTs(data.sources.zkteco_bridge.last_poll_at)} />
               </div>
