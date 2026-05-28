@@ -253,6 +253,17 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
         { replacements: [sid, sid, sid] }
       ).catch(() => [[]]);
 
+      // ── Conversión de CHECKTIME ───────────────────────────────────────────────
+      // El driver mssql/tedious devuelve DATETIME de SQL Server como JS Date donde
+      // el valor UTC == el valor crudo almacenado (sin zona horaria).
+      // Ejemplo: SQL Server "15:11:05" → new Date('2026-05-28T15:11:05Z') (UTC = 15:11).
+      // Si pasamos ese Date a Sequelize (timezone '-03:00'), éste aplica −3h más y
+      // almacena "12:11:05" en MySQL — 3 horas de desfase.
+      //
+      // Solución: extraer la cadena ISO cruda y pasarla como string.
+      // Sequelize deja pasar strings sin conversión de zona; MySQL DATETIME los guarda tal cual.
+      const tsStr = checktimeToStr(r.CHECKTIME);
+
       const [result] = await sequelize.query(`
         INSERT IGNORE INTO attendance_logs
           (employee_id, device_id, timestamp, type, source, raw_data)
@@ -260,7 +271,7 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
       `, { replacements: [
         emp.id,
         device?.id || null,
-        new Date(r.CHECKTIME),
+        tsStr,
         type,
         JSON.stringify({
           userid: r.USERID,
@@ -281,6 +292,21 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
 
   logger.info(`Sync asistencia: ${imported} importados, ${skipped} duplicados, ${notFound} sin empleado`);
   return { imported, skipped, notFound, total: records.length };
+}
+
+/**
+ * Convierte un CHECKTIME de SQL Server (devuelto por tedious como JS Date o string)
+ * al formato MySQL "YYYY-MM-DD HH:mm:ss" SIN aplicar ningún offset de zona horaria.
+ *
+ * Tedious trata los campos DATETIME (sin timezone) como UTC-equivalente:
+ *   SQL Server "2026-05-28 15:11:05" → new Date('2026-05-28T15:11:05Z')
+ * Esta función extrae "2026-05-28 15:11:05" de vuelta sin perder nada.
+ */
+function checktimeToStr(checktime) {
+  if (checktime instanceof Date) {
+    return checktime.toISOString().replace('T', ' ').slice(0, 19);
+  }
+  return String(checktime).replace('T', ' ').slice(0, 19);
 }
 
 // Importar relojes desde Machines
@@ -346,4 +372,5 @@ module.exports = {
   syncMachines,
   syncHolidays,
   fullSync,
+  checktimeToStr,
 };
