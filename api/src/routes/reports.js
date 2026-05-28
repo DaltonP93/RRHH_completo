@@ -19,7 +19,7 @@ router.get('/monthly', async (req, res) => {
   const [rows] = await sequelize.query(`
     SELECT
       e.id, e.code, CONCAT(e.first_name,' ',e.last_name) AS employee_name,
-      d.name AS department,
+      CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department,
       COUNT(CASE WHEN ds.status IN ('present','late') THEN 1 END)  AS days_present,
       COUNT(CASE WHEN ds.status = 'late'              THEN 1 END)  AS days_late,
       COUNT(CASE WHEN ds.status = 'absent'            THEN 1 END)  AS days_absent,
@@ -85,7 +85,7 @@ router.get('/daily', async (req, res) => {
       SELECT
         e.id AS employee_id,
         CONCAT(e.first_name,' ',e.last_name) AS employee_name,
-        d.name AS department,
+        CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department,
         ds.first_in, ds.last_out, ds.worked_minutes,
         ds.late_minutes, ds.overtime_minutes,
         COALESCE(ds.status, 'absent') AS status
@@ -133,7 +133,7 @@ router.get('/daily-detail', async (req, res) => {
     SELECT
       e.id AS employee_id, e.code,
       CONCAT(e.first_name,' ',e.last_name) AS employee_name,
-      d.name AS department, s.name AS schedule,
+      CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department, s.name AS schedule,
       s.check_in AS scheduled_in, s.check_out AS scheduled_out,
       ds.first_in, ds.last_out, ds.worked_minutes, ds.late_minutes,
       ds.overtime_minutes, ds.status,
@@ -436,7 +436,7 @@ router.get('/monthly/export', async (req, res) => {
     const [rows] = await sequelize.query(`
       SELECT
         e.id, e.code, CONCAT(e.first_name,' ',e.last_name) AS employee_name,
-        d.name AS department,
+        CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department,
         ds.date, ds.status, ds.first_in, ds.last_out,
         ds.worked_minutes, ds.late_minutes, ds.overtime_minutes,
         IFNULL(ds.justification, NULL) AS justification

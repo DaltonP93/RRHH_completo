@@ -32,7 +32,8 @@ const logger           = require('./logger');
 async function fetchCheckInOut({ dateFrom, dateTo, limit = 5000 } = {}) {
   let where = '1=1';
   if (dateFrom) where += ` AND CHECKTIME >= '${dateFrom}'`;
-  if (dateTo)   where += ` AND CHECKTIME <= '${dateTo}'`;
+  // dateTo is a date string — append 23:59:59 so the full day is included
+  if (dateTo)   where += ` AND CHECKTIME <= '${dateTo} 23:59:59'`;
 
   const chkCols  = await getTableColumns('CHECKINOUT');
   const userCols = await getTableColumns('USERINFO');
