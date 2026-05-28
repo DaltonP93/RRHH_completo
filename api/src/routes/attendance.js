@@ -62,17 +62,25 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
     qAtt('SELECT COUNT(*) AS cnt FROM USERINFO'),
   ]);
   const att2000Available = attTotal !== null;
+  const attLastEventAt = att2000Available ? (attLastEvent?.[0]?.ts ?? null) : null;
 
   // ── 2. Bridge ZKTeco ────────────────────────────────────────────
-  let bridgeDevices = 0;
+  // Devices come from BOTH the DB `devices` table AND ZKTECO_DEVICES env var (ip:port CSV)
+  let bridgeDevicesDetected = 0;
   let bridgeLastPoll = null;
   try {
     const [devRows] = await sequelize.query(
       'SELECT COUNT(*) AS cnt, MAX(last_sync_at) AS last_sync FROM devices'
     );
-    bridgeDevices  = devRows[0]?.cnt || 0;
-    bridgeLastPoll = devRows[0]?.last_sync || null;
+    bridgeDevicesDetected = devRows[0]?.cnt || 0;
+    bridgeLastPoll        = devRows[0]?.last_sync || null;
   } catch {}
+  const envDevicesStr = process.env.ZKTECO_DEVICES || '';
+  const bridgeDevicesExpected = envDevicesStr
+    ? envDevicesStr.split(',').filter(s => s.trim()).length
+    : 0;
+  const totalDevices = Math.max(bridgeDevicesDetected, bridgeDevicesExpected);
+
   const rawTodayRow = await qLocalOne(
     'SELECT COUNT(*) AS cnt FROM attendance_logs WHERE DATE(timestamp) = ? AND source = ?',
     [date, 'device']
@@ -84,6 +92,11 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   const logTodayRow  = await qLocalOne(
     'SELECT COUNT(*) AS cnt FROM attendance_logs WHERE DATE(timestamp) = ?', [date]
   );
+  const lastRawRow = await qLocalOne(
+    'SELECT MAX(timestamp) AS ts FROM attendance_logs', null
+  );
+  const lastRawEventAt = lastRawRow?.ts ?? null;
+
   const latestRaw = await qLocal(
     `SELECT al.id, al.employee_id, al.timestamp, al.type, al.source,
             CONCAT(e.first_name,' ',e.last_name) AS employee_name
@@ -96,6 +109,11 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   const dsTodayRow = await qLocalOne(
     'SELECT COUNT(*) AS cnt FROM daily_summary WHERE date = ?', [date]
   );
+  const lastProcessedRow = await qLocalOne(
+    'SELECT MAX(date) AS dt FROM daily_summary', null
+  );
+  const lastProcessedEventAt = lastProcessedRow?.dt ?? null;
+
   const latestProcessed = await qLocal(
     `SELECT ds.employee_id, ds.date, ds.first_in, ds.last_out,
             ds.worked_minutes, ds.late_minutes, ds.status,
@@ -135,39 +153,71 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
     'SELECT source, COUNT(*) AS cnt FROM attendance_logs WHERE DATE(timestamp) = ? GROUP BY source', [date]
   );
 
+  // ── 8. Lag de sincronización ─────────────────────────────────────
+  let syncLagHours = null;
+  if (lastRawEventAt) {
+    syncLagHours = Math.round((Date.now() - new Date(lastRawEventAt).getTime()) / 36e5 * 10) / 10;
+  }
+
+  // ── 9. Warnings ──────────────────────────────────────────────────
+  const warnings = [];
+  const activeEmployees = empTotalRow?.cnt || 0;
+  const todayLogs = logTodayRow?.cnt || 0;
+  if (att2000Available && attLastEventAt && new Date(attLastEventAt).toISOString().split('T')[0] < date) {
+    warnings.push(`att2000: último evento fue ${attLastEventAt} — sin marcaciones para ${date}`);
+  }
+  if (activeEmployees > 0 && todayLogs === 0) {
+    warnings.push(`Sin marcaciones locales hoy (${date}) con ${activeEmployees} empleados activos`);
+  }
+  if (activeEmployees > 0 && (dsTodayRow?.cnt || 0) === 0) {
+    warnings.push(`daily_summary vacío para ${date} — ejecutar POST /api/attendance/recalc-summary`);
+  }
+  if (bridgeDevicesExpected > 0 && bridgeDevicesDetected === 0) {
+    warnings.push(`Bridge: ${bridgeDevicesExpected} dispositivos en ENV pero 0 detectados en BD (tabla devices vacía)`);
+  }
+  if (syncLagHours !== null && syncLagHours > 24) {
+    warnings.push(`Sin marcaciones nuevas hace ${syncLagHours}h — verificar bridge y sync att2000`);
+  }
+
   res.json({
     ok: true,
     date,
+    sync_lag_hours:           syncLagHours,
+    last_raw_event_at:        lastRawEventAt,
+    last_processed_event_at:  lastProcessedEventAt,
+    warnings,
     sources: {
       att2000: {
-        available:      att2000Available,
-        total:          att2000Available ? (attTotal[0]?.cnt ?? 0) : null,
-        today:          att2000Available ? (attToday?.[0]?.cnt ?? 0) : null,
+        available:       att2000Available,
+        total:           att2000Available ? (attTotal[0]?.cnt ?? 0) : null,
+        today:           att2000Available ? (attToday?.[0]?.cnt ?? 0) : null,
         users_in_userinfo: att2000Available ? (attUsers?.[0]?.cnt ?? 0) : null,
-        last_event_at:  att2000Available ? (attLastEvent?.[0]?.ts ?? null) : null,
+        last_event_at:   attLastEventAt,
         last_event_user: att2000Available ? (attLastEvent?.[0]?.USERID ?? null) : null,
       },
       zkteco_bridge: {
-        available:         bridgeDevices > 0,
-        devices:           bridgeDevices,
-        last_poll_at:      bridgeLastPoll,
-        raw_events_today:  rawToday,
+        available:              totalDevices > 0,
+        devices:                totalDevices,
+        bridge_devices_expected: bridgeDevicesExpected,
+        bridge_devices_detected: bridgeDevicesDetected,
+        last_poll_at:           bridgeLastPoll,
+        raw_events_today:       rawToday,
       },
       local_raw: {
-        total:  logTotalRow?.cnt || 0,
-        today:  logTodayRow?.cnt || 0,
+        total:     logTotalRow?.cnt || 0,
+        today:     todayLogs,
         by_source: sourceBreakdown,
       },
       processed: {
-        daily_summary_today:  dsTodayRow?.cnt || 0,
-        absent_today:         absentToday?.cnt || 0,
+        daily_summary_today: dsTodayRow?.cnt || 0,
+        absent_today:        absentToday?.cnt || 0,
       },
     },
     mapping: {
-      employees_active:               empTotalRow?.cnt  || 0,
-      employees_with_code:            empWithCode?.cnt  || 0,
-      employees_without_code:         empNoCode?.cnt    || 0,
-      unmatched_punches_total:        unmatchedCount?.cnt || 0,
+      employees_active:        activeEmployees,
+      employees_with_code:     empWithCode?.cnt  || 0,
+      employees_without_code:  empNoCode?.cnt    || 0,
+      unmatched_punches_total: unmatchedCount?.cnt || 0,
     },
     samples: {
       latest_raw:       latestRaw,
