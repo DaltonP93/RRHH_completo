@@ -27,6 +27,123 @@ router.post('/recalc-summary', authorize('admin','super_admin'), async (req, res
   }
 });
 
+// ─── POST /api/attendance/import-att2000 ─────────────────────────────────────
+// Importa marcaciones de att2000 hacia attendance_logs y recalcula daily_summary.
+// Accesible a admin y hr (sin requerir super_admin como /api/sync/).
+// Body: { date_from: "YYYY-MM-DD", date_to: "YYYY-MM-DD" }
+// Respuesta: { ok, date_from, date_to, import: {...}, recalc: { dates, count, errors } }
+router.post('/import-att2000', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
+  const { date_from, date_to } = req.body;
+  if (!date_from || !date_to) {
+    return res.status(400).json({ ok: false, error: 'date_from y date_to son requeridos (YYYY-MM-DD)' });
+  }
+  const dtFrom = new Date(date_from + 'T00:00:00');
+  const dtTo   = new Date(date_to   + 'T00:00:00');
+  if (isNaN(dtFrom) || isNaN(dtTo) || dtFrom > dtTo) {
+    return res.status(400).json({ ok: false, error: 'Rango de fechas inválido' });
+  }
+  const diffDays = Math.round((dtTo - dtFrom) / 86400000);
+  if (diffDays > 31) {
+    return res.status(400).json({ ok: false, error: 'El rango no puede superar 31 días por ejecución' });
+  }
+
+  try {
+    const { syncAttendance }  = require('../config/zkAdapter');
+    const { bulkRecalcDailySummary, pyDateStr } = require('../services/scheduler');
+
+    // 1. Importar att2000.CHECKINOUT → attendance_logs (INSERT IGNORE, idempotente)
+    let importResult = { imported: 0, skipped: 0, notFound: 0, total: 0 };
+    try {
+      importResult = await syncAttendance({ dateFrom: date_from, dateTo: date_to });
+    } catch (importErr) {
+      return res.status(502).json({
+        ok: false,
+        error: `Error conectando a att2000: ${importErr.message}`,
+        date_from, date_to,
+      });
+    }
+
+    // 2. Recalcular daily_summary para cada fecha del rango
+    const dates = [];
+    const cur = new Date(dtFrom);
+    while (cur <= dtTo) {
+      dates.push(pyDateStr(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const recalcErrors = [];
+    for (const d of dates) {
+      try {
+        await bulkRecalcDailySummary(d);
+      } catch (e) {
+        recalcErrors.push({ date: d, error: e.message });
+      }
+    }
+
+    res.json({
+      ok: true,
+      date_from,
+      date_to,
+      import: importResult,
+      recalc: { dates, count: dates.length, errors: recalcErrors },
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/attendance/recalc-range ───────────────────────────────────────
+// Recalcula daily_summary para un rango de fechas sin reimportar desde att2000.
+// Útil cuando los logs ya están en attendance_logs pero el procesamiento falló.
+// Body: { date_from: "YYYY-MM-DD", date_to: "YYYY-MM-DD" }
+router.post('/recalc-range', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
+  const { date_from, date_to } = req.body;
+  if (!date_from || !date_to) {
+    return res.status(400).json({ ok: false, error: 'date_from y date_to son requeridos (YYYY-MM-DD)' });
+  }
+  const dtFrom = new Date(date_from + 'T00:00:00');
+  const dtTo   = new Date(date_to   + 'T00:00:00');
+  if (isNaN(dtFrom) || isNaN(dtTo) || dtFrom > dtTo) {
+    return res.status(400).json({ ok: false, error: 'Rango de fechas inválido' });
+  }
+  if (Math.round((dtTo - dtFrom) / 86400000) > 31) {
+    return res.status(400).json({ ok: false, error: 'El rango no puede superar 31 días' });
+  }
+
+  try {
+    const { bulkRecalcDailySummary, pyDateStr } = require('../services/scheduler');
+    const dates = [];
+    const cur = new Date(dtFrom);
+    while (cur <= dtTo) {
+      dates.push(pyDateStr(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const results = [];
+    for (const d of dates) {
+      try {
+        await bulkRecalcDailySummary(d);
+        results.push({ date: d, ok: true });
+      } catch (e) {
+        results.push({ date: d, ok: false, error: e.message });
+      }
+    }
+
+    const errors = results.filter(r => !r.ok);
+    res.json({
+      ok: errors.length === 0,
+      date_from,
+      date_to,
+      dates_processed: results.length,
+      dates_ok: results.length - errors.length,
+      errors,
+      results,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── GET /api/attendance/reconciliation-diagnostics?date=YYYY-MM-DD ──────────
 // Diagnóstico completo de la cadena de marcaciones: att2000 → local → daily_summary.
 // Ayuda a identificar por qué empleados aparecen como "ausentes" sin datos.

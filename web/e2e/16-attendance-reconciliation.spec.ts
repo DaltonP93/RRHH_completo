@@ -59,12 +59,20 @@ test.describe('Conciliación de Marcaciones', () => {
     await login(page);
     await page.goto('/asistencia/conciliacion');
 
-    // Esperar que cargue el encabezado
     await expect(page.getByRole('heading', { name: /conciliaci[oó]n/i })).toBeVisible({ timeout: 15000 });
 
-    // Al menos una de las cards de fuentes debe aparecer
-    // (pueden estar en loading o con datos, pero el contenedor debe existir)
     const cards = page.locator('text=/att2000|Bridge ZKTeco|attendance_logs|daily_summary/i');
     await expect(cards.first()).toBeVisible({ timeout: 20000 });
+  });
+
+  test('panel de importación es visible y operable', async ({ page }) => {
+    await login(page);
+    await page.goto('/asistencia/conciliacion');
+
+    await expect(page.getByRole('heading', { name: /conciliaci[oó]n/i })).toBeVisible({ timeout: 15000 });
+
+    // El panel de import debe tener los controles de fecha y el botón
+    await expect(page.locator('select').filter({ hasText: /importar|recalcular/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('button', { name: /importar|recalcular/i })).toBeVisible();
   });
 });

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users } from 'lucide-react'
+import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle } from 'lucide-react'
 
 interface DiagnosticData {
   ok: boolean
@@ -70,13 +70,22 @@ interface DiagnosticData {
   }
 }
 
+interface ImportResult {
+  ok: boolean
+  date_from: string
+  date_to: string
+  import?: { imported: number; skipped: number; notFound: number; total: number }
+  recalc?: { dates: string[]; count: number; errors: Array<{ date: string; error: string }> }
+  error?: string
+}
+
 const STATUS_COLOR: Record<string, string> = {
-  present: 'bg-green-100 text-green-800',
-  absent:  'bg-red-100 text-red-800',
-  late:    'bg-yellow-100 text-yellow-800',
+  present:    'bg-green-100 text-green-800',
+  absent:     'bg-red-100 text-red-800',
+  late:       'bg-yellow-100 text-yellow-800',
   permission: 'bg-blue-100 text-blue-800',
-  holiday: 'bg-purple-100 text-purple-800',
-  weekend: 'bg-gray-100 text-gray-700',
+  holiday:    'bg-purple-100 text-purple-800',
+  weekend:    'bg-gray-100 text-gray-700',
 }
 
 function fmtTs(ts: string | null): string {
@@ -84,6 +93,13 @@ function fmtTs(ts: string | null): string {
   try {
     return new Date(ts).toLocaleString('es-PY', { dateStyle: 'short', timeStyle: 'short' })
   } catch { return ts }
+}
+
+function authHeader(): Record<string, string> {
+  const token = (typeof window !== 'undefined')
+    ? (localStorage.getItem('accessToken') || localStorage.getItem('token') || '')
+    : ''
+  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 }
 
 function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
@@ -95,9 +111,9 @@ function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
   )
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className={`bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden ${className ?? ''}`}>
       <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
         <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
       </div>
@@ -116,6 +132,113 @@ function Stat({ label, value, sub }: { label: string; value: React.ReactNode; su
   )
 }
 
+// ─── Import Panel ──────────────────────────────────────────────────────────────
+function ImportPanel({ onDone }: { onDone: () => void }) {
+  const today = new Date().toISOString().split('T')[0]
+  const [dateFrom, setDateFrom] = useState(today)
+  const [dateTo,   setDateTo]   = useState(today)
+  const [mode, setMode] = useState<'import_recalc' | 'recalc_only'>('import_recalc')
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<ImportResult | null>(null)
+
+  const run = async () => {
+    setRunning(true)
+    setResult(null)
+    try {
+      const endpoint = mode === 'import_recalc'
+        ? '/api/attendance/import-att2000'
+        : '/api/attendance/recalc-range'
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({ date_from: dateFrom, date_to: dateTo }),
+      })
+      const data = await res.json()
+      setResult(data)
+      if (data.ok) onDone()
+    } catch (e: unknown) {
+      setResult({ ok: false, date_from: dateFrom, date_to: dateTo, error: e instanceof Error ? e.message : 'Error de red' })
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <Card title="Importar y Recalcular">
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Desde</label>
+            <input type="date" value={dateFrom} max={today}
+              onChange={e => setDateFrom(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Hasta</label>
+            <input type="date" value={dateTo} max={today} min={dateFrom}
+              onChange={e => setDateTo(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Operación</label>
+            <select value={mode} onChange={e => setMode(e.target.value as typeof mode)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="import_recalc">Importar att2000 + Recalcular</option>
+              <option value="recalc_only">Solo recalcular (sin importar)</option>
+            </select>
+          </div>
+        </div>
+
+        <button
+          onClick={run}
+          disabled={running}
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+        >
+          {running
+            ? <><RefreshCw className="w-4 h-4 animate-spin" />Procesando…</>
+            : <><Play className="w-4 h-4" />{mode === 'import_recalc' ? 'Importar y recalcular' : 'Recalcular'}</>
+          }
+        </button>
+
+        {result && (
+          <div className={`rounded-lg p-4 ${result.ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              {result.ok
+                ? <CheckCircle className="w-4 h-4 text-green-600" />
+                : <XCircle className="w-4 h-4 text-red-600" />
+              }
+              <span className={`text-sm font-medium ${result.ok ? 'text-green-800' : 'text-red-800'}`}>
+                {result.ok ? 'Completado' : 'Error'}
+              </span>
+            </div>
+            {result.error && <p className="text-sm text-red-700">{result.error}</p>}
+            {result.import && (
+              <div className="grid grid-cols-4 gap-3 mt-2 text-xs">
+                <div><p className="text-gray-500">Leídas</p><p className="font-bold">{result.import.total}</p></div>
+                <div><p className="text-gray-500">Importadas</p><p className="font-bold text-green-700">{result.import.imported}</p></div>
+                <div><p className="text-gray-500">Duplicadas</p><p className="font-bold">{result.import.skipped}</p></div>
+                <div><p className="text-gray-500">Sin empleado</p><p className="font-bold text-amber-600">{result.import.notFound}</p></div>
+              </div>
+            )}
+            {result.recalc && (
+              <p className="text-xs text-gray-600 mt-2">
+                Recalculado: {result.recalc.count} fecha(s) — {result.recalc.dates.join(', ')}
+                {result.recalc.errors.length > 0 && (
+                  <span className="text-red-600 ml-1">({result.recalc.errors.length} error(es))</span>
+                )}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+// ─── Main page ─────────────────────────────────────────────────────────────────
 export default function ConciliacionPage() {
   const today = new Date().toISOString().split('T')[0]
   const [date, setDate] = useState(today)
@@ -127,9 +250,8 @@ export default function ConciliacionPage() {
     setLoading(true)
     setError(null)
     try {
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('token') || ''
       const res = await fetch(`/api/attendance/reconciliation-diagnostics?date=${d}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeader(),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setData(await res.json())
@@ -152,15 +274,12 @@ export default function ConciliacionPage() {
         </div>
         <div className="flex items-center gap-3">
           <input
-            type="date"
-            value={date}
-            max={today}
+            type="date" value={date} max={today}
             onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
           <button
-            onClick={() => load(date)}
-            disabled={loading}
+            onClick={() => load(date)} disabled={loading}
             className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -176,6 +295,9 @@ export default function ConciliacionPage() {
           {error}
         </div>
       )}
+
+      {/* Import/recalc panel — always visible */}
+      <ImportPanel onDone={() => load(date)} />
 
       {/* Warnings */}
       {data && data.warnings.length > 0 && (
@@ -288,8 +410,7 @@ export default function ConciliacionPage() {
       {/* Muestras */}
       {data && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Últimas marcaciones raw */}
-          <Card title={`Últimas marcaciones (attendance_logs)`}>
+          <Card title="Últimas marcaciones (attendance_logs)">
             {data.samples.latest_raw.length === 0 ? (
               <p className="text-sm text-gray-400">Sin datos</p>
             ) : (
@@ -308,7 +429,9 @@ export default function ConciliacionPage() {
                       <tr key={r.id}>
                         <td className="py-1.5 pr-3 text-gray-600 whitespace-nowrap">{fmtTs(r.timestamp)}</td>
                         <td className="py-1.5 pr-3 text-gray-900">{r.employee_name || `#${r.employee_id}`}</td>
-                        <td className="py-1.5 pr-3"><span className={`px-1.5 py-0.5 rounded text-xs ${r.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{r.type}</span></td>
+                        <td className="py-1.5 pr-3">
+                          <span className={`px-1.5 py-0.5 rounded text-xs ${r.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{r.type}</span>
+                        </td>
                         <td className="py-1.5 text-gray-500">{r.source}</td>
                       </tr>
                     ))}
@@ -318,7 +441,6 @@ export default function ConciliacionPage() {
             )}
           </Card>
 
-          {/* Últimos registros procesados */}
           <Card title={`Registros procesados — ${date}`}>
             {data.samples.latest_processed.length === 0 ? (
               <p className="text-sm text-gray-400">Sin registros procesados para esta fecha</p>
@@ -383,32 +505,21 @@ export default function ConciliacionPage() {
         </Card>
       )}
 
-      {/* Acciones rápidas */}
+      {/* Links rápidos */}
       {data && (
-        <Card title="Acciones de Corrección">
+        <Card title="Navegación rápida">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <a href="/sync/att2000" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
               <Database className="w-4 h-4 text-gray-400" />
-              <span>Importar desde att2000</span>
+              <span>Configuración att2000</span>
             </a>
-            <button
-              onClick={async () => {
-                const token = localStorage.getItem('accessToken') || localStorage.getItem('token') || ''
-                await fetch('/api/attendance/recalc-summary', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                  body: JSON.stringify({ date }),
-                })
-                load(date)
-              }}
-              className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4 text-gray-400" />
-              <span>Recalcular daily_summary</span>
-            </button>
             <a href="/asistencia/relojes/diagnostico" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
               <Wifi className="w-4 h-4 text-gray-400" />
               <span>Diagnóstico de relojes</span>
+            </a>
+            <a href="/asistencia" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+              <Download className="w-4 h-4 text-gray-400" />
+              <span>Dashboard asistencia</span>
             </a>
           </div>
         </Card>

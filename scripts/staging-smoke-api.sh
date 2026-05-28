@@ -175,6 +175,39 @@ echo ""
 echo "--- Conciliación ---"
 check "GET /api/attendance/reconciliation-diagnostics"        "${BASE_URL}/api/attendance/reconciliation-diagnostics?date=${TODAY}"
 
+# POST endpoints: verificar routing (body válido → 200, no 404/500)
+LAST_WEEK=$(date -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -v-7d +%Y-%m-%d 2>/dev/null || echo "$TODAY")
+check_post() {
+  local label="$1"
+  local url="$2"
+  local body="$3"
+  local expected_status="${4:-200}"
+
+  local status
+  status=$(curl -s --connect-timeout 5 --max-time 30 -o "$SMOKE_TMP" -w "%{http_code}" \
+    -X POST \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -H "Origin: ${ORIGIN}" \
+    -d "$body" \
+    "$url" 2>/dev/null || echo "000")
+
+  if [ "$status" = "$expected_status" ]; then
+    echo "PASS  [$status] $label"
+    PASS=$((PASS + 1))
+  else
+    local preview
+    preview=$(head -c 200 "$SMOKE_TMP" 2>/dev/null | tr '\n' ' ' || true)
+    echo "FAIL  [$status] $label  (expected $expected_status)  ${preview}"
+    FAIL=$((FAIL + 1))
+  fi
+  sleep "${SMOKE_SLEEP}"
+}
+
+check_post "POST /api/attendance/recalc-range (rango pasado)"  \
+  "${BASE_URL}/api/attendance/recalc-range"                    \
+  "{\"date_from\":\"${LAST_WEEK}\",\"date_to\":\"${LAST_WEEK}\"}"
+
 echo ""
 echo "=== Resultado: ${PASS} PASS | ${FAIL} FAIL ==="
 rm -f "$SMOKE_TMP"
