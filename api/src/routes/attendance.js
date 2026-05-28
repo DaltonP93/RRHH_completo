@@ -27,11 +27,87 @@ router.post('/recalc-summary', authorize('admin','super_admin'), async (req, res
   }
 });
 
+// ─── Orquestador compartido: importar att2000 + recalcular daily_summary ──────
+async function _runImportAndRecalc({ date_from, date_to }) {
+  const { syncAttendance }  = require('../config/zkAdapter');
+  const { bulkRecalcDailySummary, pyDateStr } = require('../services/scheduler');
+  const { sequelize } = require('../config/database');
+  const logger = require('../config/logger');
+
+  // 1. Importar att2000 → attendance_logs (INSERT IGNORE, idempotente)
+  let raw = { imported: 0, skipped: 0, notFound: 0, total: 0 };
+  try {
+    raw = await syncAttendance({ dateFrom: date_from, dateTo: date_to });
+  } catch (importErr) {
+    const err = new Error(`att2000 no disponible: ${importErr.message}`);
+    err.status = 502;
+    throw err;
+  }
+
+  logger.info('import-att2000', {
+    date_from, date_to,
+    source_total: raw.total,
+    inserted: raw.imported,
+    skipped_duplicates: raw.skipped,
+    not_found_employees: raw.notFound,
+  });
+
+  // 2. Contar cuántos registros existen ya en attendance_logs para el rango
+  let localExisting = 0;
+  try {
+    const [[row]] = await sequelize.query(
+      "SELECT COUNT(*) AS cnt FROM attendance_logs WHERE DATE(timestamp) BETWEEN ? AND ?",
+      { replacements: [date_from, date_to] }
+    );
+    localExisting = row?.cnt || 0;
+  } catch {}
+
+  // 3. Recalcular daily_summary para cada fecha del rango
+  const dtFrom = new Date(date_from + 'T00:00:00');
+  const dtTo   = new Date(date_to   + 'T00:00:00');
+  const dates = [];
+  const cur = new Date(dtFrom);
+  while (cur <= dtTo) {
+    dates.push(pyDateStr(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  const recalcErrors = [];
+  for (const d of dates) {
+    try { await bulkRecalcDailySummary(d); }
+    catch (e) { recalcErrors.push({ date: d, error: e.message }); }
+  }
+
+  const result = {
+    ok: true,
+    date_from,
+    date_to,
+    source: 'att2000',
+    source_total:          raw.total,
+    local_existing:        localExisting,
+    inserted:              raw.imported,
+    skipped_duplicates:    raw.skipped,
+    not_found_employees:   raw.notFound,
+    recalculated_days:     dates,
+  };
+
+  if (raw.total === 0) {
+    result.warning = 'No se encontraron marcaciones en att2000 para el rango solicitado. Verifique fecha y conexión.';
+  } else if (raw.imported === 0 && raw.skipped > 0) {
+    result.message = 'Importación finalizada: los datos ya estaban sincronizados';
+  } else {
+    result.message = `${raw.imported} nuevas marcaciones importadas, ${dates.length} día(s) recalculado(s)`;
+  }
+
+  if (recalcErrors.length > 0) result.recalc_errors = recalcErrors;
+
+  return result;
+}
+
 // ─── POST /api/attendance/import-att2000 ─────────────────────────────────────
 // Importa marcaciones de att2000 hacia attendance_logs y recalcula daily_summary.
 // Accesible a admin y hr (sin requerir super_admin como /api/sync/).
 // Body: { date_from: "YYYY-MM-DD", date_to: "YYYY-MM-DD" }
-// Respuesta: { ok, date_from, date_to, import: {...}, recalc: { dates, count, errors } }
 router.post('/import-att2000', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
   const { date_from, date_to } = req.body;
   if (!date_from || !date_to) {
@@ -42,51 +118,45 @@ router.post('/import-att2000', authorize('admin', 'super_admin', 'hr'), async (r
   if (isNaN(dtFrom) || isNaN(dtTo) || dtFrom > dtTo) {
     return res.status(400).json({ ok: false, error: 'Rango de fechas inválido' });
   }
-  const diffDays = Math.round((dtTo - dtFrom) / 86400000);
-  if (diffDays > 31) {
+  if (Math.round((dtTo - dtFrom) / 86400000) > 31) {
     return res.status(400).json({ ok: false, error: 'El rango no puede superar 31 días por ejecución' });
   }
-
   try {
-    const { syncAttendance }  = require('../config/zkAdapter');
+    res.json(await _runImportAndRecalc({ date_from, date_to }));
+  } catch (err) {
+    res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/attendance/reprocess-range (alias de import-att2000) ───────────
+router.post('/reprocess-range', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
+  const { date_from, date_to } = req.body;
+  if (!date_from || !date_to) {
+    return res.status(400).json({ ok: false, error: 'date_from y date_to son requeridos (YYYY-MM-DD)' });
+  }
+  const dtFrom = new Date(date_from + 'T00:00:00');
+  const dtTo   = new Date(date_to   + 'T00:00:00');
+  if (isNaN(dtFrom) || isNaN(dtTo) || dtFrom > dtTo) {
+    return res.status(400).json({ ok: false, error: 'Rango de fechas inválido' });
+  }
+  if (Math.round((dtTo - dtFrom) / 86400000) > 31) {
+    return res.status(400).json({ ok: false, error: 'El rango no puede superar 31 días por ejecución' });
+  }
+  try {
+    const result = await _runImportAndRecalc({ date_from, date_to });
+    res.json({ ...result, days_processed: result.recalculated_days.length });
+  } catch (err) {
+    res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/attendance/process-day (alias de recalc-summary) ──────────────
+router.post('/process-day', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
+  try {
     const { bulkRecalcDailySummary, pyDateStr } = require('../services/scheduler');
-
-    // 1. Importar att2000.CHECKINOUT → attendance_logs (INSERT IGNORE, idempotente)
-    let importResult = { imported: 0, skipped: 0, notFound: 0, total: 0 };
-    try {
-      importResult = await syncAttendance({ dateFrom: date_from, dateTo: date_to });
-    } catch (importErr) {
-      return res.status(502).json({
-        ok: false,
-        error: `Error conectando a att2000: ${importErr.message}`,
-        date_from, date_to,
-      });
-    }
-
-    // 2. Recalcular daily_summary para cada fecha del rango
-    const dates = [];
-    const cur = new Date(dtFrom);
-    while (cur <= dtTo) {
-      dates.push(pyDateStr(cur));
-      cur.setDate(cur.getDate() + 1);
-    }
-
-    const recalcErrors = [];
-    for (const d of dates) {
-      try {
-        await bulkRecalcDailySummary(d);
-      } catch (e) {
-        recalcErrors.push({ date: d, error: e.message });
-      }
-    }
-
-    res.json({
-      ok: true,
-      date_from,
-      date_to,
-      import: importResult,
-      recalc: { dates, count: dates.length, errors: recalcErrors },
-    });
+    const date = req.body.date || pyDateStr(new Date());
+    await bulkRecalcDailySummary(date);
+    res.json({ ok: true, date, processed: true, message: `daily_summary recalculado para ${date}` });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -258,7 +328,16 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
      WHERE e.status = 'active' AND (ds.id IS NULL OR ds.status = 'absent')`, [date]
   );
 
-  // ── 6. Sin mapeo (unmapped punches) ─────────────────────────────
+  // ── 6. Anomalías en daily_summary para la fecha ─────────────────
+  const [anomalyOnlyIn, anomalyOnlyOut, anomalyOutBeforeIn, anomalyDeptGeneric, anomalyNoName] = await Promise.all([
+    qLocalOne(`SELECT COUNT(*) AS cnt FROM daily_summary WHERE date = ? AND first_in IS NOT NULL AND last_out IS NULL`, [date]),
+    qLocalOne(`SELECT COUNT(*) AS cnt FROM daily_summary WHERE date = ? AND first_in IS NULL AND last_out IS NOT NULL`, [date]),
+    qLocalOne(`SELECT COUNT(*) AS cnt FROM daily_summary ds WHERE date = ? AND first_in IS NOT NULL AND last_out IS NOT NULL AND last_out < first_in`, [date]),
+    qLocalOne(`SELECT COUNT(*) AS cnt FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.status = 'active' AND (d.id IS NULL OR d.name = 'This Company' OR d.name IS NULL)`, null),
+    qLocalOne(`SELECT COUNT(*) AS cnt FROM employees WHERE status = 'active' AND (first_name IS NULL OR first_name = '' OR last_name IS NULL OR last_name = '')`, null),
+  ]);
+
+  // ── 7. Sin mapeo (unmapped punches) ─────────────────────────────
   const unmatchedRows = await qLocal(
     'SELECT source_user_id, badge_number, check_time FROM unknown_attendance_events ORDER BY check_time DESC LIMIT 5',
     null
@@ -295,6 +374,15 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   if (syncLagHours !== null && syncLagHours > 24) {
     warnings.push(`Sin marcaciones nuevas hace ${syncLagHours}h — verificar bridge y sync att2000`);
   }
+  const cntOnlyIn     = anomalyOnlyIn?.cnt    || 0;
+  const cntOnlyOut    = anomalyOnlyOut?.cnt   || 0;
+  const cntOutBefore  = anomalyOutBeforeIn?.cnt || 0;
+  const cntNoName     = anomalyNoName?.cnt    || 0;
+  const cntNoDept     = anomalyDeptGeneric?.cnt || 0;
+  if (cntOutBefore > 0) warnings.push(`${cntOutBefore} empleado(s) con last_out anterior a first_in — posible error de tipo de marcación`);
+  if (cntOnlyOut  > 0) warnings.push(`${cntOnlyOut} empleado(s) con solo salida (sin entrada) para ${date}`);
+  if (cntNoDept   > 0) warnings.push(`${cntNoDept} empleado(s) activo(s) sin departamento asignado — ejecutar POST /api/sync/departments`);
+  if (cntNoName   > 0) warnings.push(`${cntNoName} empleado(s) activo(s) sin nombre completo — reimportar desde att2000`);
 
   res.json({
     ok: true,
@@ -313,12 +401,12 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
         last_event_user: att2000Available ? (attLastEvent?.[0]?.USERID ?? null) : null,
       },
       zkteco_bridge: {
-        available:              totalDevices > 0,
-        devices:                totalDevices,
+        available:               totalDevices > 0,
+        devices:                 totalDevices,
         bridge_devices_expected: bridgeDevicesExpected,
         bridge_devices_detected: bridgeDevicesDetected,
-        last_poll_at:           bridgeLastPoll,
-        raw_events_today:       rawToday,
+        last_poll_at:            bridgeLastPoll,
+        raw_events_today:        rawToday,
       },
       local_raw: {
         total:     logTotalRow?.cnt || 0,
@@ -326,15 +414,20 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
         by_source: sourceBreakdown,
       },
       processed: {
-        daily_summary_today: dsTodayRow?.cnt || 0,
-        absent_today:        absentToday?.cnt || 0,
+        daily_summary_today:       dsTodayRow?.cnt || 0,
+        absent_today:              absentToday?.cnt || 0,
+        employees_with_only_in:    cntOnlyIn,
+        employees_with_only_out:   cntOnlyOut,
+        employees_out_before_in:   cntOutBefore,
       },
     },
     mapping: {
-      employees_active:        activeEmployees,
-      employees_with_code:     empWithCode?.cnt  || 0,
-      employees_without_code:  empNoCode?.cnt    || 0,
-      unmatched_punches_total: unmatchedCount?.cnt || 0,
+      employees_active:          activeEmployees,
+      employees_with_code:       empWithCode?.cnt  || 0,
+      employees_without_code:    empNoCode?.cnt    || 0,
+      employees_no_department:   cntNoDept,
+      employees_no_name:         cntNoName,
+      unmatched_punches_total:   unmatchedCount?.cnt || 0,
     },
     samples: {
       latest_raw:       latestRaw,

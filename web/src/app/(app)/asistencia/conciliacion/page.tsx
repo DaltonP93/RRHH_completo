@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { api } from '@/lib/api'
 import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle } from 'lucide-react'
 
 interface DiagnosticData {
@@ -35,12 +36,17 @@ interface DiagnosticData {
     processed: {
       daily_summary_today: number
       absent_today: number
+      employees_with_only_in: number
+      employees_with_only_out: number
+      employees_out_before_in: number
     }
   }
   mapping: {
     employees_active: number
     employees_with_code: number
     employees_without_code: number
+    employees_no_department: number
+    employees_no_name: number
     unmatched_punches_total: number
   }
   samples: {
@@ -72,10 +78,16 @@ interface DiagnosticData {
 
 interface ImportResult {
   ok: boolean
-  date_from: string
-  date_to: string
-  import?: { imported: number; skipped: number; notFound: number; total: number }
-  recalc?: { dates: string[]; count: number; errors: Array<{ date: string; error: string }> }
+  date_from?: string
+  date_to?: string
+  source_total?: number
+  local_existing?: number
+  inserted?: number
+  skipped_duplicates?: number
+  not_found_employees?: number
+  recalculated_days?: string[]
+  message?: string
+  warning?: string
   error?: string
 }
 
@@ -93,13 +105,6 @@ function fmtTs(ts: string | null): string {
   try {
     return new Date(ts).toLocaleString('es-PY', { dateStyle: 'short', timeStyle: 'short' })
   } catch { return ts }
-}
-
-function authHeader(): Record<string, string> {
-  const token = (typeof window !== 'undefined')
-    ? (localStorage.getItem('accessToken') || localStorage.getItem('token') || '')
-    : ''
-  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 }
 
 function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
@@ -148,16 +153,13 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
       const endpoint = mode === 'import_recalc'
         ? '/api/attendance/import-att2000'
         : '/api/attendance/recalc-range'
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: authHeader(),
-        body: JSON.stringify({ date_from: dateFrom, date_to: dateTo }),
-      })
-      const data = await res.json()
+      const { data } = await api.post(endpoint, { date_from: dateFrom, date_to: dateTo })
       setResult(data)
       if (data.ok) onDone()
     } catch (e: unknown) {
-      setResult({ ok: false, date_from: dateFrom, date_to: dateTo, error: e instanceof Error ? e.message : 'Error de red' })
+      const msg = (e as { response?: { data?: { error?: string } }; message?: string })
+        ?.response?.data?.error ?? (e as { message?: string })?.message ?? 'Error de red'
+      setResult({ ok: false, error: msg })
     } finally {
       setRunning(false)
     }
@@ -193,8 +195,7 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
         </div>
 
         <button
-          onClick={run}
-          disabled={running}
+          onClick={run} disabled={running}
           className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
         >
           {running
@@ -206,29 +207,25 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
         {result && (
           <div className={`rounded-lg p-4 ${result.ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
             <div className="flex items-center gap-2 mb-2">
-              {result.ok
-                ? <CheckCircle className="w-4 h-4 text-green-600" />
-                : <XCircle className="w-4 h-4 text-red-600" />
-              }
+              {result.ok ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-red-600" />}
               <span className={`text-sm font-medium ${result.ok ? 'text-green-800' : 'text-red-800'}`}>
                 {result.ok ? 'Completado' : 'Error'}
               </span>
             </div>
-            {result.error && <p className="text-sm text-red-700">{result.error}</p>}
-            {result.import && (
-              <div className="grid grid-cols-4 gap-3 mt-2 text-xs">
-                <div><p className="text-gray-500">Leídas</p><p className="font-bold">{result.import.total}</p></div>
-                <div><p className="text-gray-500">Importadas</p><p className="font-bold text-green-700">{result.import.imported}</p></div>
-                <div><p className="text-gray-500">Duplicadas</p><p className="font-bold">{result.import.skipped}</p></div>
-                <div><p className="text-gray-500">Sin empleado</p><p className="font-bold text-amber-600">{result.import.notFound}</p></div>
+            {result.error   && <p className="text-sm text-red-700">{result.error}</p>}
+            {result.warning && <p className="text-sm text-amber-700">{result.warning}</p>}
+            {result.message && <p className="text-sm text-green-700">{result.message}</p>}
+            {result.source_total !== undefined && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-xs">
+                <div><p className="text-gray-500">En att2000</p><p className="font-bold">{result.source_total}</p></div>
+                <div><p className="text-gray-500">Ya locales</p><p className="font-bold">{result.local_existing ?? '—'}</p></div>
+                <div><p className="text-gray-500">Nuevas</p><p className="font-bold text-green-700">{result.inserted ?? 0}</p></div>
+                <div><p className="text-gray-500">Sin empleado</p><p className="font-bold text-amber-600">{result.not_found_employees ?? 0}</p></div>
               </div>
             )}
-            {result.recalc && (
+            {result.recalculated_days && result.recalculated_days.length > 0 && (
               <p className="text-xs text-gray-600 mt-2">
-                Recalculado: {result.recalc.count} fecha(s) — {result.recalc.dates.join(', ')}
-                {result.recalc.errors.length > 0 && (
-                  <span className="text-red-600 ml-1">({result.recalc.errors.length} error(es))</span>
-                )}
+                Recalculado: {result.recalculated_days.join(', ')}
               </p>
             )}
           </div>
@@ -250,13 +247,12 @@ export default function ConciliacionPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/attendance/reconciliation-diagnostics?date=${d}`, {
-        headers: authHeader(),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      setData(await res.json())
+      const { data: resp } = await api.get(`/api/attendance/reconciliation-diagnostics?date=${d}`)
+      setData(resp)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error desconocido')
+      const msg = (e as { response?: { data?: { error?: string } }; message?: string })
+        ?.response?.data?.error ?? (e as { message?: string })?.message ?? 'Error desconocido'
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -330,7 +326,8 @@ export default function ConciliacionPage() {
                 <Stat label="Total marcaciones" value={data.sources.att2000.total?.toLocaleString() ?? '—'} />
                 <Stat label="Hoy" value={data.sources.att2000.today ?? '—'} />
                 <Stat label="Usuarios USERINFO" value={data.sources.att2000.users_in_userinfo ?? '—'} />
-                <Stat label="Último evento" value={fmtTs(data.sources.att2000.last_event_at)} sub={data.sources.att2000.last_event_user ? `USERID ${data.sources.att2000.last_event_user}` : undefined} />
+                <Stat label="Último evento" value={fmtTs(data.sources.att2000.last_event_at)}
+                  sub={data.sources.att2000.last_event_user ? `USERID ${data.sources.att2000.last_event_user}` : undefined} />
               </div>
             </div>
           </Card>
@@ -386,6 +383,20 @@ export default function ConciliacionPage() {
                 <Stat label="Ausentes hoy" value={data.sources.processed.absent_today} />
               </div>
               <Stat label="Último procesado" value={fmtTs(data.last_processed_event_at)} />
+              {(data.sources.processed.employees_out_before_in > 0 ||
+                data.sources.processed.employees_with_only_out > 0) && (
+                <div className="pt-1 space-y-1 border-t border-gray-100">
+                  {data.sources.processed.employees_out_before_in > 0 && (
+                    <p className="text-xs text-red-600">⚠ {data.sources.processed.employees_out_before_in} salida anterior a entrada</p>
+                  )}
+                  {data.sources.processed.employees_with_only_out > 0 && (
+                    <p className="text-xs text-amber-600">⚠ {data.sources.processed.employees_with_only_out} solo salida (sin entrada)</p>
+                  )}
+                  {data.sources.processed.employees_with_only_in > 0 && (
+                    <p className="text-xs text-blue-600">ℹ {data.sources.processed.employees_with_only_in} solo entrada (sin salida)</p>
+                  )}
+                </div>
+              )}
             </div>
           </Card>
         </div>
@@ -393,16 +404,22 @@ export default function ConciliacionPage() {
 
       {/* Mapeo de empleados */}
       {data && (
-        <Card title="Mapeo de Empleados">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Stat label="Empleados activos" value={<span className="flex items-center gap-1"><Users className="w-4 h-4 text-gray-400" />{data.mapping.employees_active}</span>} />
+        <Card title="Estado de Empleados">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <Stat label="Activos" value={<span className="flex items-center gap-1"><Users className="w-4 h-4 text-gray-400" />{data.mapping.employees_active}</span>} />
             <Stat
               label="Con código ZKTeco"
               value={data.mapping.employees_with_code}
-              sub={`${Math.round(data.mapping.employees_with_code / Math.max(data.mapping.employees_active, 1) * 100)}% del total`}
+              sub={`${Math.round(data.mapping.employees_with_code / Math.max(data.mapping.employees_active, 1) * 100)}%`}
             />
-            <Stat label="Sin código" value={<span className={data.mapping.employees_without_code > 0 ? 'text-red-600' : 'text-gray-900'}>{data.mapping.employees_without_code}</span>} />
-            <Stat label="Marcaciones sin mapeo" value={<span className={data.mapping.unmatched_punches_total > 0 ? 'text-amber-600' : 'text-gray-900'}>{data.mapping.unmatched_punches_total}</span>} />
+            <Stat label="Sin código"
+              value={<span className={data.mapping.employees_without_code > 0 ? 'text-red-600' : ''}>{data.mapping.employees_without_code}</span>} />
+            <Stat label="Sin departamento"
+              value={<span className={data.mapping.employees_no_department > 0 ? 'text-amber-600' : ''}>{data.mapping.employees_no_department}</span>} />
+            <Stat label="Sin nombre"
+              value={<span className={data.mapping.employees_no_name > 0 ? 'text-amber-600' : ''}>{data.mapping.employees_no_name}</span>} />
+            <Stat label="Punches sin mapeo"
+              value={<span className={data.mapping.unmatched_punches_total > 0 ? 'text-amber-600' : ''}>{data.mapping.unmatched_punches_total}</span>} />
           </div>
         </Card>
       )}
@@ -480,7 +497,6 @@ export default function ConciliacionPage() {
           <div className="flex items-start gap-2 mb-3 p-2 bg-amber-50 rounded text-xs text-amber-700">
             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             Estos USERID de ZKTeco no tienen un empleado con <code className="font-mono">employees.code</code> equivalente.
-            Asignar el código correcto en la ficha del empleado.
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -506,24 +522,22 @@ export default function ConciliacionPage() {
       )}
 
       {/* Links rápidos */}
-      {data && (
-        <Card title="Navegación rápida">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <a href="/sync/att2000" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-              <Database className="w-4 h-4 text-gray-400" />
-              <span>Configuración att2000</span>
-            </a>
-            <a href="/asistencia/relojes/diagnostico" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-              <Wifi className="w-4 h-4 text-gray-400" />
-              <span>Diagnóstico de relojes</span>
-            </a>
-            <a href="/asistencia" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-              <Download className="w-4 h-4 text-gray-400" />
-              <span>Dashboard asistencia</span>
-            </a>
-          </div>
-        </Card>
-      )}
+      <Card title="Navegación rápida">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <a href="/sync/att2000" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+            <Database className="w-4 h-4 text-gray-400" />
+            <span>Configuración att2000</span>
+          </a>
+          <a href="/asistencia/relojes/diagnostico" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+            <Wifi className="w-4 h-4 text-gray-400" />
+            <span>Diagnóstico de relojes</span>
+          </a>
+          <a href="/asistencia" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+            <Download className="w-4 h-4 text-gray-400" />
+            <span>Dashboard asistencia</span>
+          </a>
+        </div>
+      </Card>
     </div>
   )
 }

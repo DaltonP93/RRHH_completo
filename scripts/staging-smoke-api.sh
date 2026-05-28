@@ -204,8 +204,16 @@ check_post() {
   sleep "${SMOKE_SLEEP}"
 }
 
-check_post "POST /api/attendance/recalc-range (rango pasado)"  \
-  "${BASE_URL}/api/attendance/recalc-range"                    \
+check_post "POST /api/attendance/recalc-range (rango pasado)"   \
+  "${BASE_URL}/api/attendance/recalc-range"                     \
+  "{\"date_from\":\"${LAST_WEEK}\",\"date_to\":\"${LAST_WEEK}\"}"
+
+check_post "POST /api/attendance/process-day (hoy)"             \
+  "${BASE_URL}/api/attendance/process-day"                      \
+  "{\"date\":\"${LAST_WEEK}\"}"
+
+check_post "POST /api/attendance/reprocess-range (alias)"       \
+  "${BASE_URL}/api/attendance/reprocess-range"                  \
   "{\"date_from\":\"${LAST_WEEK}\",\"date_to\":\"${LAST_WEEK}\"}"
 
 echo ""
