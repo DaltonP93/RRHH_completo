@@ -417,3 +417,98 @@ describe('pipeline buildSegments + computeBaseMetrics + applyPolicy (Juan Carlos
     expect(result.breakMinutes).toBe(60);
   });
 });
+
+// ─── Reglas de negocio — process-day-v2 ──────────────────────────────────────
+describe('process-day-v2 business rules', () => {
+  // REGLA 1: jornada corrida con default policy → sin descuento
+  test('06:00-13:00 + default policy → gross=420, break=0, worked=420', () => {
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 06:00:00', type: 'unknown' },
+      { id: 2, timestamp: '2026-05-28 13:00:00', type: 'unknown' },
+    ];
+    const typed = assignTypes(rawLogs);
+    const { segments } = buildSegments(typed);
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, DEFAULT_POLICY);
+
+    expect(result.grossMinutes).toBe(420);
+    expect(result.breakMinutes).toBe(0);
+    expect(result.workedMinutes).toBe(420);
+    expect(result.breakSource).toBe('none');
+  });
+
+  // REGLA 2: 4 marcaciones IN/OUT/IN/OUT → segmentos reales, break = gap real
+  test('4 marcaciones IN/OUT/IN/OUT → segmentos y break real calculados', () => {
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 06:00:00', type: 'in' },
+      { id: 2, timestamp: '2026-05-28 12:00:00', type: 'out' },
+      { id: 3, timestamp: '2026-05-28 13:00:00', type: 'in' },
+      { id: 4, timestamp: '2026-05-28 15:00:00', type: 'out' },
+    ];
+    const typed = assignTypes(rawLogs);
+    const { segments } = buildSegments(typed);
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, DEFAULT_POLICY);
+
+    expect(segments).toHaveLength(2);
+    expect(result.grossMinutes).toBe(540);         // 06:00→15:00 span
+    expect(result.breakMinutes).toBe(60);          // 12:00→13:00 lunch gap
+    expect(result.workedMinutes).toBe(360 + 120);  // 6h mañana + 2h tarde = 480
+    expect(result.breakSource).toBe('marked_lunch');
+  });
+
+  // REGLA 3: 2 marcaciones + auto_deduct=true + gross >= umbral → descuento
+  test('2 marcaciones + auto_deduct=true + gross >= umbral → worked = gross - break_minutes', () => {
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 06:45:00', type: 'unknown' },
+      { id: 2, timestamp: '2026-05-28 15:11:00', type: 'unknown' },
+    ];
+    const typed = assignTypes(rawLogs);
+    const { segments } = buildSegments(typed);
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, DEDUCT_POLICY); // umbral=300, break=60
+
+    expect(result.workedMinutes).toBe(result.grossMinutes - 60);
+    expect(result.breakMinutes).toBe(60);
+    expect(result.breakSource).toBe('auto_deduct');
+  });
+
+  // REGLA 3 borde: gross < umbral → sin descuento aunque auto_deduct=true
+  test('2 marcaciones + auto_deduct=true + gross < umbral → sin descuento', () => {
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 08:00:00', type: 'unknown' },
+      { id: 2, timestamp: '2026-05-28 12:30:00', type: 'unknown' }, // 270 min < 300 umbral
+    ];
+    const typed = assignTypes(rawLogs);
+    const { segments } = buildSegments(typed);
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, DEDUCT_POLICY);
+
+    expect(result.grossMinutes).toBe(270);
+    expect(result.workedMinutes).toBe(270);
+    expect(result.breakMinutes).toBe(0);
+    expect(result.breakSource).toBe('none');
+  });
+
+  // REGLA 4: sin política configurada → DEFAULT aplicado (auto_deduct=false)
+  test('sin política → DEFAULT: auto_deduct=false, break=0, allow_continuous_shift=true', () => {
+    // DEFAULT_POLICY es exactamente la política que debe aplicarse cuando no hay nada configurado
+    expect(DEFAULT_POLICY.auto_deduct_break).toBe(false);
+    expect(DEFAULT_POLICY.break_minutes).toBe(0);
+    expect(DEFAULT_POLICY.allow_continuous_shift).toBe(true);
+
+    // Aplicando DEFAULT a 2 marcaciones nunca descuenta
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 06:00:00', type: 'unknown' },
+      { id: 2, timestamp: '2026-05-28 15:00:00', type: 'unknown' },
+    ];
+    const typed = assignTypes(rawLogs);
+    const { segments } = buildSegments(typed);
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, DEFAULT_POLICY);
+
+    expect(result.breakMinutes).toBe(0);
+    expect(result.workedMinutes).toBe(result.grossMinutes);
+    expect(result.breakSource).toBe('none');
+  });
+});
