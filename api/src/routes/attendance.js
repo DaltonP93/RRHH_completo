@@ -766,6 +766,82 @@ router.get('/punch-time-audit', authorize('admin', 'super_admin', 'hr'), async (
   });
 });
 
+// ─── GET /api/attendance/policy/resolve ──────────────────────────────────────
+router.get('/policy/resolve', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
+  const { employee_id } = req.query;
+  if (!employee_id) return res.status(400).json({ error: 'employee_id requerido' });
+  try {
+    const { resolvePolicy } = require('../services/attendancePolicyResolver');
+    const policy = await resolvePolicy(+employee_id);
+    res.json({ ok: true, policy });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── GET /api/attendance/policies ────────────────────────────────────────────
+router.get('/policies', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const { listPolicies } = require('../services/attendancePolicyResolver');
+    res.json({ ok: true, data: await listPolicies() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/attendance/policies ───────────────────────────────────────────
+router.post('/policies', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const { upsertPolicy } = require('../services/attendancePolicyResolver');
+    const id = await upsertPolicy(req.body);
+    res.json({ ok: true, id });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── PUT /api/attendance/policies/:id ────────────────────────────────────────
+router.put('/policies/:id', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const { upsertPolicy } = require('../services/attendancePolicyResolver');
+    await upsertPolicy({ ...req.body, id: +req.params.id });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── DELETE /api/attendance/policies/:id ─────────────────────────────────────
+router.delete('/policies/:id', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const { deletePolicy } = require('../services/attendancePolicyResolver');
+    await deletePolicy(+req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/attendance/process-day-v2 ─────────────────────────────────────
+// Recalcula daily_summary usando el motor V2 con políticas.
+// Body: { date: "YYYY-MM-DD", employee_id?: N }  (sin employee_id = todos del día)
+router.post('/process-day-v2', authorize('admin', 'super_admin'), async (req, res) => {
+  const { date, employee_id } = req.body || {};
+  if (!date) return res.status(400).json({ ok: false, error: 'date requerido (YYYY-MM-DD)' });
+  try {
+    const { bulkProcessDay, processAttendanceDay } = require('../services/attendanceProcessor');
+    if (employee_id) {
+      const result = await processAttendanceDay({ date, employeeId: +employee_id });
+      res.json({ ok: true, date, employee_id: +employee_id, ...result.finalMetrics, policy: result.policy });
+    } else {
+      const result = await bulkProcessDay(date);
+      res.json({ ok: true, ...result });
+    }
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── GET /api/attendance/day-timeline ────────────────────────────────────────
 // Línea de tiempo visual de la jornada de un empleado para una fecha.
 // Query params:
@@ -845,10 +921,18 @@ router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req,
       // att2000 no disponible
     }
 
+    // Política efectiva
+    let policy = null;
+    try {
+      const { resolvePolicy } = require('../services/attendancePolicyResolver');
+      policy = await resolvePolicy(+employee_id);
+    } catch { /* opcional */ }
+
     res.json({
       ok: true,
       employee: emp,
       date,
+      policy,
       raw_logs,
       segments,
       summary: summary || null,
