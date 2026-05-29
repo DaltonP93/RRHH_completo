@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
-import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle, Activity } from 'lucide-react'
 
 interface DiagnosticData {
   ok: boolean
@@ -231,6 +231,229 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
               <p className="text-xs text-gray-600 mt-2">
                 Recalculado: {result.recalculated_days.join(', ')}
               </p>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+// ─── Day Timeline Panel ────────────────────────────────────────────────────────
+interface TimelineLog { id: number; timestamp: string; type: string; source: string; device_name: string | null }
+interface TimelineSegment { segment_index: number; in_at: string | null; out_at: string | null; minutes: number | null; confidence: string; anomaly_code: string | null }
+interface TimelineAnomaly { anomaly_type: string; severity: string; message: string | null }
+interface TimelineSummary { first_in: string | null; lunch_out: string | null; lunch_in: string | null; last_out: string | null; worked_minutes: number; break_minutes: number; late_minutes: number; status: string }
+interface TimelineData {
+  ok: boolean
+  employee: { id: number; full_name: string; department: string; schedule_name: string | null; check_in: string | null }
+  date: string
+  raw_logs: TimelineLog[]
+  segments: TimelineSegment[]
+  summary: TimelineSummary | null
+  anomalies: TimelineAnomaly[]
+  att2000_punches: Array<{ raw_checktime: string; CHECKTYPE: string }> | null
+}
+
+const SEV_COLOR: Record<string, string> = {
+  error:   'bg-red-100 text-red-700 border-red-200',
+  warning: 'bg-amber-100 text-amber-700 border-amber-200',
+  info:    'bg-blue-100 text-blue-700 border-blue-200',
+}
+
+function minsToHM(mins: number | null): string {
+  if (!mins || mins <= 0) return '0:00'
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return `${h}:${String(m).padStart(2, '0')}`
+}
+
+function fmtTime(ts: string | null): string {
+  if (!ts) return '—'
+  const s = ts.replace('T', ' ').replace('Z', '').slice(11, 16)
+  return s || ts.slice(0, 16)
+}
+
+function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: string; defaultEmployeeId?: string }) {
+  const [date, setDate]           = useState(defaultDate)
+  const [empId, setEmpId]         = useState(defaultEmployeeId ?? '')
+  const [data, setData]           = useState<TimelineData | null>(null)
+  const [loading, setLoading]     = useState(false)
+  const [error, setError]         = useState<string | null>(null)
+
+  const load = async () => {
+    if (!empId) return
+    setLoading(true); setError(null); setData(null)
+    try {
+      const { data: resp } = await api.get(`/api/attendance/day-timeline?date=${date}&employee_id=${empId}`)
+      setData(resp)
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } }; message?: string })
+        ?.response?.data?.error ?? (e as { message?: string })?.message ?? 'Error de red'
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Card title="Línea de Tiempo de Jornada">
+      <div className="space-y-4">
+        {/* Controles */}
+        <div className="flex flex-wrap gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Fecha</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">ID Empleado</label>
+            <input type="number" placeholder="ej: 11" value={empId} onChange={e => setEmpId(e.target.value)}
+              className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+          <div className="flex items-end">
+            <button onClick={load} disabled={loading || !empId}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+              <Activity className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Cargando…' : 'Ver jornada'}
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            <XCircle className="w-4 h-4 shrink-0" />{error}
+          </div>
+        )}
+
+        {data && (
+          <div className="space-y-4">
+            {/* Encabezado empleado */}
+            <div className="bg-gray-50 rounded-lg px-4 py-3 flex flex-wrap gap-4 items-center">
+              <div>
+                <p className="font-semibold text-gray-900">{data.employee.full_name}</p>
+                <p className="text-xs text-gray-500">{data.employee.department}</p>
+              </div>
+              {data.employee.schedule_name && (
+                <div className="text-xs text-gray-500">
+                  <span className="font-medium">Horario:</span> {data.employee.schedule_name}
+                  {data.employee.check_in && ` (entrada: ${data.employee.check_in.slice(0,5)})`}
+                </div>
+              )}
+              {data.summary && (
+                <div className="ml-auto flex gap-4 text-sm">
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500">Trabajado</p>
+                    <p className="font-bold text-emerald-700">{minsToHM(data.summary.worked_minutes)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500">Almuerzo</p>
+                    <p className="font-medium text-blue-700">{minsToHM(data.summary.break_minutes)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500">Atraso</p>
+                    <p className={`font-medium ${(data.summary.late_minutes ?? 0) > 0 ? 'text-amber-600' : 'text-gray-500'}`}>{minsToHM(data.summary.late_minutes)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500">Estado</p>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLOR[data.summary.status] ?? 'bg-gray-100 text-gray-700'}`}>{data.summary.status}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Cronología visual */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-2">Marcaciones cronológicas</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-500 border-b border-gray-100">
+                      <th className="text-left pb-2 pr-3">#</th>
+                      <th className="text-left pb-2 pr-3">Hora</th>
+                      <th className="text-left pb-2 pr-3">Tipo</th>
+                      <th className="text-left pb-2 pr-3">Fuente</th>
+                      <th className="text-left pb-2">Reloj</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {data.raw_logs.length === 0 ? (
+                      <tr><td colSpan={5} className="py-3 text-gray-400">Sin marcaciones para esta fecha</td></tr>
+                    ) : data.raw_logs.map((log, idx) => (
+                      <tr key={log.id}>
+                        <td className="py-1.5 pr-3 text-gray-400">{idx + 1}</td>
+                        <td className="py-1.5 pr-3 font-mono font-medium text-gray-900">{fmtTime(log.timestamp)}</td>
+                        <td className="py-1.5 pr-3">
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${log.type === 'in' ? 'bg-green-100 text-green-700' : log.type === 'out' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
+                            {log.type === 'in' ? '↑ entrada' : log.type === 'out' ? '↓ salida' : log.type}
+                          </span>
+                        </td>
+                        <td className="py-1.5 pr-3 text-gray-500">{log.source}</td>
+                        <td className="py-1.5 text-gray-400">{log.device_name ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Segmentos de trabajo */}
+            {data.segments.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-2">Bloques de trabajo calculados</p>
+                <div className="space-y-2">
+                  {data.segments.map((seg, i) => (
+                    <div key={i} className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-sm ${seg.anomaly_code ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                      <span className="text-xs font-medium text-gray-500 w-6">{i + 1}</span>
+                      <span className="font-mono text-gray-700">
+                        {fmtTime(seg.in_at)} → {fmtTime(seg.out_at)}
+                      </span>
+                      {seg.minutes !== null && (
+                        <span className="font-medium text-emerald-700">{minsToHM(seg.minutes)}</span>
+                      )}
+                      {seg.anomaly_code && (
+                        <span className="text-xs text-red-600 font-medium">{seg.anomaly_code}</span>
+                      )}
+                      {i === 0 && data.segments.length >= 2 && data.summary?.lunch_out && (
+                        <span className="ml-auto text-xs text-blue-600">
+                          ☕ almuerzo {fmtTime(data.summary.lunch_out)} → {fmtTime(data.summary.lunch_in)}
+                          {data.summary.break_minutes > 0 && ` (${minsToHM(data.summary.break_minutes)})`}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Comparación att2000 */}
+            {data.att2000_punches && data.att2000_punches.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-2">Marcaciones en att2000 (referencia)</p>
+                <div className="flex flex-wrap gap-2">
+                  {data.att2000_punches.map((p, i) => (
+                    <span key={i} className="px-2 py-1 bg-gray-100 rounded text-xs font-mono text-gray-700">
+                      {p.raw_checktime?.slice(11, 16)} {p.CHECKTYPE ? `(${p.CHECKTYPE})` : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Anomalías */}
+            {data.anomalies.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-2">Anomalías detectadas</p>
+                <div className="space-y-1">
+                  {data.anomalies.map((a, i) => (
+                    <div key={i} className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-xs ${SEV_COLOR[a.severity] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                      <span className="font-medium mr-1">{a.anomaly_type}</span>
+                      {a.message && <span className="opacity-80">{a.message}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -562,6 +785,9 @@ export default function ConciliacionPage() {
           </div>
         </Card>
       )}
+
+      {/* Línea de tiempo de jornada */}
+      <DayTimelinePanel defaultDate={date} />
 
       {/* Links rápidos */}
       <Card title="Navegación rápida">

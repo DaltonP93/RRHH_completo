@@ -602,9 +602,26 @@ router.post('/att2000/import-employees', async (req, res) => {
     const { queryAtt2000, getTableColumns, pickCol } = require('../config/att2000');
     const logger = require('../config/logger');
 
-    // Crear sync run
-    const [[src]] = await sequelize.query("SELECT id FROM source_systems WHERE code = 'att2000'");
-    const sourceId = src.id;
+    // source_systems puede no existir si las migraciones avanzadas no se aplicaron.
+    // En ese caso usamos syncEmployees() directamente.
+    let sourceId = null;
+    try {
+      const [[src]] = await sequelize.query("SELECT id FROM source_systems WHERE code = 'att2000'");
+      sourceId = src?.id || null;
+    } catch {
+      sourceId = null;
+    }
+
+    if (!sourceId) {
+      // Fallback: sincronización directa sin tablas de trazabilidad
+      const result = await syncEmployees();
+      return res.json({
+        ok: true, mode: 'direct_sync',
+        total: result.total, matched: result.synced, errors: result.errors,
+        note: 'source_systems no disponible — se usó syncEmployees() directo',
+      });
+    }
+
     const [runRes] = await sequelize.query(`
       INSERT INTO source_sync_runs (source_system_id, sync_type, entity_type, status, started_at)
       VALUES (?, 'full', 'users', 'running', NOW())

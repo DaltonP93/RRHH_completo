@@ -296,72 +296,67 @@ function stopJob(scheduleId) {
   }
 }
 
-// ─── Recalcular daily_summary en bloque para una fecha (Paraguay) ─
+// ─── Recalcular daily_summary en bloque para una fecha ────────────────────────
+// V2: usa attendanceProcessor para soporte multi-punch con almuerzo.
+// Cálculo correcto: worked_minutes = Σ(out_i - in_i) por segmento.
 async function bulkRecalcDailySummary(date) {
-  // Insertar/actualizar daily_summary para todos los empleados
-  // con registros en attendance_logs para la fecha dada.
-  // late_minutes se calcula comparando primer IN con el horario del empleado.
-  await sequelize.query(`
-    INSERT INTO daily_summary
-      (employee_id, date, first_in, last_out, worked_minutes, late_minutes, status)
-    SELECT
-      al.employee_id,
-      ? AS date,
-      MIN(CASE WHEN al.type = 'in'  THEN al.timestamp END) AS first_in,
-      MAX(CASE WHEN al.type = 'out' THEN al.timestamp END) AS last_out,
-      GREATEST(0, COALESCE(
-        TIMESTAMPDIFF(MINUTE,
-          MIN(CASE WHEN al.type = 'in'  THEN al.timestamp END),
-          MAX(CASE WHEN al.type = 'out' THEN al.timestamp END)
-        ), 0
-      )) AS worked_minutes,
-      GREATEST(0, COALESCE(
-        TIMESTAMPDIFF(MINUTE,
-          CONCAT(?, ' ', (
-            SELECT TIME_FORMAT(
-              ADDTIME(s2.check_in, SEC_TO_TIME(COALESCE(s2.tolerance_in,0)*60)),
-              '%H:%i:%s')
-            FROM employees e2
-            LEFT JOIN schedules s2 ON e2.schedule_id = s2.id
-            WHERE e2.id = al.employee_id LIMIT 1
-          )),
-          MIN(CASE WHEN al.type = 'in' THEN al.timestamp END)
-        ), 0
-      )) AS late_minutes,
-      CASE
-        WHEN MIN(CASE WHEN al.type = 'in' THEN al.timestamp END) IS NOT NULL THEN
-          CASE WHEN
-            TIMESTAMPDIFF(MINUTE,
+  try {
+    const { bulkProcessDay } = require('./attendanceProcessor');
+    const result = await bulkProcessDay(date);
+    logger.info(`♻️  daily_summary V2 recalculado para ${date}: ${result.processed} empleados`);
+    return result;
+  } catch (err) {
+    // Fallback al SQL directo si el procesador V2 falla (ej: tabla segments no existe)
+    logger.warn(`V2 processor falló para ${date}: ${err.message} — usando fallback SQL`);
+    await sequelize.query(`
+      INSERT INTO daily_summary
+        (employee_id, date, first_in, last_out, worked_minutes, break_minutes, late_minutes, status)
+      SELECT
+        al.employee_id,
+        ? AS date,
+        MIN(CASE WHEN al.type = 'in'  THEN al.timestamp END) AS first_in,
+        MAX(CASE WHEN al.type = 'out' THEN al.timestamp END) AS last_out,
+        GREATEST(0, COALESCE(
+          TIMESTAMPDIFF(MINUTE,
+            MIN(CASE WHEN al.type = 'in'  THEN al.timestamp END),
+            MAX(CASE WHEN al.type = 'out' THEN al.timestamp END)
+          ), 0
+        )) AS worked_minutes,
+        0 AS break_minutes,
+        GREATEST(0, COALESCE(
+          TIMESTAMPDIFF(MINUTE,
+            CONCAT(?, ' ', (
+              SELECT TIME_FORMAT(ADDTIME(s2.check_in, SEC_TO_TIME(COALESCE(s2.tolerance_in,0)*60)),'%H:%i:%s')
+              FROM employees e2 LEFT JOIN schedules s2 ON e2.schedule_id = s2.id
+              WHERE e2.id = al.employee_id LIMIT 1
+            )),
+            MIN(CASE WHEN al.type = 'in' THEN al.timestamp END)
+          ), 0
+        )) AS late_minutes,
+        CASE
+          WHEN MIN(CASE WHEN al.type = 'in' THEN al.timestamp END) IS NOT NULL THEN
+            CASE WHEN TIMESTAMPDIFF(MINUTE,
               CONCAT(?, ' ', (
-                SELECT TIME_FORMAT(
-                  ADDTIME(s2.check_in, SEC_TO_TIME(COALESCE(s2.tolerance_in,0)*60)),
-                  '%H:%i:%s')
-                FROM employees e2
-                LEFT JOIN schedules s2 ON e2.schedule_id = s2.id
+                SELECT TIME_FORMAT(ADDTIME(s2.check_in, SEC_TO_TIME(COALESCE(s2.tolerance_in,0)*60)),'%H:%i:%s')
+                FROM employees e2 LEFT JOIN schedules s2 ON e2.schedule_id = s2.id
                 WHERE e2.id = al.employee_id LIMIT 1
               )),
               MIN(CASE WHEN al.type = 'in' THEN al.timestamp END)
-            ) > 0
-          THEN 'late'
-          ELSE 'present'
-          END
-        ELSE 'absent'
-      END AS status
-    FROM attendance_logs al
-    WHERE DATE(al.timestamp) = ?
-    GROUP BY al.employee_id
-    ON DUPLICATE KEY UPDATE
-      first_in       = COALESCE(VALUES(first_in),       first_in),
-      last_out       = COALESCE(VALUES(last_out),        last_out),
-      worked_minutes = VALUES(worked_minutes),
-      late_minutes   = VALUES(late_minutes),
-      status         = CASE
-        WHEN status IN ('holiday','weekend','permission') THEN status
-        ELSE VALUES(status)
-      END
-  `, { replacements: [date, date, date, date] });
-
-  logger.info(`♻️  daily_summary recalculado para ${date}`);
+            ) > 0 THEN 'late' ELSE 'present' END
+          ELSE 'absent'
+        END AS status
+      FROM attendance_logs al
+      WHERE DATE(al.timestamp) = ?
+      GROUP BY al.employee_id
+      ON DUPLICATE KEY UPDATE
+        first_in       = COALESCE(VALUES(first_in), first_in),
+        last_out       = COALESCE(VALUES(last_out), last_out),
+        worked_minutes = VALUES(worked_minutes),
+        late_minutes   = VALUES(late_minutes),
+        status         = CASE WHEN status IN ('holiday','weekend','permission') THEN status ELSE VALUES(status) END
+    `, { replacements: [date, date, date, date] });
+    logger.info(`♻️  daily_summary fallback SQL recalculado para ${date}`);
+  }
 }
 
 // ─── Cron respaldo: pull att2000 → MySQL ─────────────────────────
