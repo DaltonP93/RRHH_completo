@@ -101,3 +101,43 @@ systemctl reload nginx
 - La API debe leer secretos desde `process.env`
 - El bridge tiene DOS puertos: 8080 (PUSH ZKTeco) y 8081 (API bridge)
 - Analytics Python debe ejecutarse con su entorno virtual local
+
+---
+
+## Skills de Claude Code instaladas
+
+Las siguientes skills están instaladas en `.claude/skills/` y documentadas en `docs/CLAUDE_SKILLS_USAGE.md`.
+
+### Reglas de uso
+
+#### UI/UX — rediseño de páginas o componentes
+Invocar siempre en este orden:
+1. `/frontend-design` — diseño visual, jerarquía, accesibilidad
+2. `/hyperframes` — estructura de componentes y layout
+3. `/tailwind` — clases utilitarias y tema corporativo
+4. `/css-animations` — transiciones y micro-interacciones declarativas
+5. `/gsap` — **solo** para animaciones que CSS no puede lograr; mantener sobriedad ERP
+
+#### Auditoría de configuración de Claude
+- `/claude-settings-audit` — revisar permisos, hooks y settings del proyecto
+
+#### Automatizaciones de mensajería
+- `/whatsapp-automation` — integraciones con WhatsApp Business API
+
+#### Creación de nuevas skills internas
+1. `/skill-development` — estructura y proceso de desarrollo
+2. `/plugin-structure` — anatomía de un plugin/skill
+
+### Estilo visual obligatorio para este sistema
+
+- **Tono:** ERP/SaaS corporativo compacto — sin aspecto de demo o landing page
+- **Densidad:** tablas densas, pocos espacios en blanco decorativos, tipografía pequeña
+- **Color:** paleta neutral con acentos de marca; sin gradientes llamativos
+- **Animaciones:** solo funcionales (feedback de estado, skeleton loaders); nada decorativo
+- **Consistencia:** mantener el mismo patrón visual entre portal, asistencia, nómina, documentos, cumplimiento, reportes y configuración
+
+### Restricciones permanentes
+
+- No tocar Docker, Nginx, Bridge ni healthchecks salvo petición explícita
+- No mergear PR #69 (`feat/timezone-fix-py-utc4`) hasta que punch-time-audit confirme diff_minutes = 0
+- No almacenar credenciales en el repositorio — usar variables de entorno
