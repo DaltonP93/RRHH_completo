@@ -341,6 +341,12 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
     qLocalOne(`SELECT COUNT(*) AS cnt FROM employees WHERE status = 'active' AND (first_name IS NULL OR first_name = '' OR last_name IS NULL OR last_name = '')`, null),
   ]);
 
+  // ── 6b. Totales de departamentos y último sync de USERINFO ──────
+  const deptTotalRow = await qLocalOne('SELECT COUNT(*) AS cnt FROM departments', null);
+  const userinfoSyncRow = await qLocalOne(
+    "SELECT `value` AS ts FROM settings WHERE `key` = 'userinfo_last_sync_at'", null
+  );
+
   // ── 7. Sin mapeo (unmapped punches) ─────────────────────────────
   const unmatchedRows = await qLocal(
     'SELECT source_user_id, badge_number, check_time FROM unknown_attendance_events ORDER BY check_time DESC LIMIT 5',
@@ -448,12 +454,15 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
       },
     },
     mapping: {
-      employees_active:          activeEmployees,
-      employees_with_code:       empWithCode?.cnt  || 0,
-      employees_without_code:    empNoCode?.cnt    || 0,
-      employees_no_department:   cntNoDept,
-      employees_no_name:         cntNoName,
-      unmatched_punches_total:   unmatchedCount?.cnt || 0,
+      employees_active:            activeEmployees,
+      employees_with_code:         empWithCode?.cnt  || 0,
+      employees_without_code:      empNoCode?.cnt    || 0,
+      employees_no_department:     cntNoDept,
+      employees_without_name:      cntNoName,
+      employees_no_name:           cntNoName,
+      departments_total:           deptTotalRow?.cnt || 0,
+      latest_userinfo_sync_at:     userinfoSyncRow?.ts || null,
+      unmatched_punches_total:     unmatchedCount?.cnt || 0,
     },
     duplicates: {
       attendance_logs_duplicates_today: dupCount,

@@ -137,6 +137,58 @@ router.post('/employees', async (req, res) => {
   }
 });
 
+// ─── POST /api/sync/employees-from-att2000 ───────────────────────
+// Sincroniza departamentos + empleados desde att2000 y devuelve
+// estadísticas de calidad (nombres, departamentos) tras la sincronización.
+router.post('/employees-from-att2000', async (req, res) => {
+  try {
+    // 1. Departamentos primero — los empleados referencian department_id
+    const deptResult = await syncDepartments();
+
+    // 2. Empleados
+    const empResult = await syncEmployees();
+
+    // 3. Calcular estadísticas post-sync
+    const [[withName]] = await sequelize.query(
+      "SELECT COUNT(*) AS cnt FROM employees WHERE status = 'active' AND first_name != '' AND last_name != '' AND first_name IS NOT NULL AND last_name IS NOT NULL"
+    ).catch(() => [[{ cnt: null }]]);
+
+    const [[blankName]] = await sequelize.query(
+      "SELECT COUNT(*) AS cnt FROM employees WHERE status = 'active' AND (first_name IS NULL OR first_name = '' OR last_name IS NULL OR last_name = '')"
+    ).catch(() => [[{ cnt: null }]]);
+
+    const [[withDept]] = await sequelize.query(
+      "SELECT COUNT(*) AS cnt FROM employees e JOIN departments d ON e.department_id = d.id WHERE e.status = 'active' AND d.name != 'This Company'"
+    ).catch(() => [[{ cnt: null }]]);
+
+    const [[noDept]] = await sequelize.query(
+      "SELECT COUNT(*) AS cnt FROM employees e LEFT JOIN departments d ON e.department_id = d.id WHERE e.status = 'active' AND (d.id IS NULL OR d.name = 'This Company' OR d.name IS NULL)"
+    ).catch(() => [[{ cnt: null }]]);
+
+    // 4. Registrar timestamp de sincronización en settings
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    await sequelize.query(
+      "INSERT INTO settings (`key`, `value`) VALUES ('userinfo_last_sync_at', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",
+      { replacements: [now] }
+    ).catch(() => {});
+
+    res.json({
+      ok: true,
+      departments: deptResult,
+      employees: empResult,
+      after_sync: {
+        employees_with_name:          withName?.cnt  ?? null,
+        employees_blank_name:         blankName?.cnt ?? null,
+        employees_with_department:    withDept?.cnt  ?? null,
+        employees_without_department: noDept?.cnt    ?? null,
+      },
+      synced_at: now,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── POST /api/sync/attendance — Importar marcajes ───────────────
 // Body: { dateFrom: "2026-04-01", dateTo: "2026-04-11", limit: 10000, conn? }
 router.post('/attendance', async (req, res) => {

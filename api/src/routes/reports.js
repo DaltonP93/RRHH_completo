@@ -51,7 +51,8 @@ router.get('/weekly', async (req, res) => {
   const [rows] = await sequelize.query(`
     SELECT
       ds.date, ds.status, ds.first_in, ds.last_out, ds.worked_minutes, ds.late_minutes,
-      CONCAT(e.first_name,' ',e.last_name) AS employee_name, d.name AS department
+      CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+      CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department
     FROM daily_summary ds
     JOIN employees e ON ds.employee_id = e.id
     LEFT JOIN departments d ON e.department_id = d.id
