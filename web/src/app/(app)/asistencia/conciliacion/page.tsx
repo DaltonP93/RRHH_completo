@@ -122,9 +122,9 @@ function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
 
 function Card({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className={`bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden ${className ?? ''}`}>
-      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-        <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+    <div className={`bg-white rounded-lg border border-slate-200 shadow-[0_1px_3px_rgba(15,23,42,0.06)] overflow-hidden ${className ?? ''}`}>
+      <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50">
+        <h3 className="text-xs font-semibold text-slate-700">{title}</h3>
       </div>
       <div className="p-4">{children}</div>
     </div>
@@ -134,8 +134,8 @@ function Card({ title, children, className }: { title: string; children: React.R
 function Stat({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
     <div>
-      <p className="text-xs text-gray-500">{label}</p>
-      <p className="text-lg font-bold text-gray-900">{value}</p>
+      <p className="text-[11px] text-slate-400">{label}</p>
+      <p className="text-base font-bold text-slate-900">{value}</p>
       {sub && <p className="text-xs text-gray-400">{sub}</p>}
     </div>
   )
@@ -200,7 +200,7 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
 
         <button
           onClick={run} disabled={running}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
         >
           {running
             ? <><RefreshCw className="w-4 h-4 animate-spin" />Procesando…</>
@@ -209,18 +209,18 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
         </button>
 
         {result && (
-          <div className={`rounded-lg p-4 ${result.ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+          <div className={`rounded-lg p-3 text-xs ${result.ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
             <div className="flex items-center gap-2 mb-2">
               {result.ok ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-red-600" />}
-              <span className={`text-sm font-medium ${result.ok ? 'text-green-800' : 'text-red-800'}`}>
+              <span className={`text-xs font-medium ${result.ok ? 'text-green-800' : 'text-red-800'}`}>
                 {result.ok ? 'Completado' : 'Error'}
               </span>
             </div>
-            {result.error   && <p className="text-sm text-red-700">{result.error}</p>}
-            {result.warning && <p className="text-sm text-amber-700">{result.warning}</p>}
-            {result.message && <p className="text-sm text-green-700">{result.message}</p>}
+            {result.error   && <p className="text-xs text-red-700">{result.error}</p>}
+            {result.warning && <p className="text-xs text-amber-700">{result.warning}</p>}
+            {result.message && <p className="text-xs text-green-700">{result.message}</p>}
             {result.source_total !== undefined && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-xs">
                 <div><p className="text-gray-500">En att2000</p><p className="font-bold">{result.source_total}</p></div>
                 <div><p className="text-gray-500">Ya locales</p><p className="font-bold">{result.local_existing ?? '—'}</p></div>
                 <div><p className="text-gray-500">Nuevas</p><p className="font-bold text-green-700">{result.inserted ?? 0}</p></div>
@@ -488,11 +488,11 @@ export default function ConciliacionPage() {
   useEffect(() => { load(date) }, [date, load])
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 space-y-4 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Conciliación de Marcaciones</h1>
+          <h1 className="text-lg font-bold text-slate-900">Conciliación de Marcaciones</h1>
           <p className="text-sm text-gray-500 mt-0.5">Diagnóstico de la cadena att2000 → logs → daily_summary</p>
         </div>
         <div className="flex items-center gap-3">
