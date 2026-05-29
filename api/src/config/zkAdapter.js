@@ -231,6 +231,27 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
   const records = await fetchCheckInOut({ dateFrom, dateTo, limit });
   let imported = 0, skipped = 0, notFound = 0;
 
+  // Pre-pass: infer CHECKTYPE for null/unknown entries via chronological sequence.
+  // Group by employee+date, sort ascending, assign in/out by 0-indexed position.
+  const unknownGroups = new Map();
+  for (const r of records) {
+    const ct = r.CHECKTYPE ? String(r.CHECKTYPE).toUpperCase() : null;
+    if (ct !== 'I' && ct !== 'O') {
+      const dayKey = checktimeToStr(r.CHECKTIME).slice(0, 10);
+      const k = `${r.USERID}_${dayKey}`;
+      if (!unknownGroups.has(k)) unknownGroups.set(k, []);
+      unknownGroups.get(k).push(r);
+    }
+  }
+  for (const group of unknownGroups.values()) {
+    group.sort((a, b) => {
+      const ta = checktimeToStr(a.CHECKTIME);
+      const tb = checktimeToStr(b.CHECKTIME);
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
+    });
+    group.forEach((r, i) => { r._inferredType = i % 2 === 0 ? 'in' : 'out'; });
+  }
+
   for (const r of records) {
     try {
       // Buscar empleado en el nuevo sistema por código USERID
@@ -241,10 +262,11 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
 
       if (!emp) { notFound++; continue; }
 
-      // Mapear CHECKTYPE: 'I'=entrada, 'O'=salida, null=detectar por orden
+      // Mapear CHECKTYPE: 'I'=entrada, 'O'=salida, null=inferir por secuencia cronológica
       let type = 'unknown';
       if (r.CHECKTYPE === 'I' || r.CHECKTYPE === 'i') type = 'in';
       else if (r.CHECKTYPE === 'O' || r.CHECKTYPE === 'o') type = 'out';
+      else if (r._inferredType) type = r._inferredType;
 
       // Buscar dispositivo por sensor_id (MachineNo en att2000) con fallback al id MySQL
       const sid = r.SENSORID || 0;

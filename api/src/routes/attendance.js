@@ -341,6 +341,12 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
     qLocalOne(`SELECT COUNT(*) AS cnt FROM employees WHERE status = 'active' AND (first_name IS NULL OR first_name = '' OR last_name IS NULL OR last_name = '')`, null),
   ]);
 
+  // ── 6b. Totales de departamentos y último sync de USERINFO ──────
+  const deptTotalRow = await qLocalOne('SELECT COUNT(*) AS cnt FROM departments', null);
+  const userinfoSyncRow = await qLocalOne(
+    "SELECT `value` AS ts FROM settings WHERE `key` = 'userinfo_last_sync_at'", null
+  );
+
   // ── 7. Sin mapeo (unmapped punches) ─────────────────────────────
   const unmatchedRows = await qLocal(
     'SELECT source_user_id, badge_number, check_time FROM unknown_attendance_events ORDER BY check_time DESC LIMIT 5',
@@ -448,12 +454,15 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
       },
     },
     mapping: {
-      employees_active:          activeEmployees,
-      employees_with_code:       empWithCode?.cnt  || 0,
-      employees_without_code:    empNoCode?.cnt    || 0,
-      employees_no_department:   cntNoDept,
-      employees_no_name:         cntNoName,
-      unmatched_punches_total:   unmatchedCount?.cnt || 0,
+      employees_active:            activeEmployees,
+      employees_with_code:         empWithCode?.cnt  || 0,
+      employees_without_code:      empNoCode?.cnt    || 0,
+      employees_no_department:     cntNoDept,
+      employees_without_name:      cntNoName,
+      employees_no_name:           cntNoName,
+      departments_total:           deptTotalRow?.cnt || 0,
+      latest_userinfo_sync_at:     userinfoSyncRow?.ts || null,
+      unmatched_punches_total:     unmatchedCount?.cnt || 0,
     },
     duplicates: {
       attendance_logs_duplicates_today: dupCount,
@@ -467,91 +476,116 @@ router.get('/reconciliation-diagnostics', authorize('admin', 'super_admin', 'hr'
   });
 });
 
-// ─── POST /api/attendance/reimport-range ─────────────────────────────────
-// Borra registros de attendance_logs con source='device' en el rango indicado
-// y los reimporta desde att2000 usando el CHECKTIME crudo sin desfase horario.
-// Usar después de corregir el bug de conversión de CHECKTIME.
-//
-// Body: { date_from: "YYYY-MM-DD", date_to: "YYYY-MM-DD" }
-// Limitado a 31 días por ejecución. Solo admin/super_admin.
-router.post('/reimport-range', authorize('admin', 'super_admin'), async (req, res) => {
+// ─── Shared handler: borra + reimporta + recalcula ────────────────────────
+// Usado por /reimport-range y /reimport-range-safe (mismo comportamiento).
+async function _runReimportRange(date_from, date_to) {
+  const { syncAttendance }  = require('../config/zkAdapter');
+  const { bulkRecalcDailySummary, pyDateStr } = require('../services/scheduler');
+  const { sequelize } = require('../config/database');
+  const logger = require('../config/logger');
+
+  // 1. Contar y borrar registros source='device' del rango
+  //    NOTA: cubre att2000 y ZKTeco bridge; solo ejecutar en rangos
+  //    donde la única fuente era att2000 con timestamps erróneos.
+  const [[beforeRow]] = await sequelize.query(
+    `SELECT COUNT(*) AS cnt FROM attendance_logs
+     WHERE source = 'device' AND DATE(timestamp) BETWEEN ? AND ?`,
+    { replacements: [date_from, date_to] }
+  );
+  const deleted = beforeRow?.cnt || 0;
+
+  await sequelize.query(
+    `DELETE FROM attendance_logs
+     WHERE source = 'device' AND DATE(timestamp) BETWEEN ? AND ?`,
+    { replacements: [date_from, date_to] }
+  );
+  logger.info(`reimport-range: eliminados ${deleted} registros (${date_from} → ${date_to})`);
+
+  // 2. Reimportar desde att2000 — checktimeToStr() guarda CHECKTIME sin offset
+  let raw = { imported: 0, skipped: 0, notFound: 0, total: 0 };
+  try {
+    raw = await syncAttendance({ dateFrom: date_from, dateTo: date_to });
+  } catch (importErr) {
+    const err = new Error(`att2000 no disponible: ${importErr.message}`);
+    err.status = 502;
+    err.deleted = deleted;
+    throw err;
+  }
+
+  // 3. Recalcular daily_summary para cada fecha del rango
+  const dtFrom = new Date(date_from + 'T00:00:00Z');
+  const dtTo   = new Date(date_to   + 'T00:00:00Z');
+  const recalculated_dates = [];
+  const cur = new Date(dtFrom);
+  while (cur <= dtTo) { recalculated_dates.push(pyDateStr(cur)); cur.setDate(cur.getDate() + 1); }
+
+  const recalc_errors = [];
+  for (const d of recalculated_dates) {
+    try { await bulkRecalcDailySummary(d); }
+    catch (e) { recalc_errors.push({ date: d, error: e.message }); }
+  }
+
+  return {
+    ok:                 true,
+    date_from,
+    date_to,
+    deleted,
+    source_total:       raw.total,
+    inserted:           raw.imported,
+    skipped_duplicates: raw.skipped,
+    not_found:          raw.notFound,
+    recalculated_dates,
+    ...(recalc_errors.length ? { recalc_errors } : {}),
+    message: `${deleted} registros borrados, ${raw.imported} reimportados con timestamp correcto`,
+  };
+}
+
+function _validateReimportBody(req, res) {
   const { date_from, date_to } = req.body;
   if (!date_from || !date_to) {
-    return res.status(400).json({ ok: false, error: 'date_from y date_to son requeridos (YYYY-MM-DD)' });
+    res.status(400).json({ ok: false, error: 'date_from y date_to son requeridos (YYYY-MM-DD)' });
+    return null;
   }
   const dtFrom = new Date(date_from + 'T00:00:00Z');
   const dtTo   = new Date(date_to   + 'T00:00:00Z');
   if (isNaN(dtFrom) || isNaN(dtTo) || dtFrom > dtTo) {
-    return res.status(400).json({ ok: false, error: 'Rango de fechas inválido' });
+    res.status(400).json({ ok: false, error: 'Rango de fechas inválido' });
+    return null;
   }
   if (Math.round((dtTo - dtFrom) / 86400000) > 31) {
-    return res.status(400).json({ ok: false, error: 'El rango no puede superar 31 días' });
+    res.status(400).json({ ok: false, error: 'El rango no puede superar 31 días' });
+    return null;
   }
+  return { date_from, date_to };
+}
 
+// ─── POST /api/attendance/reimport-range-safe ─────────────────────────────
+// Borra attendance_logs (source='device') en el rango y reimporta desde att2000
+// usando CHECKTIME sin conversión de timezone. Recalcula daily_summary.
+//
+// Body: { date_from: "YYYY-MM-DD", date_to: "YYYY-MM-DD" }  (máx 31 días)
+// Respuesta: { deleted, source_total, inserted, skipped_duplicates, not_found,
+//              recalculated_dates, message }
+router.post('/reimport-range-safe', authorize('admin', 'super_admin'), async (req, res) => {
+  const dates = _validateReimportBody(req, res);
+  if (!dates) return;
   try {
-    const { syncAttendance }  = require('../config/zkAdapter');
-    const { bulkRecalcDailySummary, pyDateStr } = require('../services/scheduler');
-    const { sequelize } = require('../config/database');
-    const logger = require('../config/logger');
-
-    // 1. Contar registros existentes en el rango (para el log)
-    const [[beforeRow]] = await sequelize.query(
-      `SELECT COUNT(*) AS cnt FROM attendance_logs
-       WHERE source = 'device' AND DATE(timestamp) BETWEEN ? AND ?`,
-      { replacements: [date_from, date_to] }
-    );
-    const deletedCount = beforeRow?.cnt || 0;
-
-    // 2. Borrar registros source='device' del rango
-    // NOTA: incluye tanto att2000 como ZKTeco bridge directo; en producción
-    //       solo correr sobre rangos donde la fuente real era att2000.
-    await sequelize.query(
-      `DELETE FROM attendance_logs
-       WHERE source = 'device' AND DATE(timestamp) BETWEEN ? AND ?`,
-      { replacements: [date_from, date_to] }
-    );
-    logger.info(`reimport-range: eliminados ${deletedCount} registros (${date_from} → ${date_to})`);
-
-    // 3. Reimportar desde att2000 con CHECKTIME sin conversión de timezone
-    let raw = { imported: 0, skipped: 0, notFound: 0, total: 0 };
-    try {
-      raw = await syncAttendance({ dateFrom: date_from, dateTo: date_to });
-    } catch (importErr) {
-      return res.status(502).json({
-        ok: false,
-        error: `att2000 no disponible durante reimport: ${importErr.message}`,
-        deleted: deletedCount,
-      });
-    }
-
-    // 4. Recalcular daily_summary para cada fecha del rango
-    const dates = [];
-    const cur = new Date(dtFrom);
-    while (cur <= dtTo) {
-      dates.push(pyDateStr(cur));
-      cur.setDate(cur.getDate() + 1);
-    }
-    const recalcErrors = [];
-    for (const d of dates) {
-      try { await bulkRecalcDailySummary(d); }
-      catch (e) { recalcErrors.push({ date: d, error: e.message }); }
-    }
-
-    res.json({
-      ok:                 true,
-      date_from,
-      date_to,
-      deleted:            deletedCount,
-      source_total:       raw.total,
-      reimported:         raw.imported,
-      skipped_duplicates: raw.skipped,
-      not_found_employees: raw.notFound,
-      recalculated_days:  dates,
-      ...(recalcErrors.length ? { recalc_errors: recalcErrors } : {}),
-      message: `${deletedCount} registros borrados, ${raw.imported} reimportados con timestamp correcto`,
-    });
+    res.json(await _runReimportRange(dates.date_from, dates.date_to));
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(err.status || 500).json({ ok: false, error: err.message,
+      ...(err.deleted !== undefined ? { deleted: err.deleted } : {}) });
+  }
+});
+
+// ─── POST /api/attendance/reimport-range (alias backward-compat) ──────────
+router.post('/reimport-range', authorize('admin', 'super_admin'), async (req, res) => {
+  const dates = _validateReimportBody(req, res);
+  if (!dates) return;
+  try {
+    res.json(await _runReimportRange(dates.date_from, dates.date_to));
+  } catch (err) {
+    res.status(err.status || 500).json({ ok: false, error: err.message,
+      ...(err.deleted !== undefined ? { deleted: err.deleted } : {}) });
   }
 });
 
