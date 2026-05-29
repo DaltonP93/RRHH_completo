@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
-import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle, Activity } from 'lucide-react'
 
 interface DiagnosticData {
   ok: boolean
@@ -122,9 +122,9 @@ function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
 
 function Card({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className={`bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden ${className ?? ''}`}>
-      <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-        <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+    <div className={`bg-white rounded-lg border border-slate-200 shadow-[0_1px_3px_rgba(15,23,42,0.06)] overflow-hidden ${className ?? ''}`}>
+      <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50">
+        <h3 className="text-xs font-semibold text-slate-700">{title}</h3>
       </div>
       <div className="p-4">{children}</div>
     </div>
@@ -134,8 +134,8 @@ function Card({ title, children, className }: { title: string; children: React.R
 function Stat({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
     <div>
-      <p className="text-xs text-gray-500">{label}</p>
-      <p className="text-lg font-bold text-gray-900">{value}</p>
+      <p className="text-[11px] text-slate-400">{label}</p>
+      <p className="text-base font-bold text-slate-900">{value}</p>
       {sub && <p className="text-xs text-gray-400">{sub}</p>}
     </div>
   )
@@ -200,7 +200,7 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
 
         <button
           onClick={run} disabled={running}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
         >
           {running
             ? <><RefreshCw className="w-4 h-4 animate-spin" />Procesando…</>
@@ -209,18 +209,18 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
         </button>
 
         {result && (
-          <div className={`rounded-lg p-4 ${result.ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+          <div className={`rounded-lg p-3 text-xs ${result.ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
             <div className="flex items-center gap-2 mb-2">
               {result.ok ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-red-600" />}
-              <span className={`text-sm font-medium ${result.ok ? 'text-green-800' : 'text-red-800'}`}>
+              <span className={`text-xs font-medium ${result.ok ? 'text-green-800' : 'text-red-800'}`}>
                 {result.ok ? 'Completado' : 'Error'}
               </span>
             </div>
-            {result.error   && <p className="text-sm text-red-700">{result.error}</p>}
-            {result.warning && <p className="text-sm text-amber-700">{result.warning}</p>}
-            {result.message && <p className="text-sm text-green-700">{result.message}</p>}
+            {result.error   && <p className="text-xs text-red-700">{result.error}</p>}
+            {result.warning && <p className="text-xs text-amber-700">{result.warning}</p>}
+            {result.message && <p className="text-xs text-green-700">{result.message}</p>}
             {result.source_total !== undefined && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-xs">
                 <div><p className="text-gray-500">En att2000</p><p className="font-bold">{result.source_total}</p></div>
                 <div><p className="text-gray-500">Ya locales</p><p className="font-bold">{result.local_existing ?? '—'}</p></div>
                 <div><p className="text-gray-500">Nuevas</p><p className="font-bold text-green-700">{result.inserted ?? 0}</p></div>
@@ -236,6 +236,309 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
         )}
       </div>
     </Card>
+  )
+}
+
+// ─── Day Timeline Panel ────────────────────────────────────────────────────────
+interface TimelineLog { id: number; timestamp: string; type: string; source: string; device_name: string | null }
+interface TimelineSegment { segment_index: number; in_at: string | null; out_at: string | null; minutes: number | null; confidence: string; anomaly_code: string | null }
+interface TimelineAnomaly { anomaly_type: string; severity: string; message: string | null }
+interface TimelineSummary { first_in: string | null; lunch_out: string | null; lunch_in: string | null; last_out: string | null; worked_minutes: number; break_minutes: number; late_minutes: number; status: string }
+interface TimelineData {
+  ok: boolean
+  employee: { id: number; full_name: string; department: string; schedule_name: string | null; check_in: string | null }
+  date: string
+  raw_logs: TimelineLog[]
+  segments: TimelineSegment[]
+  summary: TimelineSummary | null
+  anomalies: TimelineAnomaly[]
+  att2000_punches: Array<{ raw_checktime: string; CHECKTYPE: string }> | null
+}
+
+const SEV_COLOR: Record<string, string> = {
+  error:   'bg-red-100 text-red-700 border-red-200',
+  warning: 'bg-amber-100 text-amber-700 border-amber-200',
+  info:    'bg-blue-100 text-blue-700 border-blue-200',
+}
+
+function minsToHM(mins: number | null): string {
+  if (!mins || mins <= 0) return '0:00'
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return `${h}:${String(m).padStart(2, '0')}`
+}
+
+function fmtTime(ts: string | null): string {
+  if (!ts) return '—'
+  const s = ts.replace('T', ' ').replace('Z', '').slice(11, 16)
+  return s || ts.slice(0, 16)
+}
+
+function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: string; defaultEmployeeId?: string }) {
+  const [date, setDate]           = useState(defaultDate)
+  const [empId, setEmpId]         = useState(defaultEmployeeId ?? '')
+  const [data, setData]           = useState<TimelineData | null>(null)
+  const [loading, setLoading]     = useState(false)
+  const [error, setError]         = useState<string | null>(null)
+
+  const load = async () => {
+    if (!empId) return
+    setLoading(true); setError(null); setData(null)
+    try {
+      const { data: resp } = await api.get(`/api/attendance/day-timeline?date=${date}&employee_id=${empId}`)
+      setData(resp)
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } }; message?: string })
+        ?.response?.data?.error ?? (e as { message?: string })?.message ?? 'Error de red'
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+      <div className="px-4 py-2.5 border-b border-slate-100">
+        <h3 className="text-xs font-semibold text-slate-700">Línea de Tiempo de Jornada</h3>
+      </div>
+      <div className="p-4 space-y-4">
+        {/* Controles */}
+        <div className="flex flex-wrap gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Fecha</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">ID Empleado</label>
+            <input type="number" placeholder="ej: 11" value={empId} onChange={e => setEmpId(e.target.value)}
+              className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          </div>
+          <div className="flex items-end">
+            <button onClick={load} disabled={loading || !empId}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+              <Activity className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Cargando…' : 'Ver jornada'}
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            <XCircle className="w-4 h-4 shrink-0" />{error}
+          </div>
+        )}
+
+        {data && (
+          <div className="space-y-4">
+            {/* Encabezado empleado */}
+            <div className="bg-slate-50 rounded-lg px-4 py-3 flex flex-wrap gap-4 items-center">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">{data.employee.full_name}</p>
+                <p className="text-xs text-slate-500">{data.employee.department}</p>
+              </div>
+              {data.employee.schedule_name && (
+                <div className="text-xs text-slate-500">
+                  <span className="font-medium">Horario:</span> {data.employee.schedule_name}
+                  {data.employee.check_in && ` (entrada: ${data.employee.check_in.slice(0,5)})`}
+                </div>
+              )}
+              {data.summary && (
+                <div className="ml-auto flex items-center gap-4 divide-x divide-slate-200">
+                  <div className="px-3 first:pl-0 text-center">
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wide">Trabajado</p>
+                    <p className="text-sm font-bold text-emerald-700">{minsToHM(data.summary.worked_minutes)}</p>
+                  </div>
+                  <div className="px-3 text-center">
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wide">Almuerzo</p>
+                    <p className="text-sm font-medium text-blue-700">{minsToHM(data.summary.break_minutes)}</p>
+                  </div>
+                  <div className="px-3 text-center">
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wide">Atraso</p>
+                    <p className={`text-sm font-medium ${(data.summary.late_minutes ?? 0) > 0 ? 'text-amber-600' : 'text-slate-500'}`}>{minsToHM(data.summary.late_minutes)}</p>
+                  </div>
+                  <div className="px-3 text-center">
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wide">Estado</p>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLOR[data.summary.status] ?? 'bg-gray-100 text-gray-700'}`}>{data.summary.status}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Visual timeline bar */}
+            {data.raw_logs.length > 0 && (() => {
+              const DAY_START = 6 * 60  // 06:00
+              const DAY_END   = 20 * 60 // 20:00
+              const RANGE     = DAY_END - DAY_START
+              const toMin = (ts: string | null) => {
+                if (!ts) return null
+                const t = fmtTime(ts)
+                if (t === '—') return null
+                const [h, m] = t.split(':').map(Number)
+                return h * 60 + m
+              }
+              const pct = (min: number | null) => min === null ? null : `${Math.max(0, Math.min(100, ((min - DAY_START) / RANGE) * 100))}%`
+              return (
+                <div className="px-4 py-3 border border-slate-100 rounded-lg bg-slate-50">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-2">Línea de tiempo</p>
+                  <div className="relative h-6 bg-slate-100 rounded overflow-hidden">
+                    {/* Hour markers */}
+                    {[8,10,12,14,16,18].map(h => (
+                      <div key={h} className="absolute top-0 bottom-0 w-px bg-slate-200"
+                           style={{ left: `${((h * 60 - DAY_START) / RANGE) * 100}%` }} />
+                    ))}
+                    {/* Work segments */}
+                    {data.segments.map((seg, i) => {
+                      const inMin  = toMin(seg.in_at)
+                      const outMin = toMin(seg.out_at)
+                      if (inMin === null || outMin === null) return null
+                      return (
+                        <div key={i}
+                          className={`absolute top-1 bottom-1 rounded ${seg.anomaly_code ? 'bg-red-400' : 'bg-emerald-500'}`}
+                          style={{ left: pct(inMin)!, width: `${((outMin - inMin) / RANGE) * 100}%` }}
+                          title={`Seg ${i+1}: ${fmtTime(seg.in_at)} → ${fmtTime(seg.out_at)} (${minsToHM(seg.minutes ?? 0)})`}
+                        />
+                      )
+                    })}
+                    {/* Lunch gap */}
+                    {data.summary?.lunch_out && data.summary?.lunch_in && (() => {
+                      const lOut = toMin(data.summary!.lunch_out)
+                      const lIn  = toMin(data.summary!.lunch_in)
+                      if (!lOut || !lIn) return null
+                      return (
+                        <div className="absolute top-1 bottom-1 bg-blue-300/60 rounded"
+                             style={{ left: pct(lOut)!, width: `${((lIn - lOut) / RANGE) * 100}%` }}
+                             title={`Almuerzo: ${fmtTime(data.summary!.lunch_out)} → ${fmtTime(data.summary!.lunch_in)}`} />
+                      )
+                    })()}
+                    {/* Hour labels */}
+                    <div className="absolute -bottom-5 left-0 right-0 flex justify-between text-[9px] text-slate-400 pointer-events-none">
+                      {[6,8,10,12,14,16,18,20].map(h => (
+                        <span key={h} style={{ position: 'absolute', left: `${((h * 60 - DAY_START) / RANGE) * 100}%` }}>
+                          {h}h
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-6" />
+                </div>
+              )
+            })()}
+
+            {/* Cronología visual */}
+            <div>
+              <p className="text-xs font-medium text-slate-500 mb-2">Marcaciones cronológicas</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs ent-table">
+                  <thead>
+                    <tr>
+                      <th className="text-left">#</th>
+                      <th className="text-left">Hora</th>
+                      <th className="text-left">Tipo</th>
+                      <th className="text-left">Fuente</th>
+                      <th className="text-left">Reloj</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.raw_logs.length === 0 ? (
+                      <tr><td colSpan={5} className="py-3 text-slate-400">Sin marcaciones para esta fecha</td></tr>
+                    ) : data.raw_logs.map((log, idx) => (
+                      <tr key={log.id}>
+                        <td className="text-slate-400">{idx + 1}</td>
+                        <td className="font-mono font-medium text-slate-900">{fmtTime(log.timestamp)}</td>
+                        <td>
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${log.type === 'in' ? 'bg-green-100 text-green-700' : log.type === 'out' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
+                            {log.type === 'in' ? '↑ entrada' : log.type === 'out' ? '↓ salida' : log.type}
+                          </span>
+                        </td>
+                        <td className="text-slate-500">{log.source}</td>
+                        <td className="text-slate-400">{log.device_name ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Segmentos de trabajo */}
+            {data.segments.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-2">Bloques de trabajo calculados</p>
+                <div className="space-y-2">
+                  {data.segments.map((seg, i) => (
+                    <div key={i} className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-sm ${seg.anomaly_code ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                      <span className="text-xs font-medium text-slate-500 w-6">{i + 1}</span>
+                      <span className="font-mono text-slate-700">
+                        {fmtTime(seg.in_at)} → {fmtTime(seg.out_at)}
+                      </span>
+                      {seg.minutes !== null && (
+                        <span className="font-medium text-emerald-700">{minsToHM(seg.minutes)}</span>
+                      )}
+                      {seg.anomaly_code && (
+                        <span className="text-xs text-red-600 font-medium">{seg.anomaly_code}</span>
+                      )}
+                      {i === 0 && data.segments.length >= 2 && data.summary?.lunch_out && (
+                        <span className="ml-auto text-xs text-blue-600">
+                          ☕ almuerzo {fmtTime(data.summary.lunch_out)} → {fmtTime(data.summary.lunch_in)}
+                          {data.summary.break_minutes > 0 && ` (${minsToHM(data.summary.break_minutes)})`}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Policy display */}
+                {(data as any).policy && (
+                  <div className="pt-2 border-t border-slate-100 mt-3">
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-1.5">Política aplicada</p>
+                    {(() => {
+                      const p = (data as any).policy
+                      return (
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+                          <span><span className="text-slate-400">Nombre:</span> {p.name}</span>
+                          <span><span className="text-slate-400">Ámbito:</span> {p.scope_type}</span>
+                          <span><span className="text-slate-400">Desc. almuerzo:</span> {p.auto_deduct_break ? `Sí (${p.break_minutes} min)` : 'No'}</span>
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Comparación att2000 */}
+            {data.att2000_punches && data.att2000_punches.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-2">Marcaciones en att2000 (referencia)</p>
+                <div className="flex flex-wrap gap-2">
+                  {data.att2000_punches.map((p, i) => (
+                    <span key={i} className="px-2 py-1 bg-slate-100 rounded text-xs font-mono text-slate-700">
+                      {p.raw_checktime?.slice(11, 16)} {p.CHECKTYPE ? `(${p.CHECKTYPE})` : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Anomalías */}
+            {data.anomalies.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-2">Anomalías detectadas</p>
+                <div className="space-y-1">
+                  {data.anomalies.map((a, i) => (
+                    <div key={i} className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-xs ${SEV_COLOR[a.severity] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                      <span className="font-medium mr-1">{a.anomaly_type}</span>
+                      {a.message && <span className="opacity-80">{a.message}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -265,11 +568,11 @@ export default function ConciliacionPage() {
   useEffect(() => { load(date) }, [date, load])
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 space-y-4 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Conciliación de Marcaciones</h1>
+          <h1 className="text-lg font-bold text-slate-900">Conciliación de Marcaciones</h1>
           <p className="text-sm text-gray-500 mt-0.5">Diagnóstico de la cadena att2000 → logs → daily_summary</p>
         </div>
         <div className="flex items-center gap-3">
@@ -562,6 +865,9 @@ export default function ConciliacionPage() {
           </div>
         </Card>
       )}
+
+      {/* Línea de tiempo de jornada */}
+      <DayTimelinePanel defaultDate={date} />
 
       {/* Links rápidos */}
       <Card title="Navegación rápida">

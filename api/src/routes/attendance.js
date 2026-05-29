@@ -512,12 +512,16 @@ async function _runReimportRange(date_from, date_to) {
     throw err;
   }
 
-  // 3. Recalcular daily_summary para cada fecha del rango
-  const dtFrom = new Date(date_from + 'T00:00:00Z');
-  const dtTo   = new Date(date_to   + 'T00:00:00Z');
+  // 3. Recalcular daily_summary para cada fecha del rango.
+  // Iterar las cadenas de fecha directamente para evitar conversión de zona horaria:
+  // new Date('YYYY-MM-DDT00:00:00Z') → pyDateStr() con UTC-4 devuelve el día anterior.
   const recalculated_dates = [];
-  const cur = new Date(dtFrom);
-  while (cur <= dtTo) { recalculated_dates.push(pyDateStr(cur)); cur.setDate(cur.getDate() + 1); }
+  let _cur = date_from;
+  while (_cur <= date_to) {
+    recalculated_dates.push(_cur);
+    const [y, m, d] = _cur.split('-').map(Number);
+    _cur = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  }
 
   const recalc_errors = [];
   for (const d of recalculated_dates) {
@@ -760,6 +764,184 @@ router.get('/punch-time-audit', authorize('admin', 'super_admin', 'hr'), async (
     records,
     total:             records.length,
   });
+});
+
+// ─── GET /api/attendance/policy/resolve ──────────────────────────────────────
+router.get('/policy/resolve', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
+  const { employee_id } = req.query;
+  if (!employee_id) return res.status(400).json({ error: 'employee_id requerido' });
+  try {
+    const { resolvePolicy } = require('../services/attendancePolicyResolver');
+    const policy = await resolvePolicy(+employee_id);
+    res.json({ ok: true, policy });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── GET /api/attendance/policies ────────────────────────────────────────────
+router.get('/policies', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const { listPolicies } = require('../services/attendancePolicyResolver');
+    res.json({ ok: true, data: await listPolicies() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/attendance/policies ───────────────────────────────────────────
+router.post('/policies', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const { upsertPolicy } = require('../services/attendancePolicyResolver');
+    const id = await upsertPolicy(req.body);
+    res.json({ ok: true, id });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── PUT /api/attendance/policies/:id ────────────────────────────────────────
+router.put('/policies/:id', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const { upsertPolicy } = require('../services/attendancePolicyResolver');
+    await upsertPolicy({ ...req.body, id: +req.params.id });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── DELETE /api/attendance/policies/:id ─────────────────────────────────────
+router.delete('/policies/:id', authorize('admin', 'super_admin'), async (req, res) => {
+  try {
+    const { deletePolicy } = require('../services/attendancePolicyResolver');
+    await deletePolicy(+req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/attendance/process-day-v2 ─────────────────────────────────────
+// Recalcula daily_summary usando el motor V2 con políticas.
+// Body: { date: "YYYY-MM-DD", employee_id?: N }  (sin employee_id = todos del día)
+router.post('/process-day-v2', authorize('admin', 'super_admin'), async (req, res) => {
+  const { date, employee_id } = req.body || {};
+  if (!date) return res.status(400).json({ ok: false, error: 'date requerido (YYYY-MM-DD)' });
+  try {
+    const { bulkProcessDay, processAttendanceDay } = require('../services/attendanceProcessor');
+    if (employee_id) {
+      const result = await processAttendanceDay({ date, employeeId: +employee_id });
+      res.json({ ok: true, date, employee_id: +employee_id, ...result.finalMetrics, policy: result.policy });
+    } else {
+      const result = await bulkProcessDay(date);
+      res.json({ ok: true, ...result });
+    }
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── GET /api/attendance/day-timeline ────────────────────────────────────────
+// Línea de tiempo visual de la jornada de un empleado para una fecha.
+// Query params:
+//   date=YYYY-MM-DD  (obligatorio)
+//   employee_id=N    (obligatorio)
+// Respuesta: { employee, date, raw_logs, segments, summary, anomalies }
+router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
+  const { sequelize } = require('../config/database');
+  const { date, employee_id } = req.query;
+  if (!date || !employee_id) {
+    return res.status(400).json({ ok: false, error: 'date y employee_id son requeridos (query params)' });
+  }
+
+  try {
+    // Empleado
+    const [[emp]] = await sequelize.query(`
+      SELECT e.id, e.first_name, e.last_name, e.code, e.employee_number, e.status,
+             CONCAT(e.first_name,' ',e.last_name) AS full_name,
+             CASE WHEN d.name IS NULL OR d.name = 'This Company'
+               THEN 'Sin departamento asignado' ELSE d.name END AS department,
+             s.name AS schedule_name, s.check_in, s.check_out
+      FROM employees e
+      LEFT JOIN departments d ON d.id = e.department_id
+      LEFT JOIN schedules   s ON s.id = e.schedule_id
+      WHERE e.id = ?
+    `, { replacements: [+employee_id] });
+
+    if (!emp) return res.status(404).json({ ok: false, error: `Empleado ${employee_id} no encontrado` });
+
+    // Logs crudos
+    const [raw_logs] = await sequelize.query(`
+      SELECT al.id, al.timestamp, al.type, al.source, al.device_id,
+             d.name AS device_name, d.ip_address
+      FROM attendance_logs al
+      LEFT JOIN devices d ON d.id = al.device_id
+      WHERE al.employee_id = ? AND DATE(al.timestamp) = ?
+      ORDER BY al.timestamp ASC
+    `, { replacements: [+employee_id, date] });
+
+    // Segmentos (si migración 088 aplicada)
+    const [segments] = await sequelize.query(`
+      SELECT * FROM attendance_segments
+      WHERE employee_id = ? AND work_date = ?
+      ORDER BY segment_index ASC
+    `, { replacements: [+employee_id, date] }).catch(() => [[]]);
+
+    // Resumen del día
+    const [[summary]] = await sequelize.query(`
+      SELECT ds.*, s.name AS schedule_name
+      FROM daily_summary ds
+      LEFT JOIN schedules s ON s.id = ds.schedule_id
+      WHERE ds.employee_id = ? AND ds.date = ?
+    `, { replacements: [+employee_id, date] }).catch(() => [[null]]);
+
+    // Anomalías (si migración 088 aplicada)
+    const [anomalies] = await sequelize.query(`
+      SELECT id, anomaly_type, severity, message, raw_payload, resolved, created_at
+      FROM attendance_anomalies
+      WHERE employee_id = ? AND work_date = ?
+      ORDER BY severity DESC, created_at ASC
+    `, { replacements: [+employee_id, date] }).catch(() => [[]]);
+
+    // att2000 para comparación (si disponible)
+    let att2000_punches = null;
+    try {
+      const { queryAtt2000 } = require('../config/att2000');
+      att2000_punches = await queryAtt2000(`
+        SELECT CONVERT(varchar, c.CHECKTIME, 120) AS raw_checktime, c.CHECKTYPE
+        FROM CHECKINOUT c
+        JOIN USERINFO u ON u.USERID = c.USERID
+        JOIN employees e ON e.code = CAST(c.USERID AS varchar)
+        WHERE e.id = ${+employee_id}
+          AND CONVERT(date, c.CHECKTIME) = '${date}'
+        ORDER BY c.CHECKTIME ASC
+      `);
+    } catch {
+      // att2000 no disponible
+    }
+
+    // Política efectiva
+    let policy = null;
+    try {
+      const { resolvePolicy } = require('../services/attendancePolicyResolver');
+      policy = await resolvePolicy(+employee_id);
+    } catch { /* opcional */ }
+
+    res.json({
+      ok: true,
+      employee: emp,
+      date,
+      policy,
+      raw_logs,
+      segments,
+      summary: summary || null,
+      anomalies,
+      att2000_punches,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 function _auditTzInfo() {

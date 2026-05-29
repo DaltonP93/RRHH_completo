@@ -6,7 +6,7 @@ import { es } from 'date-fns/locale'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts'
-import { Users, Clock, AlertTriangle, UserCheck, Activity, RefreshCw, LayoutGrid } from 'lucide-react'
+import { Users, Clock, AlertTriangle, UserCheck, Activity, RefreshCw, LayoutGrid, Fingerprint, Smartphone, PenLine } from 'lucide-react'
 import Link from 'next/link'
 import { attendanceApi, api } from '@/lib/api'
 import { getSocket, reconnectSocket } from '@/lib/socket'
@@ -22,7 +22,11 @@ interface AttendanceEvent {
 }
 
 const TYPE_COLORS = { in: 'bg-green-100 text-green-800', out: 'bg-blue-100 text-blue-800', unknown: 'bg-gray-100 text-gray-700' }
-const SOURCE_ICONS = { device: '🖐️', mobile: '📱', manual: '✏️' }
+const SOURCE_ICON_MAP = { device: Fingerprint, mobile: Smartphone, manual: PenLine }
+function SourceIcon({ source }: { source: string }) {
+  const Icon = SOURCE_ICON_MAP[source as keyof typeof SOURCE_ICON_MAP] ?? Fingerprint
+  return <Icon size={14} className="text-slate-400" />
+}
 
 const PIE_COLORS = ['#22c55e', '#f59e0b', '#ef4444', '#8b5cf6']
 
@@ -96,11 +100,11 @@ export default function DashboardPage() {
   ]
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">{t('nav.dashboard')}</h1>
+          <h1 className="text-lg font-bold text-slate-900">{t('nav.dashboard')}</h1>
           <p className="text-slate-500 capitalize" suppressHydrationWarning>{today || '\u00a0'}</p>
         </div>
         <div className="flex items-center gap-3">
@@ -147,7 +151,7 @@ export default function DashboardPage() {
 
       {/* Empty state CTA when no employees */}
       {(!stats || !stats.total_employees) && (
-        <div className="mb-6 bg-white border rounded-2xl p-8 text-center">
+        <div className="mb-6 bg-white border rounded-lg p-6 text-center">
           <Users className="mx-auto text-slate-300 mb-3" size={48} />
           <h2 className="text-xl font-semibold text-slate-700 mb-2">No hay empleados importados todav\u00eda</h2>
           <p className="text-slate-500 mb-6">Comienza importando desde att2000, creando un empleado o configurando los relojes ZKTeco.</p>
@@ -160,7 +164,7 @@ export default function DashboardPage() {
       )}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard
           icon={<Users size={22} />}
           label={t('nav.employees')}
@@ -189,9 +193,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Charts + Live Feed */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Pie Chart */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+        <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
           <h2 className="font-semibold text-slate-700 mb-4">{t('dashboard.today_attendance')}</h2>
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
@@ -204,7 +208,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Live Feed */}
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+        <div className="lg:col-span-2 bg-white rounded-lg border border-slate-200 p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
           <div className="flex items-center gap-2 mb-4">
             <Activity size={18} className="text-blue-500" />
             <h2 className="font-semibold text-slate-700">{t('dashboard.live_feed')}</h2>
@@ -214,9 +218,9 @@ export default function DashboardPage() {
               <p className="text-slate-400 text-sm text-center py-8">{t('dashboard.no_marks_today')}</p>
             )}
             {recentLogs.map((log, i) => (
-              <div key={i} className="flex items-center justify-between py-2.5 px-3 rounded-lg bg-slate-50 slide-in">
+              <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded bg-slate-50 slide-in">
                 <div className="flex items-center gap-3">
-                  <span className="text-lg">{SOURCE_ICONS[log.source as keyof typeof SOURCE_ICONS] || '🖐️'}</span>
+                  <SourceIcon source={log.source} />
                   <div>
                     <p className="font-medium text-slate-800 text-sm">{log.employeeName || log.employee_name}</p>
                     <p className="text-xs text-slate-400">
@@ -259,10 +263,10 @@ function KpiCard({ icon, label, value, color, sub }: {
     red:   'bg-red-50   text-red-600   border-red-100',
   }
   return (
-    <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 p-5`}>
-      <div className={`inline-flex p-2.5 rounded-xl ${colors[color]} mb-3`}>{icon}</div>
-      <p className="text-slate-500 text-sm">{label}</p>
-      <p className="text-3xl font-bold text-slate-900 mt-0.5">{value}</p>
+    <div className={`bg-white rounded-lg border border-slate-200 p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)]`}>
+      <div className={`inline-flex p-2 rounded-lg ${colors[color]} mb-2`}>{icon}</div>
+      <p className="text-slate-500 text-xs">{label}</p>
+      <p className="text-2xl font-bold text-slate-900 mt-0.5">{value}</p>
       {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
     </div>
   )
