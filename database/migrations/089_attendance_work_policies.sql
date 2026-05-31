@@ -4,6 +4,7 @@
 -- Idempotente, seguro de re-ejecutar en MySQL 8.
 -- Aplicar: mysql asistencia < database/migrations/089_attendance_work_policies.sql
 
+SET NAMES utf8mb4;
 USE asistencia;
 
 -- ─── attendance_work_policies ─────────────────────────────────────────────────
