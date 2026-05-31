@@ -928,14 +928,31 @@ router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req,
       policy = await resolvePolicy(+employee_id);
     } catch { /* opcional */ }
 
+    const { formatMysqlDateTimeLocal } = require('../services/attendanceProcessor');
+
+    const logsWithLocal = raw_logs.map(l => ({
+      ...l,
+      timestamp_local: formatMysqlDateTimeLocal(l.timestamp),
+    }));
+    const segmentsWithLocal = segments.map(s => ({
+      ...s,
+      in_at_local:  formatMysqlDateTimeLocal(s.in_at),
+      out_at_local: formatMysqlDateTimeLocal(s.out_at),
+    }));
+    const summaryWithLocal = summary ? {
+      ...summary,
+      first_in_local:  formatMysqlDateTimeLocal(summary.first_in),
+      last_out_local:  formatMysqlDateTimeLocal(summary.last_out),
+    } : null;
+
     res.json({
       ok: true,
       employee: emp,
       date,
       policy,
-      raw_logs,
-      segments,
-      summary: summary || null,
+      raw_logs:  logsWithLocal,
+      segments:  segmentsWithLocal,
+      summary:   summaryWithLocal,
       anomalies,
       att2000_punches,
     });

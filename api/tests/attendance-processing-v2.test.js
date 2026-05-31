@@ -19,6 +19,7 @@ const {
   applyPolicy,
   detectDayAnomalies,
   tsToDate,
+  formatMysqlDateTimeLocal,
 } = require('../src/services/attendanceProcessor');
 
 const DEFAULT_POLICY = {
@@ -510,5 +511,71 @@ describe('process-day-v2 business rules', () => {
     expect(result.breakMinutes).toBe(0);
     expect(result.workedMinutes).toBe(result.grossMinutes);
     expect(result.breakSource).toBe('none');
+  });
+});
+
+// ─── Preservación de timestamps — sin drift de TZ ────────────────────────────
+describe('timestamps preserved through pipeline (no TZ drift)', () => {
+  test('formatMysqlDateTimeLocal preserva string MySQL exacto', () => {
+    expect(formatMysqlDateTimeLocal('2026-05-28 06:47:46')).toBe('2026-05-28 06:47:46');
+    expect(formatMysqlDateTimeLocal('2026-05-28 15:11:10')).toBe('2026-05-28 15:11:10');
+  });
+
+  test('formatMysqlDateTimeLocal convierte ISO con T a formato MySQL', () => {
+    expect(formatMysqlDateTimeLocal('2026-05-28T06:47:46')).toBe('2026-05-28 06:47:46');
+  });
+
+  test('formatMysqlDateTimeLocal devuelve null si value es null/undefined', () => {
+    expect(formatMysqlDateTimeLocal(null)).toBeNull();
+    expect(formatMysqlDateTimeLocal(undefined)).toBeNull();
+  });
+
+  test('input 06:47:46 in, 15:11:10 out → segmentos preservan timestamps exactos', () => {
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 06:47:46', type: 'in' },
+      { id: 2, timestamp: '2026-05-28 15:11:10', type: 'out' },
+    ];
+    const typed = assignTypes(rawLogs);
+    const { segments } = buildSegments(typed);
+
+    expect(segments).toHaveLength(1);
+    expect(segments[0].in_at).toBe('2026-05-28 06:47:46');
+    expect(segments[0].out_at).toBe('2026-05-28 15:11:10');
+    expect(segments[0].segment_index).toBe(1);
+  });
+
+  test('input 06:47:46 in, 15:11:10 out → métricas base correctas (gross=503, sin break)', () => {
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 06:47:46', type: 'in' },
+      { id: 2, timestamp: '2026-05-28 15:11:10', type: 'out' },
+    ];
+    const typed = assignTypes(rawLogs);
+    const { segments } = buildSegments(typed);
+    const base = computeBaseMetrics(segments);
+
+    expect(base.firstIn).toBe('2026-05-28 06:47:46');
+    expect(base.lastOut).toBe('2026-05-28 15:11:10');
+    // 15:11:10 − 06:47:46 = 8h 23m 24s → 503.4 min → round → 503
+    expect(base.grossMinutes).toBe(503);
+    expect(base.lunchOut).toBeNull();
+    expect(base.lunchIn).toBeNull();
+  });
+
+  test('input 06:47:46 in, 15:11:10 out + política por defecto → worked=503, break=0', () => {
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 06:47:46', type: 'in' },
+      { id: 2, timestamp: '2026-05-28 15:11:10', type: 'out' },
+    ];
+    const typed = assignTypes(rawLogs);
+    const { segments } = buildSegments(typed);
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, DEFAULT_POLICY);
+
+    expect(result.grossMinutes).toBe(503);
+    expect(result.workedMinutes).toBe(503);
+    expect(result.breakMinutes).toBe(0);
+    expect(result.breakSource).toBe('none');
+    expect(result.firstIn).toBe('2026-05-28 06:47:46');
+    expect(result.lastOut).toBe('2026-05-28 15:11:10');
   });
 });

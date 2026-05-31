@@ -45,6 +45,46 @@ function fmtHHMM(ts) {
   return `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
 }
 
+/**
+ * Calcula el offset en ms del timezone de Sequelize (ej: '-03:00' → -10800000).
+ * Sequelize aplica este offset al leer DATETIME de MySQL → Date object UTC.
+ * Necesitamos invertirlo para recuperar el string original de MySQL.
+ */
+const _seqTzOffsetMs = (() => {
+  const tz = sequelize.options?.timezone;
+  if (!tz || tz === 'Z' || tz === 'UTC' || tz === '+00:00') return 0;
+  const m = String(tz).match(/^([+-])(\d{2}):(\d{2})$/);
+  if (!m) return 0;
+  const sign = m[1] === '+' ? 1 : -1;
+  return sign * (parseInt(m[2]) * 60 + parseInt(m[3])) * 60 * 1000;
+})();
+
+/**
+ * Devuelve "YYYY-MM-DD HH:mm:ss" exactamente como está en MySQL, sin aplicar
+ * conversión de timezone.
+ *
+ * Problema a resolver: Sequelize con timezone='-03:00' convierte el DATETIME
+ * '06:47:46' a Date(09:47:46Z). Cuando mysql2 inserta ese Date object usa
+ * getHours() del proceso Node.js (no el timezone de Sequelize), produciendo drift.
+ *
+ * Solución: invertir el offset de Sequelize para recuperar el string original.
+ */
+function formatMysqlDateTimeLocal(value) {
+  if (!value) return null;
+  // String MySQL directo — devolver tal cual
+  if (typeof value === 'string') {
+    return value.replace('T', ' ').slice(0, 19);
+  }
+  if (value instanceof Date) {
+    // Invertir el offset que Sequelize aplicó al leer: Date(UTC) - seqOffset → original local
+    const ms = value.getTime() + _seqTzOffsetMs;
+    const d  = new Date(ms);
+    const p  = n => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+  }
+  return null;
+}
+
 // ─── Deduplicación ────────────────────────────────────────────────────────────
 
 function deduplicate(logs) {
@@ -93,7 +133,11 @@ function buildSegments(typedLogs) {
   for (let i = 0; i < typedLogs.length; i += 2) {
     const inLog  = typedLogs[i];
     const outLog = typedLogs[i + 1] || null;
-    const segIdx = Math.floor(i / 2);
+    // segment_index empieza en 1
+    const segIdx = Math.floor(i / 2) + 1;
+    // Normalizar timestamps a string MySQL sin offset de timezone
+    const inAtStr  = formatMysqlDateTimeLocal(inLog.timestamp);
+    const outAtStr = outLog ? formatMysqlDateTimeLocal(outLog.timestamp) : null;
 
     if (!outLog) {
       segments.push({
@@ -101,7 +145,7 @@ function buildSegments(typedLogs) {
         segment_type:  'incomplete',
         in_log_id:     inLog.id,
         out_log_id:    null,
-        in_at:         inLog.timestamp,
+        in_at:         inAtStr,
         out_at:        null,
         gross_minutes: null,
         worked_minutes: null,
@@ -109,19 +153,19 @@ function buildSegments(typedLogs) {
         anomaly_code:  'missing_out',
       });
       anomalies.push({ anomaly_type: 'missing_out', severity: 'warning',
-        message: `Entrada sin salida — ${fmtHHMM(inLog.timestamp)}`,
-        raw_payload: { in_log_id: inLog.id, in_at: inLog.timestamp } });
+        message: `Entrada sin salida — ${fmtHHMM(inAtStr)}`,
+        raw_payload: { in_log_id: inLog.id, in_at: inAtStr } });
       continue;
     }
 
-    const inTs  = tsToDate(inLog.timestamp);
-    const outTs = tsToDate(outLog.timestamp);
+    const inTs  = tsToDate(inAtStr);
+    const outTs = tsToDate(outAtStr);
     const mins  = Math.round((outTs - inTs) / 60000);
     const outBeforeIn = mins <= 0;
 
     if (outBeforeIn) {
       anomalies.push({ anomaly_type: 'out_before_in', severity: 'error',
-        message: `Salida (${fmtHHMM(outLog.timestamp)}) anterior a entrada (${fmtHHMM(inLog.timestamp)})`,
+        message: `Salida (${fmtHHMM(outAtStr)}) anterior a entrada (${fmtHHMM(inAtStr)})`,
         raw_payload: { in_log_id: inLog.id, out_log_id: outLog.id } });
     }
 
@@ -130,8 +174,8 @@ function buildSegments(typedLogs) {
       segment_type:   outBeforeIn ? 'incomplete' : 'work',
       in_log_id:      inLog.id,
       out_log_id:     outLog.id,
-      in_at:          inLog.timestamp,
-      out_at:         outLog.timestamp,
+      in_at:          inAtStr,
+      out_at:         outAtStr,
       gross_minutes:  Math.max(0, mins),
       worked_minutes: Math.max(0, mins),
       confidence:     inLog.confidence === 'explicit' && outLog.confidence === 'explicit' ? 'explicit' : 'inferred',
@@ -272,7 +316,7 @@ async function upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes,
 
   // Build column list dynamically based on what's available
   const cols   = ['employee_id', 'date', 'first_in', 'last_out', 'worked_minutes', 'break_minutes', 'late_minutes', 'status'];
-  const vals   = [employeeId, date, firstIn, lastOut, workedMinutes, breakMinutes, lateMinutes, status];
+  const vals   = [employeeId, date, formatMysqlDateTimeLocal(firstIn), formatMysqlDateTimeLocal(lastOut), workedMinutes, breakMinutes, lateMinutes, status];
   const update = [
     'first_in       = VALUES(first_in)',
     'last_out       = VALUES(last_out)',
@@ -284,7 +328,7 @@ async function upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes,
 
   if (hasLunch) {
     cols.push('lunch_out', 'lunch_in');
-    vals.push(lunchOut, lunchIn);
+    vals.push(formatMysqlDateTimeLocal(lunchOut), formatMysqlDateTimeLocal(lunchIn));
     update.push('lunch_out = VALUES(lunch_out)', 'lunch_in = VALUES(lunch_in)');
   }
   if (hasGross) {
@@ -336,7 +380,7 @@ async function upsertSegments({ date, employeeId, segments }) {
         `, { replacements: [
           employeeId, date, seg.segment_index, seg.segment_type || 'work',
           seg.in_log_id || null, seg.out_log_id || null,
-          seg.in_at || null, seg.out_at || null,
+          formatMysqlDateTimeLocal(seg.in_at) || null, formatMysqlDateTimeLocal(seg.out_at) || null,
           seg.gross_minutes ?? null, seg.worked_minutes ?? null,
           seg.confidence, seg.anomaly_code || null,
         ]});
@@ -355,7 +399,7 @@ async function upsertSegments({ date, employeeId, segments }) {
         `, { replacements: [
           employeeId, date, seg.segment_index,
           seg.in_log_id || null, seg.out_log_id || null,
-          seg.in_at || null, seg.out_at || null,
+          formatMysqlDateTimeLocal(seg.in_at) || null, formatMysqlDateTimeLocal(seg.out_at) || null,
           seg.gross_minutes ?? null, seg.confidence, seg.anomaly_code || null,
         ]});
       }
@@ -407,8 +451,9 @@ async function processAttendanceDay({ date, employeeId }) {
     return { segments: [], finalMetrics: null, anomalies: [], policy: null };
   }
 
-  // 2. Deduplicar, asignar tipos, construir segmentos
-  const deduped = deduplicate(logs);
+  // 2. Normalizar timestamps (Sequelize puede devolver Date objects), deduplicar, asignar tipos
+  const normalizedLogs = logs.map(l => ({ ...l, timestamp: formatMysqlDateTimeLocal(l.timestamp) }));
+  const deduped = deduplicate(normalizedLogs);
   const typed   = assignTypes(deduped);
   const { segments, anomalies: segAnomalies } = buildSegments(typed);
 
@@ -489,5 +534,6 @@ module.exports = {
   applyPolicy,
   detectDayAnomalies,
   tsToDate,
+  formatMysqlDateTimeLocal,
   _resetColCache: () => _colCache.clear(),
 };
