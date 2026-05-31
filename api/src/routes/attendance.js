@@ -902,7 +902,7 @@ router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req,
       FROM attendance_anomalies
       WHERE employee_id = ? AND work_date = ?
       ORDER BY severity DESC, created_at ASC
-    `, { replacements: [+employee_id, date] }).catch(() => [[]]);
+    `, { replacements: [+employee_id, date] }).catch(() => [[[]]]);
 
     // att2000 para comparación (si disponible)
     let att2000_punches = null;
@@ -930,9 +930,25 @@ router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req,
 
     const { formatMysqlDateTimeLocal } = require('../services/attendanceProcessor');
 
+    // Calcular estado de cada log crudo basado en las anomalías guardadas
+    // para que la UI pueda mostrar badges sin necesidad de reprocesar.
+    const parsedAnomalies = anomalies.map(a => ({
+      ...a,
+      raw_payload: typeof a.raw_payload === 'string' ? (() => { try { return JSON.parse(a.raw_payload); } catch { return {}; } })() : (a.raw_payload || {}),
+    }));
+    const suggestedExclusionIds = new Set(
+      parsedAnomalies.filter(a => a.anomaly_type === 'duplicate_nearby').map(a => a.raw_payload?.log_id).filter(Boolean)
+    );
+    const reviewRequiredIds = new Set(
+      parsedAnomalies.filter(a => a.raw_payload?.log_id).map(a => a.raw_payload.log_id)
+    );
+
     const logsWithLocal = raw_logs.map(l => ({
       ...l,
-      timestamp_local: formatMysqlDateTimeLocal(l.timestamp),
+      timestamp_local:      formatMysqlDateTimeLocal(l.timestamp),
+      used_in_calculation:  !suggestedExclusionIds.has(l.id),
+      suggested_exclusion:  suggestedExclusionIds.has(l.id),
+      requires_review:      reviewRequiredIds.has(l.id),
     }));
     const segmentsWithLocal = segments.map(s => ({
       ...s,
@@ -941,10 +957,12 @@ router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req,
     }));
     const summaryWithLocal = summary ? {
       ...summary,
-      first_in_local:  formatMysqlDateTimeLocal(summary.first_in),
-      last_out_local:  formatMysqlDateTimeLocal(summary.last_out),
-      lunch_out_local: formatMysqlDateTimeLocal(summary.lunch_out),
-      lunch_in_local:  formatMysqlDateTimeLocal(summary.lunch_in),
+      first_in_local:      formatMysqlDateTimeLocal(summary.first_in),
+      last_out_local:      formatMysqlDateTimeLocal(summary.last_out),
+      lunch_out_local:     formatMysqlDateTimeLocal(summary.lunch_out),
+      lunch_in_local:      formatMysqlDateTimeLocal(summary.lunch_in),
+      calculation_status:  summary.calculation_status || 'provisional',
+      requires_review:     Boolean(summary.requires_review),
     } : null;
 
     res.json({
@@ -952,10 +970,12 @@ router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req,
       employee: emp,
       date,
       policy,
-      raw_logs:  logsWithLocal,
-      segments:  segmentsWithLocal,
-      summary:   summaryWithLocal,
-      anomalies,
+      raw_logs:             logsWithLocal,
+      suggested_exclusions: logsWithLocal.filter(l => l.suggested_exclusion),
+      review_required_logs: logsWithLocal.filter(l => l.requires_review),
+      segments:             segmentsWithLocal,
+      summary:              summaryWithLocal,
+      anomalies:            parsedAnomalies,
       att2000_punches,
     });
   } catch (err) {

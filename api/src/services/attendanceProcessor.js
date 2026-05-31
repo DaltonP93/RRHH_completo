@@ -86,17 +86,29 @@ function formatMysqlDateTimeLocal(value) {
 }
 
 // ─── Deduplicación ────────────────────────────────────────────────────────────
+// IMPORTANTE: attendance_logs es fuente inmutable. Esta función NO elimina ni
+// modifica registros. Solo identifica cuáles usar en el cálculo provisional y
+// cuáles se sugieren como exclusión para revisión humana.
 
 function deduplicate(logs) {
-  if (!logs.length) return [];
+  if (!logs.length) return { deduped: [], suggestedExclusions: [] };
   const sorted = [...logs].sort((a, b) => tsToDate(a.timestamp) - tsToDate(b.timestamp));
-  const out = [sorted[0]];
+  const deduped = [sorted[0]];
+  const suggestedExclusions = [];
   for (let i = 1; i < sorted.length; i++) {
-    if ((tsToDate(sorted[i].timestamp) - tsToDate(out[out.length - 1].timestamp)) >= DEDUP_WINDOW_MS) {
-      out.push(sorted[i]);
+    const deltaMs = tsToDate(sorted[i].timestamp) - tsToDate(deduped[deduped.length - 1].timestamp);
+    if (deltaMs >= DEDUP_WINDOW_MS) {
+      deduped.push(sorted[i]);
+    } else {
+      suggestedExclusions.push({
+        ...sorted[i],
+        exclusion_reason: 'duplicate_nearby',
+        delta_ms: deltaMs,
+        near_log_id: deduped[deduped.length - 1].id,
+      });
     }
   }
-  return out;
+  return { deduped, suggestedExclusions };
 }
 
 // ─── Asignación de tipos ──────────────────────────────────────────────────────
@@ -289,6 +301,26 @@ function detectDayAnomalies(finalMetrics, segments, policy) {
   return extra;
 }
 
+// ─── Explicación del cálculo ──────────────────────────────────────────────────
+
+function _buildCalculationExplanation(finalMetrics, policy, suggestedExclusions, allAnomalies) {
+  const notes = [];
+  if (suggestedExclusions.length > 0) {
+    notes.push(`${suggestedExclusions.length} marcación(es) sugerida(s) como exclusión por duplicado cercano (< ${DEDUP_WINDOW_MS / 1000}s). Visibles y pendientes de revisión.`);
+  }
+  const { workedMinutes, breakMinutes, breakSource, grossMinutes } = finalMetrics;
+  if (breakSource === 'marked_lunch')  notes.push(`Almuerzo marcado explícitamente: ${breakMinutes} min excluidos del cálculo.`);
+  else if (breakSource === 'auto_deduct') notes.push(`Descuento automático de descanso: ${breakMinutes} min (política: ${policy?.name || 'default'}).`);
+  else if (breakSource === 'none')    notes.push('Jornada corrida — sin descuento de descanso.');
+  else if (breakSource === 'gap')     notes.push(`Gap entre segmentos usado como descanso: ${breakMinutes} min.`);
+  notes.push(`Resultado provisional: gross=${grossMinutes} min, descanso=${breakMinutes} min, trabajado=${workedMinutes} min.`);
+  const hasBlocker = allAnomalies.some(a => ['missing_out','out_before_in','duplicate_nearby'].includes(a.anomaly_type));
+  notes.push(hasBlocker
+    ? 'Estado: provisional — requiere revisión por supervisor/RRHH antes de impactar nómina.'
+    : 'Estado: provisional — puede aprobarse sin correcciones.');
+  return notes;
+}
+
 // ─── DB writes ────────────────────────────────────────────────────────────────
 
 // Memoize column checks (reset en tests via _resetColCache)
@@ -307,7 +339,7 @@ async function _hasColumn(table, column) {
   } catch { return false; }
 }
 
-async function upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes, status, anomalyCount, policy }) {
+async function upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes, status, anomalyCount, policy, requiresReview }) {
   const hasLunch  = await _hasColumn('daily_summary', 'lunch_out');
   const hasGross  = await _hasColumn('daily_summary', 'gross_minutes');
   const hasPolicy = await _hasColumn('daily_summary', 'policy_id');
@@ -345,6 +377,17 @@ async function upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes,
     cols.push('anomaly_count');
     vals.push(anomalyCount);
     update.push('anomaly_count = VALUES(anomaly_count)');
+  }
+  if (await _hasColumn('daily_summary', 'requires_review')) {
+    cols.push('requires_review');
+    vals.push(requiresReview ? 1 : 0);
+    update.push('requires_review = VALUES(requires_review)');
+  }
+  if (await _hasColumn('daily_summary', 'calculation_status')) {
+    cols.push('calculation_status');
+    vals.push('provisional');
+    // Solo actualizamos si el estado actual NO es ya approved/adjusted (preservar aprobaciones)
+    update.push("calculation_status = CASE WHEN calculation_status IN ('approved','adjusted') THEN calculation_status ELSE 'provisional' END");
   }
 
   const placeholders = cols.map(() => '?').join(', ');
@@ -452,8 +495,10 @@ async function processAttendanceDay({ date, employeeId }) {
   }
 
   // 2. Normalizar timestamps (Sequelize puede devolver Date objects), deduplicar, asignar tipos
+  // Nota: attendance_logs NO se modifica. suggestedExclusions son los logs no usados
+  // en el cálculo provisional, pero siempre visibles y sujetos a revisión humana.
   const normalizedLogs = logs.map(l => ({ ...l, timestamp: formatMysqlDateTimeLocal(l.timestamp) }));
-  const deduped = deduplicate(normalizedLogs);
+  const { deduped, suggestedExclusions } = deduplicate(normalizedLogs);
   const typed   = assignTypes(deduped);
   const { segments, anomalies: segAnomalies } = buildSegments(typed);
 
@@ -466,13 +511,19 @@ async function processAttendanceDay({ date, employeeId }) {
 
   // 5. Anomalías de jornada
   const dayAnomalies = detectDayAnomalies(finalMetrics, segments, policy);
-  const dupCount     = logs.length - deduped.length;
-  if (dupCount > 0) {
-    dayAnomalies.push({ anomaly_type: 'duplicate_punch', severity: 'warning',
-      message: `${dupCount} marcación(es) duplicada(s) descartada(s)`,
-      raw_payload: { original_count: logs.length, after_dedup: deduped.length } });
+  // Anomalía por cada duplicado cercano — log_id para que UI pueda vincularlos
+  for (const ex of suggestedExclusions) {
+    dayAnomalies.push({
+      anomaly_type: 'duplicate_nearby',
+      severity: 'info',
+      message: `Marcación ${fmtHHMM(ex.timestamp)} sugerida como exclusión (duplicado cercano, delta: ${ex.delta_ms}ms)`,
+      raw_payload: { log_id: ex.id, near_log_id: ex.near_log_id, delta_ms: ex.delta_ms },
+    });
   }
   const allAnomalies = [...segAnomalies, ...dayAnomalies];
+  const requiresReview = allAnomalies.some(a =>
+    ['duplicate_nearby','missing_out','out_before_in','too_many_punches','manual_review_required'].includes(a.anomaly_type)
+  );
 
   // 6. Calcular atraso respecto al horario
   let lateMinutes = 0;
@@ -492,15 +543,26 @@ async function processAttendanceDay({ date, employeeId }) {
   let status = finalMetrics.firstIn ? (lateMinutes > 0 ? 'late' : 'present') : 'absent';
 
   // 8. Guardar
-  await upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes, status, anomalyCount: allAnomalies.length, policy });
+  await upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes, status, anomalyCount: allAnomalies.length, policy, requiresReview });
   await upsertSegments({ date, employeeId, segments });
   await upsertAnomalies({ date, employeeId, anomalies: allAnomalies });
 
+  // IDs de logs referenciados en anomalías → para UI "requiere revisión"
+  const reviewLogIds = new Set(
+    allAnomalies.filter(a => a.raw_payload?.log_id).map(a => a.raw_payload.log_id)
+  );
+
+  const calculationExplanation = _buildCalculationExplanation(finalMetrics, policy, suggestedExclusions, allAnomalies);
+
   return {
+    raw_logs:            normalizedLogs,
+    suggested_exclusions: suggestedExclusions,
+    review_required_logs: normalizedLogs.filter(l => reviewLogIds.has(l.id)),
     segments,
-    finalMetrics: { ...finalMetrics, lateMinutes, status, anomalyCount: allAnomalies.length },
-    anomalies: allAnomalies,
+    finalMetrics: { ...finalMetrics, lateMinutes, status, anomalyCount: allAnomalies.length, calculation_status: 'provisional', requires_review: requiresReview },
+    anomalies:   allAnomalies,
     policy,
+    calculation_explanation: calculationExplanation,
   };
 }
 
