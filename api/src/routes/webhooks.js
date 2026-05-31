@@ -28,6 +28,20 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 const logger = require('../config/logger');
 
+// Bloquea SSRF: impide registrar webhooks apuntando a rangos privados/loopback.
+function isPrivateUrl(rawUrl) {
+  try {
+    const { hostname } = new URL(rawUrl);
+    // Loopback + RFC 1918
+    if (/^(127\.|0\.0\.0\.0|localhost$)/i.test(hostname)) return true;
+    if (/^10\.\d+\.\d+\.\d+$/.test(hostname)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(hostname)) return true;
+    if (/^192\.168\.\d+\.\d+$/.test(hostname)) return true;
+    if (/^(::1|fc00:|fd[0-9a-f]{2}:)/i.test(hostname)) return true;
+    return false;
+  } catch { return true; }
+}
+
 // ─── Tabla de webhooks (crear en init.sql o migración) ──────────
 // La creamos aquí si no existe
 async function ensureWebhookTable() {
@@ -188,6 +202,7 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const { name, url, secret, events = ['attendance.checkin', 'attendance.checkout', 'alert.late'], format = 'json', channel } = req.body;
   if (!name || !url) return res.status(400).json({ error: 'name y url son requeridos' });
+  if (isPrivateUrl(url)) return res.status(400).json({ error: 'La URL del webhook no puede apuntar a direcciones privadas o locales' });
 
   const [result] = await sequelize.query(
     'INSERT INTO webhooks (name, url, secret, events, format, channel) VALUES (?, ?, ?, ?, ?, ?)',
