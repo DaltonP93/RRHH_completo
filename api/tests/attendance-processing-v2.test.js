@@ -579,3 +579,205 @@ describe('timestamps preserved through pipeline (no TZ drift)', () => {
     expect(result.lastOut).toBe('2026-05-28 15:11:10');
   });
 });
+
+// ─── Empleado con 4 marcaciones (almuerzo marcado) ────────────────────────────
+describe('4-punch employee — IN/OUT/IN/OUT con almuerzo marcado', () => {
+  const logs4 = [
+    { id: 1, timestamp: '2026-05-28 06:45:00', type: 'in'  },
+    { id: 2, timestamp: '2026-05-28 12:00:00', type: 'out' },
+    { id: 3, timestamp: '2026-05-28 13:00:00', type: 'in'  },
+    { id: 4, timestamp: '2026-05-28 15:11:10', type: 'out' },
+  ];
+
+  test('buildSegments genera 2 segmentos con indices 1 y 2', () => {
+    const { segments } = buildSegments(assignTypes(logs4));
+    expect(segments).toHaveLength(2);
+    expect(segments[0].segment_index).toBe(1);
+    expect(segments[1].segment_index).toBe(2);
+  });
+
+  test('segmentos preservan timestamps exactos', () => {
+    const { segments } = buildSegments(assignTypes(logs4));
+    expect(segments[0].in_at).toBe('2026-05-28 06:45:00');
+    expect(segments[0].out_at).toBe('2026-05-28 12:00:00');
+    expect(segments[1].in_at).toBe('2026-05-28 13:00:00');
+    expect(segments[1].out_at).toBe('2026-05-28 15:11:10');
+  });
+
+  test('computeBaseMetrics detecta lunchOut/lunchIn y calcula lunchMinutes=60', () => {
+    const { segments } = buildSegments(assignTypes(logs4));
+    const base = computeBaseMetrics(segments);
+    expect(base.lunchOut).toBe('2026-05-28 12:00:00');
+    expect(base.lunchIn).toBe('2026-05-28 13:00:00');
+    expect(base.lunchMinutes).toBe(60);
+    // gross = 06:45→15:11 = 506 min
+    expect(base.grossMinutes).toBe(506);
+    // sumSegMins = (12:00-06:45)=375 + (15:11-13:00)=131 = 506... wait
+    // mañana: 06:45→12:00 = 5h15m = 315 min
+    // tarde:  13:00→15:11 = 2h11m = 131 min
+    expect(base.sumSegMins).toBe(315 + 131); // 446
+  });
+
+  test('applyPolicy con DEFAULT (auto_deduct=false) → worked=446, break=60', () => {
+    const { segments } = buildSegments(assignTypes(logs4));
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, DEFAULT_POLICY);
+    // Almuerzo marcado explícitamente → worked = sumSegMins, break = lunchMinutes
+    expect(result.workedMinutes).toBe(446);
+    expect(result.breakMinutes).toBe(60);
+    expect(result.breakSource).toBe('marked_lunch');
+  });
+
+  test('applyPolicy con DEDUCT_POLICY → almuerzo marcado prevalece sobre auto_deduct', () => {
+    const { segments } = buildSegments(assignTypes(logs4));
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, DEDUCT_POLICY);
+    // Almuerzo marcado siempre prevalece
+    expect(result.workedMinutes).toBe(446);
+    expect(result.breakMinutes).toBe(60);
+    expect(result.breakSource).toBe('marked_lunch');
+  });
+});
+
+// ─── Política employee con auto_deduct_break=true ─────────────────────────────
+describe('política auto_deduct_break=true — gross=503, break=60, worked=443', () => {
+  const EMPLOYEE_POLICY = {
+    ...DEFAULT_POLICY,
+    auto_deduct_break: true,
+    break_minutes: 60,
+    apply_break_after_minutes: 300, // umbral: jornada > 5h activa el descuento
+  };
+
+  test('2 marcaciones + política employee auto_deduct → worked=443, break=60', () => {
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 06:47:46', type: 'in' },
+      { id: 2, timestamp: '2026-05-28 15:11:10', type: 'out' },
+    ];
+    const { segments } = buildSegments(assignTypes(rawLogs));
+    const base = computeBaseMetrics(segments);
+    // gross=503, umbral=300 → aplica descuento de 60
+    const result = applyPolicy(base, segments, EMPLOYEE_POLICY);
+
+    expect(result.grossMinutes).toBe(503);
+    expect(result.breakMinutes).toBe(60);
+    expect(result.workedMinutes).toBe(503 - 60); // 443
+    expect(result.breakSource).toBe('auto_deduct');
+  });
+
+  test('Janina: 2 marcaciones, gross=506, auto_deduct=true → worked=446, break=60', () => {
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 06:45:11', type: 'in' },
+      { id: 2, timestamp: '2026-05-28 15:11:05', type: 'out' },
+    ];
+    const { segments } = buildSegments(assignTypes(rawLogs));
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, EMPLOYEE_POLICY);
+
+    expect(result.grossMinutes).toBe(506);
+    expect(result.workedMinutes).toBe(506 - 60); // 446
+    expect(result.breakMinutes).toBe(60);
+    expect(result.breakSource).toBe('auto_deduct');
+  });
+
+  test('jornada corta < umbral + auto_deduct=true → sin descuento', () => {
+    // gross = 270 min < umbral 300 → no aplica descuento
+    const rawLogs = [
+      { id: 1, timestamp: '2026-05-28 08:00:00', type: 'in' },
+      { id: 2, timestamp: '2026-05-28 12:30:00', type: 'out' },
+    ];
+    const { segments } = buildSegments(assignTypes(rawLogs));
+    const base = computeBaseMetrics(segments);
+    const result = applyPolicy(base, segments, EMPLOYEE_POLICY);
+
+    expect(result.grossMinutes).toBe(270);
+    expect(result.workedMinutes).toBe(270);
+    expect(result.breakMinutes).toBe(0);
+    expect(result.breakSource).toBe('none');
+  });
+});
+
+// ─── Pipeline completo — validación de timestamps en cada etapa ───────────────
+describe('pipeline completo — validación E2E de timestamps en cada etapa', () => {
+  test('2 marcaciones sin descuento — timestamps fluyen sin mutación en todos los pasos', () => {
+    const IN_TS  = '2026-05-28 06:47:46';
+    const OUT_TS = '2026-05-28 15:11:10';
+    const rawLogs = [
+      { id: 1, timestamp: IN_TS,  type: 'in'  },
+      { id: 2, timestamp: OUT_TS, type: 'out' },
+    ];
+
+    // Etapa 1: deduplication no modifica timestamps
+    const deduped = deduplicate(rawLogs);
+    expect(deduped[0].timestamp).toBe(IN_TS);
+    expect(deduped[1].timestamp).toBe(OUT_TS);
+
+    // Etapa 2: assignTypes preserva timestamps
+    const typed = assignTypes(deduped);
+    expect(typed[0].timestamp).toBe(IN_TS);
+
+    // Etapa 3: buildSegments normaliza a string MySQL sin drift
+    const { segments } = buildSegments(typed);
+    expect(segments[0].in_at).toBe(IN_TS);
+    expect(segments[0].out_at).toBe(OUT_TS);
+    expect(segments[0].segment_index).toBe(1);
+    expect(segments[0].gross_minutes).toBe(503);
+
+    // Etapa 4: computeBaseMetrics preserva los strings en firstIn/lastOut
+    const base = computeBaseMetrics(segments);
+    expect(base.firstIn).toBe(IN_TS);
+    expect(base.lastOut).toBe(OUT_TS);
+    expect(base.grossMinutes).toBe(503);
+
+    // Etapa 5: applyPolicy devuelve los mismos strings en firstIn/lastOut
+    const final = applyPolicy(base, segments, DEFAULT_POLICY);
+    expect(final.firstIn).toBe(IN_TS);
+    expect(final.lastOut).toBe(OUT_TS);
+    expect(final.workedMinutes).toBe(503);
+    expect(final.breakMinutes).toBe(0);
+  });
+
+  test('2 marcaciones con descuento automático — timestamps preservados, worked=gross-60', () => {
+    const IN_TS  = '2026-05-28 06:47:46';
+    const OUT_TS = '2026-05-28 15:11:10';
+    const rawLogs = [
+      { id: 1, timestamp: IN_TS,  type: 'in'  },
+      { id: 2, timestamp: OUT_TS, type: 'out' },
+    ];
+    const POLICY = { ...DEFAULT_POLICY, auto_deduct_break: true, break_minutes: 60, apply_break_after_minutes: 300 };
+    const { segments } = buildSegments(assignTypes(rawLogs));
+    const base = computeBaseMetrics(segments);
+    const final = applyPolicy(base, segments, POLICY);
+
+    expect(segments[0].in_at).toBe(IN_TS);
+    expect(segments[0].out_at).toBe(OUT_TS);
+    expect(final.firstIn).toBe(IN_TS);
+    expect(final.lastOut).toBe(OUT_TS);
+    expect(final.workedMinutes).toBe(443);
+    expect(final.breakMinutes).toBe(60);
+    expect(final.breakSource).toBe('auto_deduct');
+  });
+
+  test('4 marcaciones almuerzo marcado — timestamps preservados, worked=sumSegMins, break=lunchMinutes', () => {
+    const logs4 = [
+      { id: 1, timestamp: '2026-05-28 06:45:00', type: 'in'  },
+      { id: 2, timestamp: '2026-05-28 12:00:00', type: 'out' },
+      { id: 3, timestamp: '2026-05-28 13:00:00', type: 'in'  },
+      { id: 4, timestamp: '2026-05-28 15:11:10', type: 'out' },
+    ];
+    const { segments } = buildSegments(assignTypes(logs4));
+    const base = computeBaseMetrics(segments);
+    const final = applyPolicy(base, segments, DEFAULT_POLICY);
+
+    // Todos los timestamps preservados
+    expect(segments[0].in_at).toBe('2026-05-28 06:45:00');
+    expect(segments[0].out_at).toBe('2026-05-28 12:00:00');
+    expect(segments[1].in_at).toBe('2026-05-28 13:00:00');
+    expect(segments[1].out_at).toBe('2026-05-28 15:11:10');
+
+    expect(final.lunchOut).toBe('2026-05-28 12:00:00');
+    expect(final.lunchIn).toBe('2026-05-28 13:00:00');
+    expect(final.breakMinutes).toBe(60);
+    expect(final.workedMinutes).toBe(446); // 315 + 131
+    expect(final.breakSource).toBe('marked_lunch');
+  });
+});

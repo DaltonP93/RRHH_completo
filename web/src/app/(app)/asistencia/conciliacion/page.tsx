@@ -240,10 +240,28 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
 }
 
 // ─── Day Timeline Panel ────────────────────────────────────────────────────────
-interface TimelineLog { id: number; timestamp: string; type: string; source: string; device_name: string | null }
-interface TimelineSegment { segment_index: number; in_at: string | null; out_at: string | null; minutes: number | null; confidence: string; anomaly_code: string | null }
+interface TimelineLog {
+  id: number; timestamp: string; timestamp_local?: string
+  type: string; source: string; device_name: string | null
+}
+interface TimelineSegment {
+  segment_index: number; segment_type?: string
+  in_at: string | null; in_at_local?: string
+  out_at: string | null; out_at_local?: string
+  gross_minutes?: number | null; worked_minutes?: number | null
+  /** legacy column name */
+  minutes?: number | null
+  confidence: string; anomaly_code: string | null
+}
 interface TimelineAnomaly { anomaly_type: string; severity: string; message: string | null }
-interface TimelineSummary { first_in: string | null; lunch_out: string | null; lunch_in: string | null; last_out: string | null; worked_minutes: number; break_minutes: number; late_minutes: number; status: string }
+interface TimelineSummary {
+  first_in: string | null; first_in_local?: string
+  last_out: string | null; last_out_local?: string
+  lunch_out: string | null; lunch_out_local?: string
+  lunch_in: string | null; lunch_in_local?: string
+  gross_minutes?: number
+  worked_minutes: number; break_minutes: number; late_minutes: number; status: string
+}
 interface TimelineData {
   ok: boolean
   employee: { id: number; full_name: string; department: string; schedule_name: string | null; check_in: string | null }
@@ -253,6 +271,7 @@ interface TimelineData {
   summary: TimelineSummary | null
   anomalies: TimelineAnomaly[]
   att2000_punches: Array<{ raw_checktime: string; CHECKTYPE: string }> | null
+  policy?: { name: string; scope_type: string; auto_deduct_break: boolean; break_minutes: number } | null
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -268,10 +287,18 @@ function minsToHM(mins: number | null): string {
   return `${h}:${String(m).padStart(2, '0')}`
 }
 
-function fmtTime(ts: string | null): string {
+/** Extrae HH:MM de un string 'YYYY-MM-DD HH:mm:ss' (campo *_local) o ISO. */
+function fmtTime(ts: string | null | undefined): string {
   if (!ts) return '—'
-  const s = ts.replace('T', ' ').replace('Z', '').slice(11, 16)
-  return s || ts.slice(0, 16)
+  // Normaliza: 'YYYY-MM-DD HH:mm:ss' o ISO con T
+  const s = ts.replace('T', ' ').replace('Z', '')
+  const time = s.slice(11, 16)
+  return time || ts.slice(0, 16)
+}
+
+/** Devuelve la versión local si existe, si no intenta parsear el campo crudo. */
+function localOrRaw(local: string | null | undefined, raw: string | null | undefined): string | null {
+  return local ?? raw ?? null
 }
 
 function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: string; defaultEmployeeId?: string }) {
@@ -370,7 +397,7 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
               const DAY_START = 6 * 60  // 06:00
               const DAY_END   = 20 * 60 // 20:00
               const RANGE     = DAY_END - DAY_START
-              const toMin = (ts: string | null) => {
+              const toMin = (ts: string | null | undefined) => {
                 if (!ts) return null
                 const t = fmtTime(ts)
                 if (t === '—') return null
@@ -389,26 +416,32 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
                     ))}
                     {/* Work segments */}
                     {data.segments.map((seg, i) => {
-                      const inMin  = toMin(seg.in_at)
-                      const outMin = toMin(seg.out_at)
+                      const inLocal  = localOrRaw(seg.in_at_local, seg.in_at)
+                      const outLocal = localOrRaw(seg.out_at_local, seg.out_at)
+                      const inMin  = toMin(inLocal)
+                      const outMin = toMin(outLocal)
                       if (inMin === null || outMin === null) return null
+                      const mins = seg.gross_minutes ?? seg.minutes ?? 0
                       return (
                         <div key={i}
                           className={`absolute top-1 bottom-1 rounded ${seg.anomaly_code ? 'bg-red-400' : 'bg-emerald-500'}`}
                           style={{ left: pct(inMin)!, width: `${((outMin - inMin) / RANGE) * 100}%` }}
-                          title={`Seg ${i+1}: ${fmtTime(seg.in_at)} → ${fmtTime(seg.out_at)} (${minsToHM(seg.minutes ?? 0)})`}
+                          title={`Seg ${seg.segment_index ?? i+1}: ${fmtTime(inLocal)} → ${fmtTime(outLocal)} (${minsToHM(mins)})`}
                         />
                       )
                     })}
                     {/* Lunch gap */}
-                    {data.summary?.lunch_out && data.summary?.lunch_in && (() => {
-                      const lOut = toMin(data.summary!.lunch_out)
-                      const lIn  = toMin(data.summary!.lunch_in)
+                    {data.summary && (() => {
+                      const lOutLocal = localOrRaw(data.summary!.lunch_out_local, data.summary!.lunch_out)
+                      const lInLocal  = localOrRaw(data.summary!.lunch_in_local,  data.summary!.lunch_in)
+                      if (!lOutLocal || !lInLocal) return null
+                      const lOut = toMin(lOutLocal)
+                      const lIn  = toMin(lInLocal)
                       if (!lOut || !lIn) return null
                       return (
                         <div className="absolute top-1 bottom-1 bg-blue-300/60 rounded"
                              style={{ left: pct(lOut)!, width: `${((lIn - lOut) / RANGE) * 100}%` }}
-                             title={`Almuerzo: ${fmtTime(data.summary!.lunch_out)} → ${fmtTime(data.summary!.lunch_in)}`} />
+                             title={`Almuerzo: ${fmtTime(lOutLocal)} → ${fmtTime(lInLocal)}`} />
                       )
                     })()}
                     {/* Hour labels */}
@@ -445,7 +478,7 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
                     ) : data.raw_logs.map((log, idx) => (
                       <tr key={log.id}>
                         <td className="text-slate-400">{idx + 1}</td>
-                        <td className="font-mono font-medium text-slate-900">{fmtTime(log.timestamp)}</td>
+                        <td className="font-mono font-medium text-slate-900">{fmtTime(localOrRaw(log.timestamp_local, log.timestamp))}</td>
                         <td>
                           <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${log.type === 'in' ? 'bg-green-100 text-green-700' : log.type === 'out' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
                             {log.type === 'in' ? '↑ entrada' : log.type === 'out' ? '↓ salida' : log.type}
@@ -465,42 +498,44 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
               <div>
                 <p className="text-xs font-medium text-slate-500 mb-2">Bloques de trabajo calculados</p>
                 <div className="space-y-2">
-                  {data.segments.map((seg, i) => (
-                    <div key={i} className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-sm ${seg.anomaly_code ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
-                      <span className="text-xs font-medium text-slate-500 w-6">{i + 1}</span>
-                      <span className="font-mono text-slate-700">
-                        {fmtTime(seg.in_at)} → {fmtTime(seg.out_at)}
-                      </span>
-                      {seg.minutes !== null && (
-                        <span className="font-medium text-emerald-700">{minsToHM(seg.minutes)}</span>
-                      )}
-                      {seg.anomaly_code && (
-                        <span className="text-xs text-red-600 font-medium">{seg.anomaly_code}</span>
-                      )}
-                      {i === 0 && data.segments.length >= 2 && data.summary?.lunch_out && (
-                        <span className="ml-auto text-xs text-blue-600">
-                          ☕ almuerzo {fmtTime(data.summary.lunch_out)} → {fmtTime(data.summary.lunch_in)}
-                          {data.summary.break_minutes > 0 && ` (${minsToHM(data.summary.break_minutes)})`}
+                  {data.segments.map((seg, i) => {
+                    const inLocal  = localOrRaw(seg.in_at_local, seg.in_at)
+                    const outLocal = localOrRaw(seg.out_at_local, seg.out_at)
+                    const mins = seg.gross_minutes ?? seg.minutes
+                    const lunchOutLocal = localOrRaw(data.summary?.lunch_out_local, data.summary?.lunch_out)
+                    const lunchInLocal  = localOrRaw(data.summary?.lunch_in_local, data.summary?.lunch_in)
+                    return (
+                      <div key={i} className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-sm ${seg.anomaly_code ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                        <span className="text-xs font-medium text-slate-500 w-6">{seg.segment_index ?? i + 1}</span>
+                        <span className="font-mono text-slate-700">
+                          {fmtTime(inLocal)} → {fmtTime(outLocal)}
                         </span>
-                      )}
-                    </div>
-                  ))}
+                        {mins != null && (
+                          <span className="font-medium text-emerald-700">{minsToHM(mins)}</span>
+                        )}
+                        {seg.anomaly_code && (
+                          <span className="text-xs text-red-600 font-medium">{seg.anomaly_code}</span>
+                        )}
+                        {i === 0 && data.segments.length >= 2 && lunchOutLocal && (
+                          <span className="ml-auto text-xs text-blue-600">
+                            ☕ almuerzo {fmtTime(lunchOutLocal)} → {fmtTime(lunchInLocal)}
+                            {(data.summary?.break_minutes ?? 0) > 0 && ` (${minsToHM(data.summary!.break_minutes)})`}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
 
                 {/* Policy display */}
-                {(data as any).policy && (
+                {data.policy && (
                   <div className="pt-2 border-t border-slate-100 mt-3">
                     <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-1.5">Política aplicada</p>
-                    {(() => {
-                      const p = (data as any).policy
-                      return (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
-                          <span><span className="text-slate-400">Nombre:</span> {p.name}</span>
-                          <span><span className="text-slate-400">Ámbito:</span> {p.scope_type}</span>
-                          <span><span className="text-slate-400">Desc. almuerzo:</span> {p.auto_deduct_break ? `Sí (${p.break_minutes} min)` : 'No'}</span>
-                        </div>
-                      )
-                    })()}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+                      <span><span className="text-slate-400">Nombre:</span> {data.policy.name}</span>
+                      <span><span className="text-slate-400">Ámbito:</span> {data.policy.scope_type}</span>
+                      <span><span className="text-slate-400">Desc. almuerzo:</span> {data.policy.auto_deduct_break ? `Sí (${data.policy.break_minutes} min)` : 'No'}</span>
+                    </div>
                   </div>
                 )}
               </div>

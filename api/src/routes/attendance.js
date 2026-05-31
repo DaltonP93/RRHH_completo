@@ -943,6 +943,8 @@ router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req,
       ...summary,
       first_in_local:  formatMysqlDateTimeLocal(summary.first_in),
       last_out_local:  formatMysqlDateTimeLocal(summary.last_out),
+      lunch_out_local: formatMysqlDateTimeLocal(summary.lunch_out),
+      lunch_in_local:  formatMysqlDateTimeLocal(summary.lunch_in),
     } : null;
 
     res.json({
