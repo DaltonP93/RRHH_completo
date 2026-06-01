@@ -934,22 +934,37 @@ router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req,
     // para que la UI pueda mostrar badges sin necesidad de reprocesar.
     const parsedAnomalies = anomalies.map(a => ({
       ...a,
-      raw_payload: typeof a.raw_payload === 'string' ? (() => { try { return JSON.parse(a.raw_payload); } catch { return {}; } })() : (a.raw_payload || {}),
+      raw_payload: typeof a.raw_payload === 'string'
+        ? (() => { try { return JSON.parse(a.raw_payload); } catch { return {}; } })()
+        : (a.raw_payload || {}),
     }));
+
     const suggestedExclusionIds = new Set(
-      parsedAnomalies.filter(a => a.anomaly_type === 'duplicate_nearby').map(a => a.raw_payload?.log_id).filter(Boolean)
+      parsedAnomalies
+        .filter(a => a.anomaly_type === 'duplicate_nearby')
+        .map(a => a.raw_payload?.log_id)
+        .filter(Boolean)
     );
-    const reviewRequiredIds = new Set(
-      parsedAnomalies.filter(a => a.raw_payload?.log_id).map(a => a.raw_payload.log_id)
-    );
+
+    // Recoge IDs de logs desde todos los campos de raw_payload que referencian un log.
+    // missing_out usa in_log_id, out_before_in usa in_log_id+out_log_id, etc.
+    const reviewRequiredIds = new Set();
+    for (const a of parsedAnomalies) {
+      const p = a.raw_payload || {};
+      if (p.log_id)      reviewRequiredIds.add(p.log_id);
+      if (p.near_log_id) reviewRequiredIds.add(p.near_log_id);
+      if (p.in_log_id)   reviewRequiredIds.add(p.in_log_id);
+      if (p.out_log_id)  reviewRequiredIds.add(p.out_log_id);
+    }
 
     const logsWithLocal = raw_logs.map(l => ({
       ...l,
-      timestamp_local:      formatMysqlDateTimeLocal(l.timestamp),
-      used_in_calculation:  !suggestedExclusionIds.has(l.id),
-      suggested_exclusion:  suggestedExclusionIds.has(l.id),
-      requires_review:      reviewRequiredIds.has(l.id),
+      timestamp_local:     formatMysqlDateTimeLocal(l.timestamp),
+      used_in_calculation: !suggestedExclusionIds.has(l.id),
+      suggested_exclusion: suggestedExclusionIds.has(l.id),
+      requires_review:     reviewRequiredIds.has(l.id),
     }));
+
     const segmentsWithLocal = segments.map(s => ({
       ...s,
       in_at_local:  formatMysqlDateTimeLocal(s.in_at),
@@ -957,25 +972,70 @@ router.get('/day-timeline', authorize('admin', 'super_admin', 'hr'), async (req,
     }));
     const summaryWithLocal = summary ? {
       ...summary,
-      first_in_local:      formatMysqlDateTimeLocal(summary.first_in),
-      last_out_local:      formatMysqlDateTimeLocal(summary.last_out),
-      lunch_out_local:     formatMysqlDateTimeLocal(summary.lunch_out),
-      lunch_in_local:      formatMysqlDateTimeLocal(summary.lunch_in),
-      calculation_status:  summary.calculation_status || 'provisional',
-      requires_review:     Boolean(summary.requires_review),
+      first_in_local:     formatMysqlDateTimeLocal(summary.first_in),
+      last_out_local:     formatMysqlDateTimeLocal(summary.last_out),
+      lunch_out_local:    formatMysqlDateTimeLocal(summary.lunch_out),
+      lunch_in_local:     formatMysqlDateTimeLocal(summary.lunch_in),
+      calculation_status: summary.calculation_status || 'provisional',
+      requires_review:    Boolean(summary.requires_review),
     } : null;
+
+    // Construir calculation_explanation desde las anomalías guardadas.
+    // El motor lo computa en memoria pero no lo persiste en DB, así que lo
+    // reconstruimos aquí para que day-timeline siempre devuelva un array (nunca null).
+    const calculationExplanation = [];
+    for (const a of parsedAnomalies) {
+      const p = a.raw_payload || {};
+      if (a.anomaly_type === 'duplicate_nearby') {
+        const exclLog = raw_logs.find(l => l.id === p.log_id);
+        const nearLog = raw_logs.find(l => l.id === p.near_log_id);
+        const exclTs = exclLog ? formatMysqlDateTimeLocal(exclLog.timestamp)?.slice(11, 19) : '?';
+        const nearTs = nearLog ? formatMysqlDateTimeLocal(nearLog.timestamp)?.slice(11, 19) : '?';
+        calculationExplanation.push(
+          `${exclTs} posible duplicado cercano de ${nearTs}; no se elimina y requiere revisión.`
+        );
+      } else if (a.anomaly_type === 'missing_out') {
+        const inLog = raw_logs.find(l => l.id === p.in_log_id);
+        const inTs  = inLog ? formatMysqlDateTimeLocal(inLog.timestamp)?.slice(11, 19) : '?';
+        calculationExplanation.push(
+          `${inTs} entrada sin salida posterior; requiere revisión.`
+        );
+      } else if (a.anomaly_type === 'missing_in') {
+        const outLog = raw_logs.find(l => l.id === p.out_log_id);
+        const outTs  = outLog ? formatMysqlDateTimeLocal(outLog.timestamp)?.slice(11, 19) : '?';
+        calculationExplanation.push(
+          `${outTs} salida sin entrada previa; requiere revisión.`
+        );
+      } else if (a.anomaly_type === 'out_before_in') {
+        calculationExplanation.push(a.message || 'Salida anterior a entrada; requiere revisión.');
+      } else if (a.anomaly_type === 'long_shift') {
+        calculationExplanation.push(a.message || 'Jornada extensa detectada.');
+      }
+    }
+    if (summaryWithLocal) {
+      const s = summaryWithLocal;
+      if (s.gross_minutes != null) {
+        calculationExplanation.push(
+          `Resultado provisional: gross=${s.gross_minutes} min, descanso=${s.break_minutes || 0} min, trabajado=${s.worked_minutes || 0} min.`
+        );
+      }
+      calculationExplanation.push(s.requires_review
+        ? 'Estado: provisional — requiere revisión por supervisor/RRHH antes de impactar nómina.'
+        : 'Estado: provisional — puede aprobarse sin correcciones.');
+    }
 
     res.json({
       ok: true,
       employee: emp,
       date,
       policy,
-      raw_logs:             logsWithLocal,
-      suggested_exclusions: logsWithLocal.filter(l => l.suggested_exclusion),
-      review_required_logs: logsWithLocal.filter(l => l.requires_review),
-      segments:             segmentsWithLocal,
-      summary:              summaryWithLocal,
-      anomalies:            parsedAnomalies,
+      raw_logs:              logsWithLocal,
+      suggested_exclusions:  logsWithLocal.filter(l => l.suggested_exclusion),
+      review_required_logs:  logsWithLocal.filter(l => l.requires_review),
+      segments:              segmentsWithLocal,
+      summary:               summaryWithLocal,
+      anomalies:             parsedAnomalies,
+      calculation_explanation: calculationExplanation,
       att2000_punches,
     });
   } catch (err) {
