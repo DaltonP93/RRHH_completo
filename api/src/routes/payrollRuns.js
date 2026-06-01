@@ -170,13 +170,13 @@ router.post('/:id/calculate', authorize('admin', 'hr', 'super_admin'), async (re
       try {
         const baseSalary = parseFloat(emp.base_salary || 0);
 
-        // Get worked days from attendance
+        // Get worked days from attendance (daily_summary is the authoritative source)
         const [attRows] = await sequelize.query(`
           SELECT COUNT(*) AS days,
                  COALESCE(SUM(worked_minutes), 0) AS total_minutes,
                  COALESCE(SUM(overtime_minutes), 0) AS overtime_minutes
-          FROM attendance_days
-          WHERE employee_id = ? AND work_date BETWEEN ? AND ? AND status = 'present'
+          FROM daily_summary
+          WHERE employee_id = ? AND date BETWEEN ? AND ? AND status IN ('present','late')
         `, { replacements: [emp.id, run.period_start, run.period_end] });
 
         const workedDays = parseInt(attRows[0]?.days || 0) || 26;
@@ -313,7 +313,7 @@ router.get('/:id/settlements/:settlementId', async (req, res) => {
       SELECT sl.*, sc.name AS concept_name, sc.type AS concept_type, sc.affects_ips
       FROM settlement_lines sl
       LEFT JOIN salary_concepts sc ON sc.id = sl.salary_concept_id
-      WHERE sl.employee_settlement_id = ?
+      WHERE sl.settlement_id = ?
       ORDER BY sc.type ASC, sl.sort_order ASC
     `, { replacements: [req.params.settlementId] });
 

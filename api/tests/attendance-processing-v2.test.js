@@ -62,35 +62,42 @@ describe('deduplicate', () => {
   const mk = (ts, id) => ({ id, timestamp: ts });
 
   test('mantiene marcaciones separadas por más de 60s', () => {
-    const logs = [
-      mk('2026-05-28 06:45:00', 1),
-      mk('2026-05-28 12:00:00', 2),
-    ];
-    expect(deduplicate(logs)).toHaveLength(2);
+    const logs = [mk('2026-05-28 06:45:00', 1), mk('2026-05-28 12:00:00', 2)];
+    const { deduped, suggestedExclusions } = deduplicate(logs);
+    expect(deduped).toHaveLength(2);
+    expect(suggestedExclusions).toHaveLength(0);
   });
 
-  test('elimina duplicado dentro de 60s', () => {
+  test('sugiere exclusión para duplicado dentro de 60s — NO elimina log', () => {
     const logs = [
       mk('2026-05-28 06:45:00', 1),
-      mk('2026-05-28 06:45:30', 2), // 30s después — duplicado
+      mk('2026-05-28 06:45:30', 2), // 30s después — sugerido como exclusión
       mk('2026-05-28 12:00:00', 3),
     ];
-    const result = deduplicate(logs);
-    expect(result).toHaveLength(2);
-    expect(result[0].id).toBe(1);
-    expect(result[1].id).toBe(3);
+    const { deduped, suggestedExclusions } = deduplicate(logs);
+    // deduped excluye el cercano del cálculo provisional
+    expect(deduped).toHaveLength(2);
+    expect(deduped[0].id).toBe(1);
+    expect(deduped[1].id).toBe(3);
+    // log original sigue accesible en suggestedExclusions
+    expect(suggestedExclusions).toHaveLength(1);
+    expect(suggestedExclusions[0].id).toBe(2);
+    expect(suggestedExclusions[0].exclusion_reason).toBe('duplicate_nearby');
+    expect(suggestedExclusions[0].near_log_id).toBe(1);
+    expect(suggestedExclusions[0].delta_ms).toBe(30000);
   });
 
-  test('no elimina marcación a exactamente 60s', () => {
-    const logs = [
-      mk('2026-05-28 06:45:00', 1),
-      mk('2026-05-28 06:46:00', 2), // exactamente 60s — NO duplicado
-    ];
-    expect(deduplicate(logs)).toHaveLength(2);
+  test('no excluye marcación a exactamente 60s', () => {
+    const logs = [mk('2026-05-28 06:45:00', 1), mk('2026-05-28 06:46:00', 2)];
+    const { deduped, suggestedExclusions } = deduplicate(logs);
+    expect(deduped).toHaveLength(2);
+    expect(suggestedExclusions).toHaveLength(0);
   });
 
   test('lista vacía', () => {
-    expect(deduplicate([])).toHaveLength(0);
+    const { deduped, suggestedExclusions } = deduplicate([]);
+    expect(deduped).toHaveLength(0);
+    expect(suggestedExclusions).toHaveLength(0);
   });
 });
 
@@ -707,7 +714,7 @@ describe('pipeline completo — validación E2E de timestamps en cada etapa', ()
     ];
 
     // Etapa 1: deduplication no modifica timestamps
-    const deduped = deduplicate(rawLogs);
+    const { deduped } = deduplicate(rawLogs);
     expect(deduped[0].timestamp).toBe(IN_TS);
     expect(deduped[1].timestamp).toBe(OUT_TS);
 
@@ -779,5 +786,121 @@ describe('pipeline completo — validación E2E de timestamps en cada etapa', ()
     expect(final.breakMinutes).toBe(60);
     expect(final.workedMinutes).toBe(446); // 315 + 131
     expect(final.breakSource).toBe('marked_lunch');
+  });
+});
+
+// ─── Inmutabilidad de attendance_logs ─────────────────────────────────────────
+describe('inmutabilidad — attendance_logs no se elimina ni oculta', () => {
+  const mk = (id, ts, type) => ({ id, timestamp: ts, type });
+
+  // Caso Cecilia Díaz: 05:35:03 in / 05:35:06 in / 09:13:26 out / 09:43:05 in
+  describe('caso Cecilia Díaz — duplicado cercano + entrada sin salida', () => {
+    const logs = [
+      mk(1, '2026-05-28 05:35:03', 'in'),
+      mk(2, '2026-05-28 05:35:06', 'in'),  // 3s después — duplicate_nearby
+      mk(3, '2026-05-28 09:13:26', 'out'),
+      mk(4, '2026-05-28 09:43:05', 'in'),  // entrada sin salida
+    ];
+
+    test('raw_logs contiene las 4 marcaciones — ninguna eliminada', () => {
+      const { deduped, suggestedExclusions } = deduplicate(logs);
+      // En total, deduped + suggestedExclusions = logs originales
+      expect(deduped.length + suggestedExclusions.length).toBe(logs.length);
+    });
+
+    test('suggestedExclusions contiene el log id=2 (05:35:06) con razón duplicate_nearby', () => {
+      const { suggestedExclusions } = deduplicate(logs);
+      expect(suggestedExclusions).toHaveLength(1);
+      expect(suggestedExclusions[0].id).toBe(2);
+      expect(suggestedExclusions[0].exclusion_reason).toBe('duplicate_nearby');
+      expect(suggestedExclusions[0].near_log_id).toBe(1);
+      expect(suggestedExclusions[0].delta_ms).toBe(3000);
+    });
+
+    test('deduped aún contiene log id=4 (09:43:05 in) — entrada sin salida visible', () => {
+      const { deduped } = deduplicate(logs);
+      expect(deduped.find(l => l.id === 4)).toBeTruthy();
+    });
+
+    test('buildSegments genera anomalía missing_out para id=4', () => {
+      const { deduped } = deduplicate(logs);
+      const typed = assignTypes(deduped);
+      const { segments, anomalies } = buildSegments(typed);
+      expect(anomalies.some(a => a.anomaly_type === 'missing_out')).toBe(true);
+      expect(segments.some(s => s.segment_type === 'incomplete')).toBe(true);
+    });
+
+    test('el segmento incompleto apunta al log id=4', () => {
+      const { deduped } = deduplicate(logs);
+      const typed = assignTypes(deduped);
+      const { segments } = buildSegments(typed);
+      const incomplete = segments.find(s => s.segment_type === 'incomplete');
+      expect(incomplete).toBeDefined();
+      expect(incomplete.in_log_id).toBe(4);
+      expect(incomplete.out_log_id).toBeNull();
+    });
+  });
+
+  describe('duplicado cercano — anomalía generada con contexto de log_id', () => {
+    test('se genera anomalía duplicate_nearby con log_id en raw_payload', () => {
+      const logs = [
+        mk(10, '2026-05-28 06:00:00', 'in'),
+        mk(11, '2026-05-28 06:00:05', 'in'), // 5s — duplicado
+        mk(12, '2026-05-28 14:00:00', 'out'),
+      ];
+      const { suggestedExclusions } = deduplicate(logs);
+      expect(suggestedExclusions[0].id).toBe(11);
+      expect(suggestedExclusions[0].exclusion_reason).toBe('duplicate_nearby');
+      // near_log_id permite a la UI vincular la sugerencia con el log original
+      expect(suggestedExclusions[0].near_log_id).toBe(10);
+    });
+  });
+
+  describe('entrada sin salida — segmento incomplete', () => {
+    test('genera segmento incomplete sin out_at', () => {
+      const logs = [mk(20, '2026-05-28 08:00:00', 'in')];
+      const { segments, anomalies } = buildSegments(assignTypes(logs));
+      expect(segments[0].segment_type).toBe('incomplete');
+      expect(segments[0].out_at).toBeNull();
+      expect(anomalies[0].anomaly_type).toBe('missing_out');
+    });
+
+    test('el segmento incomplete no inventa una salida automática', () => {
+      const logs = [mk(21, '2026-05-28 08:00:00', 'in')];
+      const { segments } = buildSegments(assignTypes(logs));
+      expect(segments[0].out_at).toBeNull();
+      expect(segments[0].gross_minutes).toBeNull();
+    });
+  });
+
+  describe('verificación de conteo — procesamiento no elimina logs', () => {
+    test('cantidad total de logs en raw_logs igual a entrada tras deduplicación', () => {
+      const originalLogs = [
+        mk(30, '2026-05-28 06:00:00', 'in'),
+        mk(31, '2026-05-28 06:00:03', 'in'),  // duplicado
+        mk(32, '2026-05-28 12:00:00', 'out'),
+        mk(33, '2026-05-28 13:00:00', 'in'),
+        mk(34, '2026-05-28 17:00:00', 'out'),
+      ];
+      const { deduped, suggestedExclusions } = deduplicate(originalLogs);
+      // La suma debe ser igual a los originales — ninguno fue eliminado
+      expect(deduped.length + suggestedExclusions.length).toBe(originalLogs.length);
+    });
+
+    test('suggestedExclusions sigue teniendo todos los campos del log original', () => {
+      const logs = [
+        mk(40, '2026-05-28 06:00:00', 'in'),
+        mk(41, '2026-05-28 06:00:02', 'in'),
+      ];
+      const { suggestedExclusions } = deduplicate(logs);
+      const excl = suggestedExclusions[0];
+      // El log original está completo — id, timestamp, type preservados
+      expect(excl.id).toBe(41);
+      expect(excl.timestamp).toBe('2026-05-28 06:00:02');
+      expect(excl.type).toBe('in');
+      // Campos adicionales de contexto para UI/RRHH
+      expect(excl.exclusion_reason).toBe('duplicate_nearby');
+      expect(excl.delta_ms).toBe(2000);
+    });
   });
 });

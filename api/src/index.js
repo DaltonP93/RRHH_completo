@@ -151,11 +151,19 @@ const authLimiter = rateLimit({
   message: { error: 'Demasiadas solicitudes de autenticación.' }
 });
 
+// Rate limiting específico para el endpoint de refresh (anti token-theft spam)
+const refreshLimiter = rateLimit({
+  windowMs: 60 * 1000,   // 1 minuto
+  max: 10,
+  message: { error: 'Demasiadas solicitudes de renovación de token. Espere un momento.' }
+});
+
 // ─── Rutas ──────────────────────────────────────────────────────
 // Aplica loginLimiter SOLO a POST /api/auth/login (anti brute-force),
-// y un authLimiter más permisivo a todo lo demás del módulo.
-app.use('/api/auth/login', loginLimiter);
-app.use('/api/auth',        authLimiter, authRoutes);
+// refreshLimiter a /refresh, y authLimiter al resto del módulo.
+app.use('/api/auth/login',   loginLimiter);
+app.use('/api/auth/refresh', refreshLimiter);
+app.use('/api/auth',         authLimiter, authRoutes);
 app.use('/api/employees',   employeeRoutes);
 app.use('/api/attendance',  attendanceRoutes);
 app.use('/api/devices',     deviceRoutes);
