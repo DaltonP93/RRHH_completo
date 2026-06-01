@@ -3,31 +3,60 @@ USE asistencia;
 
 -- ─── 090_post_v2_audit_fixes.sql ─────────────────────────────────────────────
 -- Fixes estructurales detectados en auditoría integral post-motor V2.
--- Idempotente — seguro de re-ejecutar.
--- Aplicar: mysql asistencia < database/migrations/090_post_v2_audit_fixes.sql
+-- Idempotente — seguro de re-ejecutar en MySQL 8.0+.
+-- Aplicar: mysql -uroot -p<pass> asistencia < database/migrations/090_post_v2_audit_fixes.sql
+-- NOTA: ADD COLUMN IF NOT EXISTS y CREATE INDEX IF NOT EXISTS son MariaDB-only.
+--       Aquí usamos stored procedures + information_schema para MySQL 8.0+.
+
+-- ─── Helpers idempotentes (se crean y eliminan dentro de esta migración) ──────
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS _m090_add_col$$
+CREATE PROCEDURE _m090_add_col(IN p_tbl VARCHAR(64), IN p_col VARCHAR(64), IN p_def TEXT)
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_tbl AND COLUMN_NAME = p_col
+  ) THEN
+    SET @_s = CONCAT('ALTER TABLE `', p_tbl, '` ADD COLUMN `', p_col, '` ', p_def);
+    PREPARE _st FROM @_s; EXECUTE _st; DEALLOCATE PREPARE _st;
+  END IF;
+END$$
+
+DROP PROCEDURE IF EXISTS _m090_add_idx$$
+CREATE PROCEDURE _m090_add_idx(IN p_tbl VARCHAR(64), IN p_idx VARCHAR(64), IN p_def TEXT)
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_tbl AND INDEX_NAME = p_idx
+  ) THEN
+    SET @_s = CONCAT('CREATE INDEX `', p_idx, '` ON `', p_tbl, '` ', p_def);
+    PREPARE _st FROM @_s; EXECUTE _st; DEALLOCATE PREPARE _st;
+  END IF;
+END$$
+
+DELIMITER ;
 
 -- ─── 1. Índice faltante en daily_summary.employee_id ─────────────────────────
--- Cada reporte y cálculo de nómina hace WHERE employee_id = ? sobre esta tabla.
--- Sin índice es full-scan en tablas grandes.
-CREATE INDEX IF NOT EXISTS idx_ds_employee ON daily_summary(employee_id);
+CALL _m090_add_idx('daily_summary', 'idx_ds_employee', '(employee_id)');
 
 -- ─── 2. Índice faltante en salary_history.employee_id ────────────────────────
-CREATE INDEX IF NOT EXISTS idx_sh_employee ON salary_history(employee_id);
+CALL _m090_add_idx('salary_history', 'idx_sh_employee', '(employee_id)');
 
 -- ─── 3. Columnas faltantes en salary_concepts ────────────────────────────────
--- payrollCore.js referencia estas columnas; sin ellas el POST/PUT de conceptos falla.
-ALTER TABLE salary_concepts
-  ADD COLUMN IF NOT EXISTS calculation_value  DECIMAL(18,2)  NULL          COMMENT 'Monto fijo alternativo a formula/percentage',
-  ADD COLUMN IF NOT EXISTS affects_vacation_pay TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '1 = incide en base de cálculo de vacaciones',
-  ADD COLUMN IF NOT EXISTS is_taxable           TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '1 = gravado por IPS/IRPC';
+CALL _m090_add_col('salary_concepts', 'calculation_value',    'DECIMAL(18,2) NULL');
+CALL _m090_add_col('salary_concepts', 'affects_vacation_pay', 'TINYINT(1) NOT NULL DEFAULT 0');
+CALL _m090_add_col('salary_concepts', 'is_taxable',           'TINYINT(1) NOT NULL DEFAULT 1');
 
--- ─── 4. Índice en permissions.approved_by (y approvers nivel 1/2/final) ──────
--- FK sin índice produce full-scan en el workflow de aprobaciones.
-CREATE INDEX IF NOT EXISTS idx_perm_approved_by ON permissions(approved_by);
-CREATE INDEX IF NOT EXISTS idx_perm_l1          ON permissions(level1_approver_id);
-CREATE INDEX IF NOT EXISTS idx_perm_l2          ON permissions(level2_approver_id);
-CREATE INDEX IF NOT EXISTS idx_perm_final       ON permissions(final_approver_id);
+-- ─── 4. Índices en permissions (approvers) ───────────────────────────────────
+CALL _m090_add_idx('permissions', 'idx_perm_approved_by', '(approved_by)');
+CALL _m090_add_idx('permissions', 'idx_perm_l1',          '(level1_approver_id)');
+CALL _m090_add_idx('permissions', 'idx_perm_l2',          '(level2_approver_id)');
+CALL _m090_add_idx('permissions', 'idx_perm_final',        '(final_approver_id)');
 
 -- ─── 5. Índice en employees.schedule_id ──────────────────────────────────────
--- JOIN frecuente en reportes de asistencia.
-CREATE INDEX IF NOT EXISTS idx_emp_schedule ON employees(schedule_id);
+CALL _m090_add_idx('employees', 'idx_emp_schedule', '(schedule_id)');
+
+-- ─── Limpieza ─────────────────────────────────────────────────────────────────
+DROP PROCEDURE IF EXISTS _m090_add_col;
+DROP PROCEDURE IF EXISTS _m090_add_idx;
