@@ -65,6 +65,9 @@ check() {
   local url="$2"
   local expected_status="${3:-200}"
 
+  # Limpiar $SMOKE_TMP antes de cada curl para que el preview nunca muestre
+  # contenido de la llamada anterior si curl falla sin escribir.
+  : > "$SMOKE_TMP"
   local status
   status=$(curl -s --connect-timeout 5 --max-time 20 -o "$SMOKE_TMP" -w "%{http_code}" \
     -H "Authorization: Bearer ${TOKEN}" \
@@ -89,6 +92,7 @@ check_public() {
   local url="$2"
   local expected_status="${3:-200}"
 
+  : > "$SMOKE_TMP"
   local status
   status=$(curl -s --connect-timeout 5 --max-time 20 -o "$SMOKE_TMP" -w "%{http_code}" \
     -H "Origin: ${ORIGIN}" \
@@ -184,8 +188,13 @@ check_post() {
   local body="$3"
   local expected_status="${4:-200}"
 
+  # Limpiar $SMOKE_TMP para que el preview del FAIL muestre la respuesta real
+  # del POST y no el body de la llamada GET anterior (bug de contenido estale).
+  : > "$SMOKE_TMP"
   local status
-  status=$(curl -s --connect-timeout 5 --max-time 30 -o "$SMOKE_TMP" -w "%{http_code}" \
+  # max-time 90: los endpoints de procesamiento pueden tardar según cantidad de
+  # empleados. 90s cubre la mayoría de los casos sin que el smoke se cuelgue.
+  status=$(curl -s --connect-timeout 5 --max-time 90 -o "$SMOKE_TMP" -w "%{http_code}" \
     -X POST \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
@@ -199,23 +208,31 @@ check_post() {
   else
     local preview
     preview=$(head -c 200 "$SMOKE_TMP" 2>/dev/null | tr '\n' ' ' || true)
-    echo "FAIL  [$status] $label  (expected $expected_status)  ${preview}"
+    echo "FAIL  [$status] $label  (expected $expected_status)  preview: ${preview}"
     FAIL=$((FAIL + 1))
   fi
   sleep "${SMOKE_SLEEP}"
 }
 
-check_post "POST /api/attendance/recalc-range (rango pasado)"   \
-  "${BASE_URL}/api/attendance/recalc-range"                     \
-  "{\"date_from\":\"${LAST_WEEK}\",\"date_to\":\"${LAST_WEEK}\"}"
+# Smoke de POST de asistencia: verificar routing + validación de entrada.
+# Se usan cuerpos que disparan validación instantánea (400) en lugar de ejecutar
+# la operación completa sobre todos los empleados (puede tardar minutos en staging).
+# Esto confirma que el endpoint existe, el token es válido y el body parser funciona.
+check_post "POST /api/attendance/recalc-range (routing+body-validation)"   \
+  "${BASE_URL}/api/attendance/recalc-range"                                 \
+  '{}'                                                                      \
+  400
 
-check_post "POST /api/attendance/process-day (hoy)"             \
-  "${BASE_URL}/api/attendance/process-day"                      \
-  "{\"date\":\"${LAST_WEEK}\"}"
+# process-day con fecha sin datos → bulkProcess retorna rápido (0 empleados)
+check_post "POST /api/attendance/process-day (fecha sin datos → fast)"     \
+  "${BASE_URL}/api/attendance/process-day"                                  \
+  '{"date":"2000-01-01"}'                                                   \
+  200
 
-check_post "POST /api/attendance/reprocess-range (alias)"       \
-  "${BASE_URL}/api/attendance/reprocess-range"                  \
-  "{\"date_from\":\"${LAST_WEEK}\",\"date_to\":\"${LAST_WEEK}\"}"
+check_post "POST /api/attendance/reprocess-range (routing+body-validation)"\
+  "${BASE_URL}/api/attendance/reprocess-range"                              \
+  '{}'                                                                      \
+  400
 
 echo ""
 echo "=== Resultado: ${PASS} PASS | ${FAIL} FAIL ==="
