@@ -29,10 +29,10 @@ function pyDateStr(d) {
 /** Parsea un valor (Date o string MySQL "YYYY-MM-DD HH:mm:ss") a JS Date UTC correcto */
 function toDate(v) {
   if (v instanceof Date) return v;
-  // String MySQL sin timezone → pendiente confirmación con punch-time-audit antes de cambiar offset
+  // String MySQL sin timezone → tratar como hora local Paraguay (UTC-4 permanente desde 2023)
   const s = String(v);
   if (!s.includes('T') && !s.endsWith('Z') && !s.includes('+')) {
-    return new Date(s.replace(' ', 'T') + '-03:00');
+    return new Date(s.replace(' ', 'T') + '-04:00');
   }
   return new Date(s);
 }
