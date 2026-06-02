@@ -128,13 +128,16 @@ rrhh_post() {
   local tmp status resp
   tmp=$(mktemp)
 
-  status=$(curl -s --connect-timeout 10 --max-time 90 \
+  # Pipar el body via stdin con printf '%s' garantiza que los bytes llegan
+  # exactamente como están en $body — sin expansión de shell adicional,
+  # sin trailing newline, sin interpretación de curl ('@' file reading, etc.).
+  status=$(printf '%s' "$body" | curl -s --connect-timeout 10 --max-time 90 \
     -o "$tmp" -w "%{http_code}" \
     -X POST \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
     -H "Origin: ${ORIGIN}" \
-    -d "$body" \
+    --data-binary @- \
     "${BASE_URL}${path}" 2>/dev/null || echo "000")
 
   resp=$(cat "$tmp")
@@ -145,13 +148,13 @@ rrhh_post() {
     echo "[rrhh] 401 recibido — renovando token y reintentando..." >&2
     _rrhh_force_relogin || return 1
     tmp=$(mktemp)
-    status=$(curl -s --connect-timeout 10 --max-time 90 \
+    status=$(printf '%s' "$body" | curl -s --connect-timeout 10 --max-time 90 \
       -o "$tmp" -w "%{http_code}" \
       -X POST \
       -H "Authorization: Bearer ${TOKEN}" \
       -H "Content-Type: application/json" \
       -H "Origin: ${ORIGIN}" \
-      -d "$body" \
+      --data-binary @- \
       "${BASE_URL}${path}" 2>/dev/null || echo "000")
     resp=$(cat "$tmp")
     rm -f "$tmp"
