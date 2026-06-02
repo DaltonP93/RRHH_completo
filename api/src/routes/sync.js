@@ -137,6 +137,58 @@ router.post('/employees', async (req, res) => {
   }
 });
 
+// ─── POST /api/sync/employees-from-att2000 ───────────────────────
+// Sincroniza departamentos + empleados desde att2000 y devuelve
+// estadísticas de calidad (nombres, departamentos) tras la sincronización.
+router.post('/employees-from-att2000', async (req, res) => {
+  try {
+    // 1. Departamentos primero — los empleados referencian department_id
+    const deptResult = await syncDepartments();
+
+    // 2. Empleados
+    const empResult = await syncEmployees();
+
+    // 3. Calcular estadísticas post-sync
+    const [[withName]] = await sequelize.query(
+      "SELECT COUNT(*) AS cnt FROM employees WHERE status = 'active' AND first_name != '' AND last_name != '' AND first_name IS NOT NULL AND last_name IS NOT NULL"
+    ).catch(() => [[{ cnt: null }]]);
+
+    const [[blankName]] = await sequelize.query(
+      "SELECT COUNT(*) AS cnt FROM employees WHERE status = 'active' AND (first_name IS NULL OR first_name = '' OR last_name IS NULL OR last_name = '')"
+    ).catch(() => [[{ cnt: null }]]);
+
+    const [[withDept]] = await sequelize.query(
+      "SELECT COUNT(*) AS cnt FROM employees e JOIN departments d ON e.department_id = d.id WHERE e.status = 'active' AND d.name != 'This Company'"
+    ).catch(() => [[{ cnt: null }]]);
+
+    const [[noDept]] = await sequelize.query(
+      "SELECT COUNT(*) AS cnt FROM employees e LEFT JOIN departments d ON e.department_id = d.id WHERE e.status = 'active' AND (d.id IS NULL OR d.name = 'This Company' OR d.name IS NULL)"
+    ).catch(() => [[{ cnt: null }]]);
+
+    // 4. Registrar timestamp de sincronización en settings
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    await sequelize.query(
+      "INSERT INTO settings (`key`, `value`) VALUES ('userinfo_last_sync_at', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",
+      { replacements: [now] }
+    ).catch(() => {});
+
+    res.json({
+      ok: true,
+      departments: deptResult,
+      employees: empResult,
+      after_sync: {
+        employees_with_name:          withName?.cnt  ?? null,
+        employees_blank_name:         blankName?.cnt ?? null,
+        employees_with_department:    withDept?.cnt  ?? null,
+        employees_without_department: noDept?.cnt    ?? null,
+      },
+      synced_at: now,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── POST /api/sync/attendance — Importar marcajes ───────────────
 // Body: { dateFrom: "2026-04-01", dateTo: "2026-04-11", limit: 10000, conn? }
 router.post('/attendance', async (req, res) => {
@@ -164,6 +216,72 @@ router.post('/machines', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// ─── POST /api/sync/devices — Sincronizar relojes desde ZKTECO_DEVICES ──────
+// Lee la variable de entorno ZKTECO_DEVICES (formato "IP:PUERTO,IP:PUERTO,...")
+// y hace upsert en la tabla devices.  Idempotente — seguro de re-ejecutar.
+router.post('/devices', async (req, res) => {
+  const envStr = (process.env.ZKTECO_DEVICES || '').trim();
+  if (!envStr) {
+    return res.status(400).json({
+      ok: false,
+      error: 'ZKTECO_DEVICES no está configurado en las variables de entorno',
+    });
+  }
+
+  // Parsear "IP[:PUERTO], ..." — puerto por defecto 4370
+  const entries = envStr.split(',').map(s => s.trim()).filter(Boolean);
+  const parsed = entries.map((entry, i) => {
+    const colonIdx = entry.lastIndexOf(':');
+    let ip = entry, port = 4370;
+    if (colonIdx > 0) {
+      ip   = entry.slice(0, colonIdx).trim();
+      port = parseInt(entry.slice(colonIdx + 1)) || 4370;
+    }
+    return { name: `Reloj ZKTeco ${i + 1}`, ip_address: ip, port, source: 'env' };
+  });
+
+  const invalid = parsed.filter(d => !d.ip_address || !/^[a-zA-Z0-9._-]+$/.test(d.ip_address));
+  if (invalid.length) {
+    return res.status(400).json({
+      ok: false,
+      error: `Entradas inválidas en ZKTECO_DEVICES: ${invalid.map(d => d.ip_address).join(', ')}`,
+    });
+  }
+
+  let upserted = 0, errors = 0;
+  const errList = [];
+  for (const d of parsed) {
+    try {
+      await sequelize.query(`
+        INSERT INTO devices (name, ip_address, port, source, status)
+        VALUES (?, ?, ?, 'env', 'offline')
+        ON DUPLICATE KEY UPDATE
+          port      = VALUES(port),
+          source    = 'env',
+          name      = IF(source = 'env' OR name = '', VALUES(name), name)
+      `, { replacements: [d.name, d.ip_address, d.port] });
+      upserted++;
+    } catch (e) {
+      errors++;
+      errList.push({ ip: d.ip_address, error: e.message });
+    }
+  }
+
+  const [[dbCount]] = await sequelize.query(
+    'SELECT COUNT(*) AS cnt FROM devices'
+  ).catch(() => [[{ cnt: null }]]);
+
+  res.json({
+    ok:             errors === 0,
+    from_env:       parsed.length,
+    upserted,
+    errors,
+    ...(errList.length ? { error_list: errList } : {}),
+    devices_in_db:  dbCount?.cnt ?? null,
+    devices:        parsed,
+  });
 });
 
 // ─── GET /api/sync/checkinout — Ver CHECKINOUT crudo ─────────────
@@ -484,9 +602,26 @@ router.post('/att2000/import-employees', async (req, res) => {
     const { queryAtt2000, getTableColumns, pickCol } = require('../config/att2000');
     const logger = require('../config/logger');
 
-    // Crear sync run
-    const [[src]] = await sequelize.query("SELECT id FROM source_systems WHERE code = 'att2000'");
-    const sourceId = src.id;
+    // source_systems puede no existir si las migraciones avanzadas no se aplicaron.
+    // En ese caso usamos syncEmployees() directamente.
+    let sourceId = null;
+    try {
+      const [[src]] = await sequelize.query("SELECT id FROM source_systems WHERE code = 'att2000'");
+      sourceId = src?.id || null;
+    } catch {
+      sourceId = null;
+    }
+
+    if (!sourceId) {
+      // Fallback: sincronización directa sin tablas de trazabilidad
+      const result = await syncEmployees();
+      return res.json({
+        ok: true, mode: 'direct_sync',
+        total: result.total, matched: result.synced, errors: result.errors,
+        note: 'source_systems no disponible — se usó syncEmployees() directo',
+      });
+    }
+
     const [runRes] = await sequelize.query(`
       INSERT INTO source_sync_runs (source_system_id, sync_type, entity_type, status, started_at)
       VALUES (?, 'full', 'users', 'running', NOW())

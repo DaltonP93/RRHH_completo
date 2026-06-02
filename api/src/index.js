@@ -13,6 +13,15 @@ const { initRedis } = require('./config/redis');
 const { initSocket } = require('./socket/socketServer');
 const logger = require('./config/logger');
 
+// Evitar que unhandledRejection/uncaughtException mate el proceso (PM2 lo reiniciaría
+// igual, pero así el error queda en logs en lugar de causar un crash silencioso).
+process.on('unhandledRejection', (reason) => {
+  logger.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  logger.error('[uncaughtException]', err);
+});
+
 // Rutas
 const authRoutes       = require('./routes/auth');
 const employeeRoutes   = require('./routes/employees');
@@ -143,11 +152,19 @@ const authLimiter = rateLimit({
   message: { error: 'Demasiadas solicitudes de autenticación.' }
 });
 
+// Rate limiting específico para el endpoint de refresh (anti token-theft spam)
+const refreshLimiter = rateLimit({
+  windowMs: 60 * 1000,   // 1 minuto
+  max: 10,
+  message: { error: 'Demasiadas solicitudes de renovación de token. Espere un momento.' }
+});
+
 // ─── Rutas ──────────────────────────────────────────────────────
 // Aplica loginLimiter SOLO a POST /api/auth/login (anti brute-force),
-// y un authLimiter más permisivo a todo lo demás del módulo.
-app.use('/api/auth/login', loginLimiter);
-app.use('/api/auth',        authLimiter, authRoutes);
+// refreshLimiter a /refresh, y authLimiter al resto del módulo.
+app.use('/api/auth/login',   loginLimiter);
+app.use('/api/auth/refresh', refreshLimiter);
+app.use('/api/auth',         authLimiter, authRoutes);
 app.use('/api/employees',   employeeRoutes);
 app.use('/api/attendance',  attendanceRoutes);
 app.use('/api/attendance/manual-adjustments', manualAdjustmentsRouter);
@@ -233,7 +250,8 @@ app.use('/api/payroll-runs',        payrollRunsRouter);
 app.use('/api/aguinaldo',           aguinaldoRouter);
 app.use('/api/salary-advances',     salaryAdvancesRouter);
 app.use('/api',                     bankingRouter);
-app.use('/api',                     complianceRouter);
+// compliance: montado SOLO en /api/compliance (el mount dual /api causaba respuestas dobles en handlers async)
+app.use('/api/compliance',          complianceRouter);
 app.use('/api/document-templates',  documentTemplatesRouter);
 app.use('/api/documents',           documentsRouter);
 app.use('/api',                     competenciesRouter);
@@ -292,6 +310,75 @@ app.use('/api/sync/att2000', att2000SyncRouter);
   app.get('/api/payment-batches', authenticate, (_req, res) => res.json([]));
   app.get('/api/employee-bank-accounts', authenticate, (_req, res) => res.json([]));
   app.get('/api/payment-history', authenticate, (_req, res) => res.json([]));
+
+  // ── Compliance root ────────────────────────────────────────────────────────
+  // GET /api/compliance (sin sufijo) — responde con estado resumido
+  app.get('/api/compliance', authenticate, async (_req, res) => {
+    try {
+      const [[mtess]] = await sequelize.query('SELECT COUNT(*) AS total FROM mtess_communications');
+      const [[ips]]   = await sequelize.query('SELECT COUNT(*) AS total FROM ips_rei_records');
+      res.json({ ok: true, mtess_total: mtess?.total || 0, ips_total: ips?.total || 0 });
+    } catch {
+      res.json({ ok: true, mtess_total: 0, ips_total: 0 });
+    }
+  });
+
+  // ── Document audit global ──────────────────────────────────────────────────
+  app.get('/api/document-audit', authenticate, async (_req, res) => {
+    try {
+      const { document_id, employee_id, limit = 50 } = _req.query;
+      let sql = 'SELECT dal.*, d.title AS document_title FROM document_audit_logs dal LEFT JOIN documents d ON d.id = dal.document_id WHERE 1=1';
+      const params = [];
+      if (document_id) { sql += ' AND dal.document_id = ?'; params.push(Number(document_id)); }
+      if (employee_id) { sql += ' AND d.employee_id = ?';   params.push(Number(employee_id)); }
+      sql += ' ORDER BY dal.created_at DESC LIMIT ?';
+      params.push(Number(limit));
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json({ ok: true, data: rows });
+    } catch { res.json({ ok: true, data: [] }); }
+  });
+
+  // ── Payroll params aliases ─────────────────────────────────────────────────
+  // /api/payroll-params y /api/payroll-parameters → alias a payroll_monthly_parameters
+  const _payrollParamsHandler = async (_req, res) => {
+    try {
+      const { year } = _req.query;
+      let sql = 'SELECT * FROM payroll_monthly_parameters WHERE 1=1';
+      const params = [];
+      if (year) { sql += ' AND year = ?'; params.push(year); }
+      sql += ' ORDER BY year DESC, month DESC';
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json(rows);
+    } catch { res.json([]); }
+  };
+  app.get('/api/payroll-params',      authenticate, _payrollParamsHandler);
+  app.get('/api/payroll-parameters',  authenticate, _payrollParamsHandler);
+
+  // /api/payroll-types — catálogo de tipos de nómina (tabla payroll_types si existe)
+  app.get('/api/payroll-types', authenticate, async (_req, res) => {
+    try {
+      const [rows] = await sequelize.query('SELECT * FROM payroll_types ORDER BY name ASC');
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+
+  // /api/bridge/devices — alias para que el portal pueda consultar relojes
+  app.get('/api/bridge/devices', authenticate, async (_req, res) => {
+    try {
+      const [dbDevices] = await sequelize.query(
+        'SELECT id, name, ip_address AS ip, port, last_sync_at, last_error FROM devices ORDER BY id ASC'
+      ).catch(() => [[]]);
+      const envStr = process.env.ZKTECO_DEVICES || '';
+      const envDevices = envStr ? envStr.split(',').map((e, i) => {
+        const [ip, port] = e.trim().split(':');
+        return { id: `env_${i}`, name: `Reloj ENV ${i + 1}`, ip, port: parseInt(port || '4370'), online: true };
+      }) : [];
+      const all = [...dbDevices.map(d => ({ ...d, online: true })), ...envDevices];
+      res.json({ ok: true, devices: all, count: all.length });
+    } catch (err) {
+      res.json({ ok: true, devices: [], count: 0, error: err.message });
+    }
+  });
 
   // /api/zkteco/diagnostics — estado real bridge + relojes desde DB + env
   app.get('/api/zkteco/diagnostics', authenticate, async (_req, res) => {

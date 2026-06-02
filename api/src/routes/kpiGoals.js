@@ -25,6 +25,8 @@ router.get('/', async (req, res) => {
     `);
     res.json({ ok: true, data: rows });
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json({ ok: true, data: [] });
     res.status(500).json({ error: err.message });
   }
 });
@@ -180,6 +182,8 @@ router.get('/progress', async (req, res) => {
 
     res.json({ ok: true, period: { year, month, from, to }, goals: evaluated, raw: metrics });
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json({ ok: true, period: { year, month }, goals: [], raw: {} });
     res.status(500).json({ error: err.message });
   }
 });

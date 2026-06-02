@@ -1,93 +1,125 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { Shield, Loader2, Plus } from 'lucide-react'
+import { Scale, Plus, AlertTriangle } from 'lucide-react'
 import { api } from '@/lib/api'
-import BackButton from '@/components/BackButton'
+import EnterprisePageHeader from '@/components/ui/EnterprisePageHeader'
+import EmptyState from '@/components/ui/EmptyState'
+import StatusBadge from '@/components/ui/StatusBadge'
 
 interface Retencion {
   id: number
   empleado: string
   expediente: string
-  juzgado: string
-  monto_mensual: number
-  fecha_inicio: string
-  fecha_fin: string
+  tipo_retencion: string
+  porcentaje?: number
+  monto_fijo?: number
+  fecha_desde: string
+  fecha_hasta: string
   estado: string
+  juzgado: string
+}
+
+const STATUS_MAP: Record<string, string> = {
+  activa:      'error',
+  suspendida:  'pending',
+  finalizada:  'inactive',
+}
+
+function fmtDate(d?: string) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('es-PY', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+function fmtMontoOPct(item: Retencion) {
+  if (item.porcentaje != null) return `${item.porcentaje}%`
+  if (item.monto_fijo != null) return 'Gs. ' + item.monto_fijo.toLocaleString('es-PY')
+  return '—'
 }
 
 export default function RetencionesPage() {
-  const [items, setItems] = useState<Retencion[]>([])
+  const [items, setItems]     = useState<Retencion[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get('/api/payroll/judicial-retentions')
-      .then(r => {
-        const d = r.data
-        setItems(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : []))
-      })
+    Promise.any([
+      api.get('/api/judicial-retentions').then(r => r.data),
+      api.get('/api/salary-retentions').then(r => r.data),
+    ])
+      .then(d => setItems(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])))
       .catch(() => setItems([]))
       .finally(() => setLoading(false))
   }, [])
 
   return (
-    <div className="p-6 max-w-7xl space-y-5">
-      <BackButton href="/nomina" label="Nómina" />
+    <div className="p-6 space-y-5">
+      <EnterprisePageHeader
+        icon={Scale}
+        iconColor="bg-red-700"
+        title="Retenciones Judiciales"
+        subtitle="Embargos y retenciones sobre salario por orden judicial"
+        breadcrumbs={[
+          { label: 'Nómina', href: '/nomina' },
+          { label: 'Retenciones Judiciales' },
+        ]}
+        actions={
+          <button className="inline-flex items-center gap-2 px-3 py-2 bg-red-700 hover:bg-red-800 text-white text-xs font-medium rounded-lg transition-colors">
+            <Plus size={14} />
+            Registrar retención
+          </button>
+        }
+      />
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center">
-            <Shield className="text-white" size={18} />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Retenciones Judiciales</h1>
-            <p className="text-sm text-slate-500">Descuentos ordenados por resolución judicial sobre salarios</p>
-          </div>
-        </div>
-        <button className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-          <Plus size={15} />
-          Registrar retención
-        </button>
+      {/* Warning banner */}
+      <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+        <AlertTriangle size={15} className="text-red-600 shrink-0 mt-0.5" />
+        <p className="text-xs text-red-800 leading-relaxed">
+          <span className="font-semibold">Límite legal:</span> la retención judicial no puede superar el 30% del salario neto (Art. 241 CT PY).
+        </p>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow overflow-hidden">
+      {/* Table */}
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="animate-spin text-slate-300" size={24} />
-          </div>
+          <div className="py-12 text-center text-slate-400 text-sm">Cargando...</div>
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={Scale}
+            title="Sin retenciones judiciales registradas"
+            description="No hay órdenes de retención judicial activas sobre el personal."
+          />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-100">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Empleado</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Expediente</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Juzgado</th>
-                <th className="px-4 py-3 text-right font-medium text-slate-600">Monto Mensual (Gs.)</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Fecha Inicio</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Fecha Fin</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {items.map(item => (
-                <tr key={item.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-slate-800">{item.empleado}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.expediente}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.juzgado}</td>
-                  <td className="px-4 py-3 text-right text-slate-600">{item.monto_mensual?.toLocaleString('es-PY')}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.fecha_inicio}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.fecha_fin}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.estado}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50">
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Empleado</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Expediente</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tipo retención</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">% o Monto fijo</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Desde</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Hasta</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Estado</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Juzgado</th>
                 </tr>
-              ))}
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-400">
-                    No hay retenciones judiciales activas.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {items.map(item => (
+                  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3 text-sm font-medium text-slate-800">{item.empleado}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700 font-mono">{item.expediente || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{item.tipo_retencion || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700 text-right font-medium">{fmtMontoOPct(item)}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{fmtDate(item.fecha_desde)}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{fmtDate(item.fecha_hasta)}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={STATUS_MAP[item.estado] ?? item.estado} label={item.estado} />
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-500">{item.juzgado || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

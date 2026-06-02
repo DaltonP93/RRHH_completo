@@ -1,84 +1,121 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { UserMinus, Plus, AlertTriangle } from 'lucide-react'
 import { api } from '@/lib/api'
-import BackButton from '@/components/BackButton'
+import EnterprisePageHeader from '@/components/ui/EnterprisePageHeader'
+import EmptyState from '@/components/ui/EmptyState'
+import StatusBadge from '@/components/ui/StatusBadge'
 
 interface Preaviso {
   id: number
   empleado: string
-  tipo: string
-  fecha_inicio: string
+  tipo_egreso: string
+  fecha_notificacion: string
   dias_preaviso: number
-  fecha_vencimiento: string
+  fecha_efectiva: string
+  monto_indemnizacion: number
   estado: string
 }
 
+const STATUS_MAP: Record<string, string> = {
+  notificado:  'generated',
+  'en-curso':  'pending',
+  finalizado:  'approved',
+  rescindido:  'rejected',
+}
+
+function fmtDate(d?: string) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('es-PY', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+function fmtGs(n?: number) {
+  if (n == null) return '—'
+  return 'Gs. ' + n.toLocaleString('es-PY')
+}
+
 export default function PreavísosPage() {
-  const [items, setItems] = useState<Preaviso[]>([])
+  const [items, setItems]     = useState<Preaviso[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get('/api/payroll/preavisos')
-      .then(r => {
-        const d = r.data
-        setItems(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : []))
-      })
+    Promise.any([
+      api.get('/api/payroll-notices').then(r => r.data),
+      api.get('/api/termination-notices').then(r => r.data),
+    ])
+      .then(d => setItems(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])))
       .catch(() => setItems([]))
       .finally(() => setLoading(false))
   }, [])
 
   return (
-    <div className="p-6 max-w-7xl space-y-5">
-      <BackButton href="/nomina" label="Nómina" />
+    <div className="p-6 space-y-5">
+      <EnterprisePageHeader
+        icon={UserMinus}
+        iconColor="bg-slate-700"
+        title="Preavisos de Desvinculación"
+        subtitle="Notificaciones de egreso según Código del Trabajo PY"
+        breadcrumbs={[
+          { label: 'Nómina', href: '/nomina' },
+          { label: 'Preavisos' },
+        ]}
+        actions={
+          <button className="inline-flex items-center gap-2 px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white text-xs font-medium rounded-lg transition-colors">
+            <Plus size={14} />
+            Registrar preaviso
+          </button>
+        }
+      />
 
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-slate-700 flex items-center justify-center">
-          <AlertCircle className="text-white" size={18} />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Preavisos</h1>
-          <p className="text-sm text-slate-500">Gestión de períodos de preaviso en procesos de desvinculación</p>
-        </div>
+      {/* Info banner */}
+      <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+        <AlertTriangle size={15} className="text-amber-600 shrink-0 mt-0.5" />
+        <p className="text-xs text-amber-800 leading-relaxed">
+          <span className="font-semibold">Preaviso legal Paraguay:</span> mínimo 30 días para contratos con más de 1 año de antigüedad (Art. 87 CT).
+        </p>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow overflow-hidden">
+      {/* Table */}
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="animate-spin text-slate-300" size={24} />
-          </div>
+          <div className="py-12 text-center text-slate-400 text-sm">Cargando...</div>
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon={UserMinus}
+            title="Sin preavisos registrados"
+            description="No hay preavisos de desvinculación registrados. Se crean al iniciar un proceso de egreso."
+          />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-100">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Empleado</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Tipo</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Fecha Inicio</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Días Preaviso</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Fecha Vencimiento</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-600">Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {items.map(item => (
-                <tr key={item.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-slate-800">{item.empleado}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.tipo}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.fecha_inicio}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.dias_preaviso}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.fecha_vencimiento}</td>
-                  <td className="px-4 py-3 text-slate-600">{item.estado}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50">
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Empleado</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tipo egreso</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Fecha notif.</th>
+                  <th className="text-center px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Días preaviso</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Fecha efectiva</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Indemnización</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Estado</th>
                 </tr>
-              ))}
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
-                    No hay preavisos registrados. Se registran al iniciar un proceso de desvinculación.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {items.map(item => (
+                  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3 text-sm font-medium text-slate-800">{item.empleado}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700">{item.tipo_egreso || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{fmtDate(item.fecha_notificacion)}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700 text-center">{item.dias_preaviso ?? '—'}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{fmtDate(item.fecha_efectiva)}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700 text-right font-medium">{fmtGs(item.monto_indemnizacion)}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={STATUS_MAP[item.estado] ?? item.estado} label={item.estado} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

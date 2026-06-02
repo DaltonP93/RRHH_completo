@@ -19,7 +19,7 @@ router.get('/monthly', async (req, res) => {
   const [rows] = await sequelize.query(`
     SELECT
       e.id, e.code, CONCAT(e.first_name,' ',e.last_name) AS employee_name,
-      d.name AS department,
+      CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department,
       COUNT(CASE WHEN ds.status IN ('present','late') THEN 1 END)  AS days_present,
       COUNT(CASE WHEN ds.status = 'late'              THEN 1 END)  AS days_late,
       COUNT(CASE WHEN ds.status = 'absent'            THEN 1 END)  AS days_absent,
@@ -39,27 +39,32 @@ router.get('/monthly', async (req, res) => {
 
 // GET /api/reports/weekly?week=&year=
 router.get('/weekly', async (req, res) => {
-  const now = new Date();
-  const { year = now.getFullYear(), week } = req.query;
+  try {
+    const now = new Date();
+    const { year = now.getFullYear(), week } = req.query;
 
-  // Calcular inicio y fin de la semana
-  const jan1 = new Date(year, 0, 1);
-  const weekNum = week || Math.ceil(((now - jan1) / 86400000 + jan1.getDay() + 1) / 7);
-  const from = new Date(jan1.getTime() + (weekNum - 1) * 7 * 86400000);
-  const to   = new Date(from.getTime() + 6 * 86400000);
+    // Calcular inicio y fin de la semana
+    const jan1 = new Date(year, 0, 1);
+    const weekNum = week || Math.ceil(((now - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+    const from = new Date(jan1.getTime() + (weekNum - 1) * 7 * 86400000);
+    const to   = new Date(from.getTime() + 6 * 86400000);
 
-  const [rows] = await sequelize.query(`
-    SELECT
-      ds.date, ds.status, ds.first_in, ds.last_out, ds.worked_minutes, ds.late_minutes,
-      CONCAT(e.first_name,' ',e.last_name) AS employee_name, d.name AS department
-    FROM daily_summary ds
-    JOIN employees e ON ds.employee_id = e.id
-    LEFT JOIN departments d ON e.department_id = d.id
-    WHERE ds.date BETWEEN ? AND ?
-    ORDER BY ds.date, e.last_name
-  `, { replacements: [from.toISOString().split('T')[0], to.toISOString().split('T')[0]] });
+    const [rows] = await sequelize.query(`
+      SELECT
+        ds.date, ds.status, ds.first_in, ds.last_out, ds.worked_minutes, ds.late_minutes,
+        CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+        CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department
+      FROM daily_summary ds
+      JOIN employees e ON ds.employee_id = e.id
+      LEFT JOIN departments d ON e.department_id = d.id
+      WHERE ds.date BETWEEN ? AND ?
+      ORDER BY ds.date, e.last_name
+    `, { replacements: [from.toISOString().split('T')[0], to.toISOString().split('T')[0]] });
 
-  res.json({ data: rows, week: weekNum, from, to });
+    res.json({ data: rows, week: weekNum, from, to });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── GET /api/reports/marcadas ─────────────────────────────────────
@@ -75,47 +80,99 @@ router.get('/marcadas', async (req, res) => {
   }
 });
 
+// ─── GET /api/reports/daily?date=YYYY-MM-DD ───────────────────────
+// Resumen del día: totales presentes/ausentes/tarde + detalle por empleado.
+router.get('/daily', async (req, res) => {
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  const EMPTY = { ok: true, date, summary: { employees: 0, present: 0, absent: 0, late: 0, overtime_hours: 0 }, data: [] };
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT
+        e.id AS employee_id,
+        CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+        CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department,
+        ds.first_in, ds.last_out, ds.worked_minutes,
+        ds.late_minutes, ds.overtime_minutes,
+        COALESCE(ds.status, 'absent') AS status
+      FROM employees e
+      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN daily_summary ds ON e.id = ds.employee_id AND ds.date = ?
+      WHERE e.status = 'active'
+      ORDER BY d.name, e.last_name
+    `, { replacements: [date] });
+
+    const present  = rows.filter(r => r.status === 'present').length;
+    const late     = rows.filter(r => r.status === 'late').length;
+    const absent   = rows.filter(r => r.status === 'absent').length;
+    const otMins   = rows.reduce((s, r) => s + (r.overtime_minutes || 0), 0);
+
+    res.json({
+      ok: true,
+      date,
+      summary: {
+        employees:      rows.length,
+        present:        present + late,
+        absent,
+        late,
+        overtime_hours: Math.round(otMins / 60 * 10) / 10,
+      },
+      data: rows,
+    });
+  } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json(EMPTY);
+    console.error('[reports] GET /daily error:', err);
+    res.status(500).json({ error: 'Error al obtener reporte diario' });
+  }
+});
+
 // ─── GET /api/reports/daily-detail?date= ─────────────────────────
 // Reporte del día con todos los logs crudos por empleado
 router.get('/daily-detail', async (req, res) => {
-  const { date = new Date().toISOString().split('T')[0], dept } = req.query;
-  let filter = '';
-  const params = [date];
-  if (dept) { filter = 'AND e.department_id = ?'; params.push(dept); }
+  try {
+    const { date = new Date().toISOString().split('T')[0], dept } = req.query;
+    let filter = '';
+    const params = [date];
+    if (dept) { filter = 'AND e.department_id = ?'; params.push(dept); }
 
-  const [rows] = await sequelize.query(`
-    SELECT
-      e.id AS employee_id, e.code,
-      CONCAT(e.first_name,' ',e.last_name) AS employee_name,
-      d.name AS department, s.name AS schedule,
-      s.check_in AS scheduled_in, s.check_out AS scheduled_out,
-      ds.first_in, ds.last_out, ds.worked_minutes, ds.late_minutes,
-      ds.overtime_minutes, ds.status, ds.justification, ds.justification_type,
-      GROUP_CONCAT(
-        CONCAT(DATE_FORMAT(al.timestamp,'%H:%i'), '=', al.type)
-        ORDER BY al.timestamp SEPARATOR '|'
-      ) AS marks_raw
-    FROM employees e
-    LEFT JOIN departments d ON e.department_id = d.id
-    LEFT JOIN schedules s ON e.schedule_id = s.id
-    LEFT JOIN daily_summary ds ON e.id = ds.employee_id AND ds.date = ?
-    LEFT JOIN attendance_logs al ON e.id = al.employee_id AND DATE(al.timestamp) = ?
-    WHERE e.status = 'active' ${filter}
-    GROUP BY e.id
-    ORDER BY d.name, e.last_name
-  `, { replacements: [date, date, ...params.slice(1)] });
+    const [rows] = await sequelize.query(`
+      SELECT
+        e.id AS employee_id, e.code,
+        CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+        CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department, s.name AS schedule,
+        s.check_in AS scheduled_in, s.check_out AS scheduled_out,
+        ds.first_in, ds.last_out, ds.worked_minutes, ds.late_minutes,
+        ds.overtime_minutes, ds.status,
+        IFNULL(ds.justification, NULL) AS justification,
+        IFNULL(ds.justification_type, NULL) AS justification_type,
+        GROUP_CONCAT(
+          CONCAT(DATE_FORMAT(al.timestamp,'%H:%i'), '=', al.type)
+          ORDER BY al.timestamp SEPARATOR '|'
+        ) AS marks_raw
+      FROM employees e
+      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN schedules s ON e.schedule_id = s.id
+      LEFT JOIN daily_summary ds ON e.id = ds.employee_id AND ds.date = ?
+      LEFT JOIN attendance_logs al ON e.id = al.employee_id AND DATE(al.timestamp) = ?
+      WHERE e.status = 'active' ${filter}
+      GROUP BY e.id
+      ORDER BY d.name, e.last_name
+    `, { replacements: [date, date, ...params.slice(1)] });
 
-  // Parsear marks_raw a array
-  const data = rows.map(r => ({
-    ...r,
-    marks: r.marks_raw ? r.marks_raw.split('|').map(m => {
-      const [time, type] = m.split('=');
-      return { time, type };
-    }) : [],
-    marks_raw: undefined,
-  }));
+    // Parsear marks_raw a array
+    const data = rows.map(r => ({
+      ...r,
+      marks: r.marks_raw ? r.marks_raw.split('|').map(m => {
+        const [time, type] = m.split('=');
+        return { time, type };
+      }) : [],
+      marks_raw: undefined,
+    }));
 
-  res.json({ date, data });
+    res.json({ date, data });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── GET /api/reports/marcadas/pdf ────────────────────────────────
@@ -265,23 +322,27 @@ router.post('/marcadas/email', async (req, res) => {
 // ─── POST /api/reports/attendance/justify ─────────────────────────
 // Justificar una ausencia / tardanza
 router.post('/attendance/justify', async (req, res) => {
-  const { employeeId, date, justification, justificationType } = req.body;
-  if (!employeeId || !date || !justification) {
-    return res.status(400).json({ error: 'employeeId, date y justification son requeridos' });
-  }
-  await sequelize.query(`
-    INSERT INTO daily_summary (employee_id, date, justification, justification_type, status)
-    VALUES (?, ?, ?, ?, 'permission')
-    ON DUPLICATE KEY UPDATE
-      justification      = VALUES(justification),
-      justification_type = VALUES(justification_type),
-      status = CASE
-        WHEN status = 'absent' THEN 'permission'
-        ELSE status
-      END
-  `, { replacements: [employeeId, date, justification, justificationType || 'other'] });
+  try {
+    const { employeeId, date, justification, justificationType } = req.body;
+    if (!employeeId || !date || !justification) {
+      return res.status(400).json({ error: 'employeeId, date y justification son requeridos' });
+    }
+    await sequelize.query(`
+      INSERT INTO daily_summary (employee_id, date, justification, justification_type, status)
+      VALUES (?, ?, ?, ?, 'permission')
+      ON DUPLICATE KEY UPDATE
+        justification      = VALUES(justification),
+        justification_type = VALUES(justification_type),
+        status = CASE
+          WHEN status = 'absent' THEN 'permission'
+          ELSE status
+        END
+    `, { replacements: [employeeId, date, justification, justificationType || 'other'] });
 
-  res.json({ message: 'Justificación registrada' });
+    res.json({ ok: true, message: 'Justificación registrada' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── GET /api/reports/employee/:id/analytics ──────────────────────
@@ -300,7 +361,8 @@ router.get('/employee/:id/analytics', async (req, res) => {
       SELECT
         ds.date, ds.status, ds.worked_minutes, ds.late_minutes,
         ds.overtime_minutes, ds.first_in, ds.last_out,
-        ds.justification, ds.justification_type
+        IFNULL(ds.justification, NULL) AS justification,
+        IFNULL(ds.justification_type, NULL) AS justification_type
       FROM daily_summary ds
       WHERE ds.employee_id = ? AND ds.date BETWEEN ? AND ?
       ORDER BY ds.date
@@ -387,10 +449,10 @@ router.get('/monthly/export', async (req, res) => {
     const [rows] = await sequelize.query(`
       SELECT
         e.id, e.code, CONCAT(e.first_name,' ',e.last_name) AS employee_name,
-        d.name AS department,
+        CASE WHEN d.name IS NULL OR d.name = 'This Company' THEN 'Sin departamento asignado' ELSE d.name END AS department,
         ds.date, ds.status, ds.first_in, ds.last_out,
         ds.worked_minutes, ds.late_minutes, ds.overtime_minutes,
-        ds.justification
+        IFNULL(ds.justification, NULL) AS justification
       FROM employees e
       LEFT JOIN departments d ON e.department_id = d.id
       LEFT JOIN daily_summary ds ON e.id = ds.employee_id AND ds.date BETWEEN ? AND ?

@@ -32,7 +32,8 @@ const logger           = require('./logger');
 async function fetchCheckInOut({ dateFrom, dateTo, limit = 5000 } = {}) {
   let where = '1=1';
   if (dateFrom) where += ` AND CHECKTIME >= '${dateFrom}'`;
-  if (dateTo)   where += ` AND CHECKTIME <= '${dateTo}'`;
+  // dateTo is a date string — append 23:59:59 so the full day is included
+  if (dateTo)   where += ` AND CHECKTIME <= '${dateTo} 23:59:59'`;
 
   const chkCols  = await getTableColumns('CHECKINOUT');
   const userCols = await getTableColumns('USERINFO');
@@ -230,6 +231,27 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
   const records = await fetchCheckInOut({ dateFrom, dateTo, limit });
   let imported = 0, skipped = 0, notFound = 0;
 
+  // Pre-pass: infer CHECKTYPE for null/unknown entries via chronological sequence.
+  // Group by employee+date, sort ascending, assign in/out by 0-indexed position.
+  const unknownGroups = new Map();
+  for (const r of records) {
+    const ct = r.CHECKTYPE ? String(r.CHECKTYPE).toUpperCase() : null;
+    if (ct !== 'I' && ct !== 'O') {
+      const dayKey = checktimeToStr(r.CHECKTIME).slice(0, 10);
+      const k = `${r.USERID}_${dayKey}`;
+      if (!unknownGroups.has(k)) unknownGroups.set(k, []);
+      unknownGroups.get(k).push(r);
+    }
+  }
+  for (const group of unknownGroups.values()) {
+    group.sort((a, b) => {
+      const ta = checktimeToStr(a.CHECKTIME);
+      const tb = checktimeToStr(b.CHECKTIME);
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
+    });
+    group.forEach((r, i) => { r._inferredType = i % 2 === 0 ? 'in' : 'out'; });
+  }
+
   for (const r of records) {
     try {
       // Buscar empleado en el nuevo sistema por código USERID
@@ -240,10 +262,11 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
 
       if (!emp) { notFound++; continue; }
 
-      // Mapear CHECKTYPE: 'I'=entrada, 'O'=salida, null=detectar por orden
+      // Mapear CHECKTYPE: 'I'=entrada, 'O'=salida, null=inferir por secuencia cronológica
       let type = 'unknown';
       if (r.CHECKTYPE === 'I' || r.CHECKTYPE === 'i') type = 'in';
       else if (r.CHECKTYPE === 'O' || r.CHECKTYPE === 'o') type = 'out';
+      else if (r._inferredType) type = r._inferredType;
 
       // Buscar dispositivo por sensor_id (MachineNo en att2000) con fallback al id MySQL
       const sid = r.SENSORID || 0;
@@ -252,6 +275,17 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
         { replacements: [sid, sid, sid] }
       ).catch(() => [[]]);
 
+      // ── Conversión de CHECKTIME ───────────────────────────────────────────────
+      // El driver mssql/tedious devuelve DATETIME de SQL Server como JS Date donde
+      // el valor UTC == el valor crudo almacenado (sin zona horaria).
+      // Ejemplo: SQL Server "15:11:05" → new Date('2026-05-28T15:11:05Z') (UTC = 15:11).
+      // Si pasamos ese Date a Sequelize (timezone '-03:00'), éste aplica −3h más y
+      // almacena "12:11:05" en MySQL — 3 horas de desfase.
+      //
+      // Solución: extraer la cadena ISO cruda y pasarla como string.
+      // Sequelize deja pasar strings sin conversión de zona; MySQL DATETIME los guarda tal cual.
+      const tsStr = checktimeToStr(r.CHECKTIME);
+
       const [result] = await sequelize.query(`
         INSERT IGNORE INTO attendance_logs
           (employee_id, device_id, timestamp, type, source, raw_data)
@@ -259,7 +293,7 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
       `, { replacements: [
         emp.id,
         device?.id || null,
-        new Date(r.CHECKTIME),
+        tsStr,
         type,
         JSON.stringify({
           userid: r.USERID,
@@ -280,6 +314,21 @@ async function syncAttendance({ dateFrom, dateTo, limit = 10000 } = {}) {
 
   logger.info(`Sync asistencia: ${imported} importados, ${skipped} duplicados, ${notFound} sin empleado`);
   return { imported, skipped, notFound, total: records.length };
+}
+
+/**
+ * Convierte un CHECKTIME de SQL Server (devuelto por tedious como JS Date o string)
+ * al formato MySQL "YYYY-MM-DD HH:mm:ss" SIN aplicar ningún offset de zona horaria.
+ *
+ * Tedious trata los campos DATETIME (sin timezone) como UTC-equivalente:
+ *   SQL Server "2026-05-28 15:11:05" → new Date('2026-05-28T15:11:05Z')
+ * Esta función extrae "2026-05-28 15:11:05" de vuelta sin perder nada.
+ */
+function checktimeToStr(checktime) {
+  if (checktime instanceof Date) {
+    return checktime.toISOString().replace('T', ' ').slice(0, 19);
+  }
+  return String(checktime).replace('T', ' ').slice(0, 19);
 }
 
 // Importar relojes desde Machines
@@ -345,4 +394,5 @@ module.exports = {
   syncMachines,
   syncHolidays,
   fullSync,
+  checktimeToStr,
 };

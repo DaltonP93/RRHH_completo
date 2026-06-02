@@ -24,6 +24,17 @@ const { sequelize } = require('../config/database');
 
 router.use(authenticate);
 
+// GET / — resumen de cumplimiento (usado cuando el router está montado en /api/compliance)
+router.get('/', async (_req, res) => {
+  try {
+    const [[mc]] = await sequelize.query('SELECT COUNT(*) AS total FROM mtess_communications');
+    const [[ir]] = await sequelize.query('SELECT COUNT(*) AS total FROM ips_rei_records');
+    res.json({ ok: true, mtess_total: mc?.total || 0, ips_total: ir?.total || 0 });
+  } catch {
+    res.json({ ok: true, mtess_total: 0, ips_total: 0 });
+  }
+});
+
 // ─── MTESS Communications ────────────────────────────────────────────────────
 
 // GET /api/compliance/mtess — list with filters
@@ -51,6 +62,8 @@ router.get('/mtess', async (req, res) => {
     const [rows] = await sequelize.query(sql, { replacements });
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('GET /api/compliance/mtess error:', err);
     res.status(500).json({ error: 'Error al obtener comunicaciones MTESS' });
   }
@@ -272,6 +285,8 @@ router.get('/ips', async (req, res) => {
     const [rows] = await sequelize.query(sql, { replacements });
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('GET /api/compliance/ips error:', err);
     res.status(500).json({ error: 'Error al obtener registros IPS' });
   }
@@ -383,6 +398,8 @@ router.get('/labor-planillas', async (req, res) => {
     const [rows] = await sequelize.query(sql, { replacements });
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('GET /api/compliance/labor-planillas error:', err);
     res.status(500).json({ error: 'Error al obtener planillas laborales' });
   }
@@ -481,6 +498,8 @@ router.get('/social-security-rates', async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('GET /api/compliance/social-security-rates error:', err);
     res.status(500).json({ error: 'Error al obtener tasas de seguridad social' });
   }
@@ -566,6 +585,8 @@ router.get('/status', async (req, res) => {
       payroll_runs_current_month: payrollRuns
     });
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json({ current_period: {}, mtess_pending: 0, mtess_overdue: 0, ips_current_month: 0, payroll_runs_current_month: [] });
     console.error('GET /api/compliance/status error:', err);
     res.status(500).json({ error: 'Error al obtener estado de cumplimiento' });
   }
@@ -652,6 +673,8 @@ router.get('/calendar', async (req, res) => {
 
     res.json({ deadlines, patronal_suffix: patronalSuffix, deadline_day: deadlineDay });
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json({ deadlines: [], patronal_suffix: null, deadline_day: 10 });
     console.error('GET /api/compliance/calendar error:', err);
     res.status(500).json({ error: 'Error al obtener calendario de compliance' });
   }

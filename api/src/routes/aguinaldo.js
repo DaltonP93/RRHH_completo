@@ -37,6 +37,8 @@ router.get('/', async (req, res) => {
     const [rows] = await sequelize.query(sql, { replacements });
     res.json(rows);
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.json([]);
     console.error('GET /api/aguinaldo error:', err);
     res.status(500).json({ error: 'Error al obtener aguinaldos' });
   }
@@ -98,6 +100,8 @@ router.get('/:id', async (req, res) => {
 
     res.json({ ...runs[0], lines });
   } catch (err) {
+    const no = err.original?.errno ?? err.parent?.errno;
+    if (no === 1146 || no === 1054) return res.status(404).json({ error: 'Aguinaldo no encontrado' });
     console.error('GET /api/aguinaldo/:id error:', err);
     res.status(500).json({ error: 'Error al obtener aguinaldo' });
   }
