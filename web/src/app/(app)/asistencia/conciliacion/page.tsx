@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
-import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle, Activity } from 'lucide-react'
+import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle, Activity, Eye, EyeOff, PlusCircle, Trash2, RotateCcw, FileText, ChevronDown, ChevronUp } from 'lucide-react'
 
 interface DiagnosticData {
   ok: boolean
@@ -243,6 +243,9 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
 interface TimelineLog {
   id: number; timestamp: string; timestamp_local?: string
   type: string; source: string; device_name: string | null
+  used_in_calculation?: boolean
+  suggested_exclusion?: boolean
+  requires_review?: boolean
 }
 interface TimelineSegment {
   segment_index: number; segment_type?: string
@@ -253,7 +256,7 @@ interface TimelineSegment {
   minutes?: number | null
   confidence: string; anomaly_code: string | null
 }
-interface TimelineAnomaly { anomaly_type: string; severity: string; message: string | null }
+interface TimelineAnomaly { id?: number; anomaly_type: string; severity: string; message: string | null; resolved?: boolean }
 interface TimelineSummary {
   first_in: string | null; first_in_local?: string
   last_out: string | null; last_out_local?: string
@@ -261,17 +264,262 @@ interface TimelineSummary {
   lunch_in: string | null; lunch_in_local?: string
   gross_minutes?: number
   worked_minutes: number; break_minutes: number; late_minutes: number; status: string
+  calculation_status?: 'provisional' | 'approved' | 'adjusted'
+  requires_review?: boolean
+}
+interface ManualAdjustment {
+  id: number
+  employee_id: number
+  work_date: string
+  original_log_id: number | null
+  adjustment_type: string
+  old_value: unknown
+  new_value: unknown
+  reason: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  requested_by: number
+  requested_by_name: string | null
+  approved_by: number | null
+  approved_by_name: string | null
+  created_at: string
+  approved_at: string | null
 }
 interface TimelineData {
   ok: boolean
   employee: { id: number; full_name: string; department: string; schedule_name: string | null; check_in: string | null }
   date: string
   raw_logs: TimelineLog[]
+  approved_excluded_logs?: TimelineLog[]
+  suggested_exclusions?: TimelineLog[]
+  review_required_logs?: TimelineLog[]
+  calculation_explanation?: string[]
   segments: TimelineSegment[]
   summary: TimelineSummary | null
   anomalies: TimelineAnomaly[]
   att2000_punches: Array<{ raw_checktime: string; CHECKTYPE: string }> | null
   policy?: { name: string; scope_type: string; auto_deduct_break: boolean; break_minutes: number } | null
+}
+
+const CALC_STATUS_COLOR: Record<string, string> = {
+  provisional: 'bg-amber-50 text-amber-700 border-amber-200',
+  adjusted:    'bg-blue-50 text-blue-700 border-blue-200',
+  approved:    'bg-emerald-50 text-emerald-700 border-emerald-200',
+}
+const CALC_STATUS_LABEL: Record<string, string> = {
+  provisional: 'Provisional',
+  adjusted:    'Ajustado',
+  approved:    'Aprobado',
+}
+
+const ADJ_TYPE_LABEL: Record<string, string> = {
+  add_punch:                 'Agregar marcación',
+  exclude_from_calculation:  'Excluir del cálculo',
+  include_in_calculation:    'Incluir en cálculo',
+  change_type:               'Cambiar tipo (in/out)',
+  change_time:               'Corregir hora',
+  justify_missing_punch:     'Justificar falta de marcación',
+}
+
+// ─── CreateAdjustmentPanel ────────────────────────────────────────────────────
+function CreateAdjustmentPanel({
+  employeeId, date, logs, onCreated,
+}: {
+  employeeId: number; date: string; logs: TimelineLog[]; onCreated: () => void
+}) {
+  const [open, setOpen]   = useState(false)
+  const [type, setType]   = useState('exclude_from_calculation')
+  const [logId, setLogId] = useState('')
+  const [reason, setReason] = useState('')
+  const [newTs, setNewTs]   = useState('')
+  const [newType, setNewType] = useState('in')
+  const [saving, setSaving]  = useState(false)
+  const [err, setErr]        = useState<string | null>(null)
+
+  const submit = async () => {
+    setSaving(true); setErr(null)
+    try {
+      const body: Record<string, unknown> = {
+        employee_id: employeeId, work_date: date, adjustment_type: type, reason,
+      }
+      if (['exclude_from_calculation','include_in_calculation','change_type','change_time'].includes(type)) {
+        if (!logId) { setErr('Seleccione la marcación'); setSaving(false); return }
+        body.original_log_id = +logId
+        const log = logs.find(l => l.id === +logId)
+        if (log) body.old_value = { timestamp: log.timestamp_local ?? log.timestamp, type: log.type }
+      }
+      if (type === 'add_punch') {
+        if (!newTs) { setErr('Ingrese la hora de la marcación'); setSaving(false); return }
+        body.new_value = { timestamp: `${date} ${newTs}:00`, type: newType }
+      }
+      if (type === 'change_time') {
+        if (!newTs) { setErr('Ingrese la nueva hora'); setSaving(false); return }
+        body.new_value = { timestamp: `${date} ${newTs}:00`, type: newType }
+      }
+      await api.post('/api/attendance/manual-adjustments', body)
+      setOpen(false); setReason(''); setLogId(''); setNewTs('')
+      onCreated()
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+        ?? (e as { message?: string })?.message ?? 'Error al crear ajuste'
+      setErr(msg)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="border border-slate-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition-colors"
+      >
+        <span className="flex items-center gap-2"><PlusCircle className="w-3.5 h-3.5 text-emerald-600" />Solicitar ajuste</span>
+        {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+      </button>
+      {open && (
+        <div className="p-4 space-y-3 bg-white">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">Tipo de ajuste</label>
+              <select value={type} onChange={e => setType(e.target.value)}
+                className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                {Object.entries(ADJ_TYPE_LABEL).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+            {['exclude_from_calculation','include_in_calculation','change_type','change_time','justify_missing_punch'].includes(type) && (
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Marcación afectada</label>
+                <select value={logId} onChange={e => setLogId(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                  <option value="">— seleccionar —</option>
+                  {logs.map(l => (
+                    <option key={l.id} value={l.id}>{fmtTime(localOrRaw(l.timestamp_local, l.timestamp))} ({l.type})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {['add_punch','change_time'].includes(type) && (
+              <>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Nueva hora (HH:MM)</label>
+                  <input type="time" value={newTs} onChange={e => setNewTs(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Tipo</label>
+                  <select value={newType} onChange={e => setNewType(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                    <option value="in">Entrada (in)</option>
+                    <option value="out">Salida (out)</option>
+                  </select>
+                </div>
+              </>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">Motivo / justificación</label>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+              placeholder="Ej: Empleado olvidó marcar salida el día..."
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none" />
+          </div>
+          {err && <p className="text-xs text-red-600">{err}</p>}
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setOpen(false)}
+              className="px-3 py-1.5 text-xs border border-gray-300 rounded hover:bg-gray-50 transition-colors">
+              Cancelar
+            </button>
+            <button onClick={submit} disabled={saving}
+              className="px-3 py-1.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+              {saving ? 'Guardando…' : 'Enviar solicitud'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── AdjustmentsList ─────────────────────────────────────────────────────────
+function AdjustmentsList({
+  employeeId, date, onAction,
+}: {
+  employeeId: number; date: string; onAction: () => void
+}) {
+  const [items, setItems]   = useState<ManualAdjustment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [actErr, setActErr]   = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data } = await api.get(`/api/attendance/manual-adjustments?employee_id=${employeeId}&date=${date}`)
+      setItems(data.adjustments ?? [])
+    } catch { /* ignorar si tabla no existe */ } finally {
+      setLoading(false)
+    }
+  }, [employeeId, date])
+
+  useEffect(() => { load() }, [load])
+
+  const act = async (id: number, action: 'approve' | 'reject') => {
+    setActErr(null)
+    try {
+      await api.put(`/api/attendance/manual-adjustments/${id}/${action}`)
+      await load()
+      onAction()
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+        ?? (e as { message?: string })?.message ?? `Error al ${action === 'approve' ? 'aprobar' : 'rechazar'}`
+      setActErr(msg)
+    }
+  }
+
+  if (loading) return <p className="text-xs text-slate-400">Cargando ajustes…</p>
+  if (!items.length) return <p className="text-xs text-slate-400">Sin ajustes solicitados para esta fecha.</p>
+
+  return (
+    <div className="space-y-2">
+      {actErr && <p className="text-xs text-red-600">{actErr}</p>}
+      {items.map(adj => (
+        <div key={adj.id} className={`rounded-lg border text-xs px-3 py-2 ${
+          adj.status === 'approved' ? 'bg-emerald-50 border-emerald-200'
+          : adj.status === 'rejected' ? 'bg-red-50 border-red-200'
+          : 'bg-amber-50 border-amber-200'}`}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-slate-700">{ADJ_TYPE_LABEL[adj.adjustment_type] ?? adj.adjustment_type}</span>
+                <span className={`px-1.5 py-0.5 rounded font-medium ${
+                  adj.status === 'approved' ? 'bg-emerald-100 text-emerald-700'
+                  : adj.status === 'rejected' ? 'bg-red-100 text-red-700'
+                  : 'bg-amber-100 text-amber-700'
+                }`}>{adj.status}</span>
+              </div>
+              {adj.reason && <p className="text-slate-500">{adj.reason}</p>}
+              <p className="text-slate-400">
+                Por: {adj.requested_by_name ?? `#${adj.requested_by}`}
+                {adj.approved_by_name && ` · ${adj.status === 'approved' ? 'Aprobado' : 'Rechazado'} por: ${adj.approved_by_name}`}
+              </p>
+            </div>
+            {adj.status === 'pending' && (
+              <div className="flex gap-1.5 shrink-0">
+                <button onClick={() => act(adj.id, 'approve')}
+                  className="flex items-center gap-1 px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 transition-colors">
+                  <CheckCircle className="w-3 h-3" /> Aprobar
+                </button>
+                <button onClick={() => act(adj.id, 'reject')}
+                  className="flex items-center gap-1 px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors">
+                  <XCircle className="w-3 h-3" /> Rechazar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 const SEV_COLOR: Record<string, string> = {
@@ -307,8 +555,9 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
   const [data, setData]           = useState<TimelineData | null>(null)
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
+  const [adjKey, setAdjKey]       = useState(0)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!empId) return
     setLoading(true); setError(null); setData(null)
     try {
@@ -321,7 +570,9 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
     } finally {
       setLoading(false)
     }
-  }
+  }, [date, empId])
+
+  const reloadAll = useCallback(() => { setAdjKey(k => k + 1); load() }, [load])
 
   return (
     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
@@ -342,7 +593,7 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
               className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
           </div>
           <div className="flex items-end">
-            <button onClick={load} disabled={loading || !empId}
+            <button onClick={() => load()} disabled={loading || !empId}
               className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors">
               <Activity className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               {loading ? 'Cargando…' : 'Ver jornada'}
@@ -460,7 +711,15 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
 
             {/* Cronología visual */}
             <div>
-              <p className="text-xs font-medium text-slate-500 mb-2">Marcaciones cronológicas</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-slate-500">Marcaciones cronológicas</p>
+                {data.summary?.calculation_status && (
+                  <span className={`px-2 py-0.5 rounded border text-xs font-medium ${CALC_STATUS_COLOR[data.summary.calculation_status] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                    {CALC_STATUS_LABEL[data.summary.calculation_status] ?? data.summary.calculation_status}
+                    {data.summary.requires_review && ' · ⚠ revisión requerida'}
+                  </span>
+                )}
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs ent-table">
                   <thead>
@@ -470,13 +729,14 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
                       <th className="text-left">Tipo</th>
                       <th className="text-left">Fuente</th>
                       <th className="text-left">Reloj</th>
+                      <th className="text-left">Estado cálculo</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.raw_logs.length === 0 ? (
-                      <tr><td colSpan={5} className="py-3 text-slate-400">Sin marcaciones para esta fecha</td></tr>
+                      <tr><td colSpan={6} className="py-3 text-slate-400">Sin marcaciones para esta fecha</td></tr>
                     ) : data.raw_logs.map((log, idx) => (
-                      <tr key={log.id}>
+                      <tr key={log.id} className={log.suggested_exclusion ? 'opacity-60' : ''}>
                         <td className="text-slate-400">{idx + 1}</td>
                         <td className="font-mono font-medium text-slate-900">{fmtTime(localOrRaw(log.timestamp_local, log.timestamp))}</td>
                         <td>
@@ -486,6 +746,25 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
                         </td>
                         <td className="text-slate-500">{log.source}</td>
                         <td className="text-slate-400">{log.device_name ?? '—'}</td>
+                        <td>
+                          <div className="flex flex-wrap gap-1">
+                            {log.used_in_calculation === true && !log.suggested_exclusion && (
+                              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-medium border border-emerald-200">
+                                <Eye className="w-2.5 h-2.5" /> usado
+                              </span>
+                            )}
+                            {log.suggested_exclusion && (
+                              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-medium border border-slate-200">
+                                <EyeOff className="w-2.5 h-2.5" /> posible duplicado
+                              </span>
+                            )}
+                            {log.requires_review && (
+                              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-[10px] font-medium border border-amber-200">
+                                <AlertTriangle className="w-2.5 h-2.5" /> revisar
+                              </span>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -555,21 +834,57 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
               </div>
             )}
 
+            {/* Explicación del cálculo */}
+            {data.calculation_explanation && data.calculation_explanation.length > 0 && (
+              <div className="border border-blue-100 rounded-lg bg-blue-50 px-4 py-3">
+                <p className="text-xs font-semibold text-blue-700 mb-1.5 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5" /> Notas del cálculo
+                </p>
+                <ul className="space-y-1">
+                  {data.calculation_explanation.map((note, i) => (
+                    <li key={i} className="text-xs text-blue-700 flex items-start gap-1.5">
+                      <span className="mt-0.5 shrink-0 text-blue-400">•</span>{note}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Anomalías */}
             {data.anomalies.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-slate-500 mb-2">Anomalías detectadas</p>
                 <div className="space-y-1">
                   {data.anomalies.map((a, i) => (
-                    <div key={i} className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-xs ${SEV_COLOR[a.severity] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
-                      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <div key={i} className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-xs ${a.resolved ? 'bg-slate-50 border-slate-200 opacity-60' : SEV_COLOR[a.severity] ?? 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                      {a.resolved
+                        ? <CheckCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-emerald-500" />
+                        : <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />}
                       <span className="font-medium mr-1">{a.anomaly_type}</span>
+                      {a.resolved && <span className="text-emerald-600 font-medium mr-1">[resuelta]</span>}
                       {a.message && <span className="opacity-80">{a.message}</span>}
                     </div>
                   ))}
                 </div>
               </div>
             )}
+
+            {/* Ajustes manuales */}
+            <div className="border-t border-slate-100 pt-4 space-y-3">
+              <p className="text-xs font-semibold text-slate-700">Revisión y correcciones manuales</p>
+              <CreateAdjustmentPanel
+                employeeId={data.employee.id}
+                date={date}
+                logs={data.raw_logs}
+                onCreated={reloadAll}
+              />
+              <AdjustmentsList
+                key={adjKey}
+                employeeId={data.employee.id}
+                date={date}
+                onAction={reloadAll}
+              />
+            </div>
           </div>
         )}
       </div>

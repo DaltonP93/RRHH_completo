@@ -339,7 +339,7 @@ async function _hasColumn(table, column) {
   } catch { return false; }
 }
 
-async function upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes, status, anomalyCount, policy, requiresReview }) {
+async function upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes, status, anomalyCount, policy, requiresReview, calculationStatus }) {
   const hasLunch  = await _hasColumn('daily_summary', 'lunch_out');
   const hasGross  = await _hasColumn('daily_summary', 'gross_minutes');
   const hasPolicy = await _hasColumn('daily_summary', 'policy_id');
@@ -384,10 +384,16 @@ async function upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes,
     update.push('requires_review = VALUES(requires_review)');
   }
   if (await _hasColumn('daily_summary', 'calculation_status')) {
+    const calcStatus = calculationStatus || 'provisional';
     cols.push('calculation_status');
-    vals.push('provisional');
-    // Solo actualizamos si el estado actual NO es ya approved/adjusted (preservar aprobaciones)
-    update.push("calculation_status = CASE WHEN calculation_status IN ('approved','adjusted') THEN calculation_status ELSE 'provisional' END");
+    vals.push(calcStatus);
+    // 'adjusted' siempre se escribe (refleja ajuste humano aprobado).
+    // 'provisional' solo se escribe si el estado guardado no es approved/adjusted.
+    if (calcStatus === 'adjusted') {
+      update.push("calculation_status = 'adjusted'");
+    } else {
+      update.push("calculation_status = CASE WHEN calculation_status IN ('approved','adjusted') THEN calculation_status ELSE 'provisional' END");
+    }
   }
 
   const placeholders = cols.map(() => '?').join(', ');
@@ -494,11 +500,43 @@ async function processAttendanceDay({ date, employeeId }) {
     return { segments: [], finalMetrics: null, anomalies: [], policy: null };
   }
 
+  // 1b. Cargar ajustes aprobados para este empleado/fecha.
+  // exclude_from_calculation → filtrar esos log_ids del cálculo (inmutabilidad: el log sigue en DB).
+  // include_in_calculation   → forzar inclusión de logs previamente excluidos.
+  let approvedExcludeIds = new Set();
+  let approvedIncludeIds = new Set();
+  let hasApprovedAdjustments = false;
+  try {
+    const [adjRows] = await sequelize.query(`
+      SELECT adjustment_type, original_log_id
+      FROM attendance_adjustments
+      WHERE employee_id = ? AND work_date = ? AND status = 'approved'
+        AND adjustment_type IN ('exclude_from_calculation','include_in_calculation')
+        AND original_log_id IS NOT NULL
+    `, { replacements: [employeeId, date] });
+    for (const a of adjRows) {
+      if (a.adjustment_type === 'exclude_from_calculation') approvedExcludeIds.add(a.original_log_id);
+      if (a.adjustment_type === 'include_in_calculation')  approvedIncludeIds.add(a.original_log_id);
+    }
+    // include_in_calculation cancela un exclude previo
+    for (const id of approvedIncludeIds) approvedExcludeIds.delete(id);
+    hasApprovedAdjustments = adjRows.length > 0;
+  } catch { /* tabla puede no existir en entornos sin migración 091 */ }
+
   // 2. Normalizar timestamps (Sequelize puede devolver Date objects), deduplicar, asignar tipos
   // Nota: attendance_logs NO se modifica. suggestedExclusions son los logs no usados
   // en el cálculo provisional, pero siempre visibles y sujetos a revisión humana.
   const normalizedLogs = logs.map(l => ({ ...l, timestamp: formatMysqlDateTimeLocal(l.timestamp) }));
-  const { deduped, suggestedExclusions } = deduplicate(normalizedLogs);
+
+  // Separar logs excluidos por ajuste aprobado (nunca se eliminan, solo se omiten del cálculo)
+  const approvedExcludedLogs = approvedExcludeIds.size > 0
+    ? normalizedLogs.filter(l => approvedExcludeIds.has(l.id))
+    : [];
+  const logsForCalculation = approvedExcludeIds.size > 0
+    ? normalizedLogs.filter(l => !approvedExcludeIds.has(l.id))
+    : normalizedLogs;
+
+  const { deduped, suggestedExclusions } = deduplicate(logsForCalculation);
   const typed   = assignTypes(deduped);
   const { segments, anomalies: segAnomalies } = buildSegments(typed);
 
@@ -543,7 +581,8 @@ async function processAttendanceDay({ date, employeeId }) {
   let status = finalMetrics.firstIn ? (lateMinutes > 0 ? 'late' : 'present') : 'absent';
 
   // 8. Guardar
-  await upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes, status, anomalyCount: allAnomalies.length, policy, requiresReview });
+  const calcStatus = hasApprovedAdjustments ? 'adjusted' : 'provisional';
+  await upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes, status, anomalyCount: allAnomalies.length, policy, requiresReview, calculationStatus: calcStatus });
   await upsertSegments({ date, employeeId, segments });
   await upsertAnomalies({ date, employeeId, anomalies: allAnomalies });
 
@@ -555,11 +594,12 @@ async function processAttendanceDay({ date, employeeId }) {
   const calculationExplanation = _buildCalculationExplanation(finalMetrics, policy, suggestedExclusions, allAnomalies);
 
   return {
-    raw_logs:            normalizedLogs,
-    suggested_exclusions: suggestedExclusions,
-    review_required_logs: normalizedLogs.filter(l => reviewLogIds.has(l.id)),
+    raw_logs:              normalizedLogs,
+    approved_excluded_logs: approvedExcludedLogs,
+    suggested_exclusions:  suggestedExclusions,
+    review_required_logs:  normalizedLogs.filter(l => reviewLogIds.has(l.id)),
     segments,
-    finalMetrics: { ...finalMetrics, lateMinutes, status, anomalyCount: allAnomalies.length, calculation_status: 'provisional', requires_review: requiresReview },
+    finalMetrics: { ...finalMetrics, lateMinutes, status, anomalyCount: allAnomalies.length, calculation_status: calcStatus, requires_review: requiresReview },
     anomalies:   allAnomalies,
     policy,
     calculation_explanation: calculationExplanation,

@@ -89,6 +89,7 @@ const securityGranularRouter     = require('./routes/securityGranular');
 const att2000SyncRouter          = require('./routes/att2000Sync');
 const rolesRouter                = require('./routes/roles');
 const userScopesRouter           = require('./routes/userScopes');
+const manualAdjustmentsRouter    = require('./routes/manualAdjustments');
 
 const swaggerUi    = require('swagger-ui-express');
 const swaggerSpec  = require('./config/swagger');
@@ -166,6 +167,7 @@ app.use('/api/auth/refresh', refreshLimiter);
 app.use('/api/auth',         authLimiter, authRoutes);
 app.use('/api/employees',   employeeRoutes);
 app.use('/api/attendance',  attendanceRoutes);
+app.use('/api/attendance/manual-adjustments', manualAdjustmentsRouter);
 app.use('/api/devices',     deviceRoutes);
 app.use('/api/schedules',   scheduleRoutes);
 app.use('/api/reports',     reportRoutes);
