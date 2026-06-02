@@ -122,7 +122,10 @@ rrhh_get() {
 # Uso: rrhh_post "/api/endpoint" '{"key":"value"}'
 rrhh_post() {
   local path="${1:?rrhh_post requiere un path}"
-  local body="${2:-{}}"
+  # NOTA: ${2:-{}} se parsea como ${2:-{} + '}' literal → agrega '}' extra al body
+  # cuando $2 está definido. Asignación en dos pasos para evitar la ambigüedad.
+  local body="$2"
+  [ -z "$body" ] && body='{}'
   rrhh_login || return 1
 
   local tmp status resp
