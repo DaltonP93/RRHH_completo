@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
-import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle, Activity, Eye, EyeOff, PlusCircle, Trash2, RotateCcw, FileText, ChevronDown, ChevronUp, List, Search, ArrowRight } from 'lucide-react'
+import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle, Activity, Eye, EyeOff, PlusCircle, Trash2, RotateCcw, FileText, ChevronDown, ChevronUp, List, Search, ArrowRight, Lock, Unlock } from 'lucide-react'
 
 interface DiagnosticData {
   ok: boolean
@@ -266,6 +266,8 @@ interface TimelineSummary {
   worked_minutes: number; break_minutes: number; late_minutes: number; status: string
   calculation_status?: 'provisional' | 'approved' | 'adjusted'
   requires_review?: boolean
+  approved_by?: number | null
+  approved_at?: string | null
 }
 interface ManualAdjustment {
   id: number
@@ -443,9 +445,9 @@ function CreateAdjustmentPanel({
 
 // ─── AdjustmentsList ─────────────────────────────────────────────────────────
 function AdjustmentsList({
-  employeeId, date, onAction,
+  employeeId, date, onAction, onPendingCount,
 }: {
-  employeeId: number; date: string; onAction: () => void
+  employeeId: number; date: string; onAction: () => void; onPendingCount?: (n: number) => void
 }) {
   const [items, setItems]   = useState<ManualAdjustment[]>([])
   const [loading, setLoading] = useState(true)
@@ -455,11 +457,13 @@ function AdjustmentsList({
     setLoading(true)
     try {
       const { data } = await api.get(`/api/attendance/manual-adjustments?employee_id=${employeeId}&date=${date}`)
-      setItems(data.adjustments ?? [])
+      const adjs = data.adjustments ?? []
+      setItems(adjs)
+      onPendingCount?.(adjs.filter((a: ManualAdjustment) => a.status === 'pending').length)
     } catch { /* ignorar si tabla no existe */ } finally {
       setLoading(false)
     }
-  }, [employeeId, date])
+  }, [employeeId, date, onPendingCount])
 
   useEffect(() => { load() }, [load])
 
@@ -738,6 +742,95 @@ function EmployeeSearch({ value, onSelect }: { value: string; onSelect: (id: str
   )
 }
 
+// ─── DayApprovalPanel ─────────────────────────────────────────────────────────
+function DayApprovalPanel({
+  employeeId, date, summary, anomalies, pendingAdjustments, onAction,
+}: {
+  employeeId: number; date: string
+  summary: TimelineSummary | null
+  anomalies: TimelineAnomaly[]
+  pendingAdjustments: number
+  onAction: () => void
+}) {
+  const [acting, setActing] = useState(false)
+  const [err, setErr]       = useState<string | null>(null)
+
+  if (!summary) return null
+
+  const unresolvedAnomalies = anomalies.filter(a => !a.resolved).length
+  const isApproved = summary.calculation_status === 'approved'
+  const canApprove = !isApproved && unresolvedAnomalies === 0 && pendingAdjustments === 0
+
+  const act = async (action: 'approve' | 'reopen') => {
+    setActing(true); setErr(null)
+    try {
+      await api.put(`/api/attendance/day-approval/${employeeId}/${date}/${action}`)
+      onAction()
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+        ?? (e as { message?: string })?.message ?? 'Error'
+      setErr(msg)
+    } finally { setActing(false) }
+  }
+
+  return (
+    <div className={`rounded-lg border px-4 py-3 ${
+      isApproved
+        ? 'bg-emerald-50 border-emerald-200'
+        : canApprove
+          ? 'bg-blue-50 border-blue-200'
+          : 'bg-slate-50 border-slate-200'
+    }`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          {isApproved ? (
+            <>
+              <Lock className="w-4 h-4 text-emerald-600" />
+              <div>
+                <p className="text-xs font-semibold text-emerald-700">Jornada aprobada para nómina</p>
+                {summary.approved_at && (
+                  <p className="text-[10px] text-emerald-500 mt-0.5">
+                    {summary.approved_at.replace('T', ' ').slice(0, 16)}
+                  </p>
+                )}
+              </div>
+            </>
+          ) : canApprove ? (
+            <>
+              <CheckCircle className="w-4 h-4 text-blue-600" />
+              <p className="text-xs font-medium text-blue-700">Jornada lista para aprobación — sin anomalías ni ajustes pendientes</p>
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="w-4 h-4 text-slate-400" />
+              <p className="text-xs text-slate-500">
+                No se puede aprobar:
+                {unresolvedAnomalies > 0 && ` ${unresolvedAnomalies} anomalía(s) sin resolver`}
+                {unresolvedAnomalies > 0 && pendingAdjustments > 0 && ','}
+                {pendingAdjustments > 0 && ` ${pendingAdjustments} ajuste(s) pendiente(s)`}
+              </p>
+            </>
+          )}
+        </div>
+        <div className="flex gap-2">
+          {isApproved ? (
+            <button onClick={() => act('reopen')} disabled={acting}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 transition-colors">
+              <Unlock className="w-3 h-3" />{acting ? 'Reabriendo…' : 'Reabrir jornada'}
+            </button>
+          ) : canApprove ? (
+            <button onClick={() => act('approve')} disabled={acting}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+              <Lock className="w-3 h-3" />{acting ? 'Aprobando…' : 'Aprobar para nómina'}
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {err && <p className="text-xs text-red-600 mt-2">{err}</p>}
+    </div>
+  )
+}
+
 function DayTimelinePanel({ defaultDate, defaultEmployeeId, externalEmpId, externalDate }: {
   defaultDate: string; defaultEmployeeId?: string
   externalEmpId?: string; externalDate?: string
@@ -749,6 +842,7 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId, externalEmpId, exter
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
   const [adjKey, setAdjKey]       = useState(0)
+  const [pendingAdj, setPendingAdj] = useState(0)
 
   // Sync external props (set from queue panel)
   useEffect(() => {
@@ -1086,6 +1180,16 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId, externalEmpId, exter
               </div>
             )}
 
+            {/* Aprobación para nómina */}
+            <DayApprovalPanel
+              employeeId={data.employee.id}
+              date={date}
+              summary={data.summary}
+              anomalies={data.anomalies}
+              pendingAdjustments={pendingAdj}
+              onAction={reloadAll}
+            />
+
             {/* Ajustes manuales */}
             <div className="border-t border-slate-100 pt-4 space-y-3">
               <p className="text-xs font-semibold text-slate-700">Revisión y correcciones manuales</p>
@@ -1100,6 +1204,7 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId, externalEmpId, exter
                 employeeId={data.employee.id}
                 date={date}
                 onAction={reloadAll}
+                onPendingCount={setPendingAdj}
               />
             </div>
           </div>
