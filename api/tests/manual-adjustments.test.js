@@ -498,3 +498,48 @@ describe('Invariante de inmutabilidad de attendance_logs', () => {
     expect(processAttendanceDay).not.toHaveBeenCalled();
   });
 });
+
+// ─── work_date Date object handling ─────────────────────────────────────────
+describe('work_date Date object normalization', () => {
+  test('add_punch con work_date como Date object recalcula con string YYYY-MM-DD', async () => {
+    sequelize.query
+      .mockResolvedValueOnce([[{
+        id: 10, status: 'pending', adjustment_type: 'add_punch',
+        employee_id: 927, work_date: new Date('2026-05-28T00:00:00.000Z'), requested_by: 5,
+        new_value: JSON.stringify({ timestamp: '2026-05-28 17:00:00', type: 'out' }),
+      }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT attendance_logs
+      .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE attendance_adjustments
+
+    processAttendanceDay.mockResolvedValueOnce({});
+
+    const handler = getHandler('put', '/:id/approve');
+    const req = makeReq({ params: { id: '10' }, user: { id: 10, role: 'hr' } });
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+
+    expect(processAttendanceDay).toHaveBeenCalledWith({ date: '2026-05-28', employeeId: 927 });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
+  });
+
+  test('recalc failure propagates to response (no longer swallowed)', async () => {
+    sequelize.query
+      .mockResolvedValueOnce([[{
+        id: 11, status: 'pending', adjustment_type: 'add_punch',
+        employee_id: 927, work_date: '2026-05-28', requested_by: 5,
+        new_value: JSON.stringify({ timestamp: '2026-05-28 17:00:00', type: 'out' }),
+      }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT
+      .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE
+
+    processAttendanceDay.mockRejectedValueOnce(new Error('recalc boom'));
+
+    const handler = getHandler('put', '/:id/approve');
+    const req = makeReq({ params: { id: '11' }, user: { id: 10, role: 'hr' } });
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
+  });
+});

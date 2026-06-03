@@ -155,13 +155,17 @@ router.put('/:id/approve', authorize('admin', 'super_admin', 'hr'), async (req, 
       return res.status(403).json({ ok: false, error: 'No puede aprobar su propio ajuste' });
     }
 
+    // Normalizar work_date a string YYYY-MM-DD (MySQL2 puede devolver Date object con timezone shift)
+    const workDate = adj.work_date instanceof Date
+      ? adj.work_date.toISOString().slice(0, 10)
+      : String(adj.work_date).slice(0, 10);
+
     const newValue = typeof adj.new_value === 'string'
       ? (() => { try { return JSON.parse(adj.new_value); } catch { return {}; } })()
       : (adj.new_value || {});
 
     // Ejecutar efecto según tipo
     if (adj.adjustment_type === 'add_punch') {
-      // Crear nuevo registro en attendance_logs (nunca modificar existente)
       await sequelize.query(`
         INSERT INTO attendance_logs (employee_id, timestamp, type, source, device_id)
         VALUES (?, ?, ?, 'manual_adjustment', NULL)
@@ -170,12 +174,11 @@ router.put('/:id/approve', authorize('admin', 'super_admin', 'hr'), async (req, 
     }
 
     if (adj.adjustment_type === 'justify_missing_punch') {
-      // Marcar anomalía como resuelta
       await sequelize.query(`
         UPDATE attendance_anomalies
         SET resolved = 1
         WHERE employee_id = ? AND work_date = ? AND anomaly_type = 'missing_out' AND resolved = 0
-      `, { replacements: [adj.employee_id, adj.work_date] });
+      `, { replacements: [adj.employee_id, workDate] });
     }
 
     // Persistir aprobación
@@ -188,13 +191,9 @@ router.put('/:id/approve', authorize('admin', 'super_admin', 'hr'), async (req, 
     // Recalcular daily_summary respetando los ajustes aprobados
     const recalcTypes = ['add_punch', 'exclude_from_calculation', 'include_in_calculation', 'change_type', 'change_time'];
     if (recalcTypes.includes(adj.adjustment_type)) {
-      try {
-        const { processAttendanceDay } = require('../services/attendanceProcessor');
-        await processAttendanceDay({ date: adj.work_date, employeeId: adj.employee_id });
-        logger.info('recalculated after approval', { employee_id: adj.employee_id, date: adj.work_date });
-      } catch (recalcErr) {
-        logger.warn('recalc after approval failed (non-fatal):', recalcErr.message);
-      }
+      const { processAttendanceDay } = require('../services/attendanceProcessor');
+      await processAttendanceDay({ date: workDate, employeeId: adj.employee_id });
+      logger.info('recalculated after approval', { employee_id: adj.employee_id, date: workDate });
     }
 
     res.json({ ok: true, message: 'Ajuste aprobado' });
