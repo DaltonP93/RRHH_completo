@@ -403,6 +403,55 @@ describe('PUT /:id/reject', () => {
   });
 });
 
+// ─── change_type y change_time ────────────────────────────────────────────────
+describe('change_type y change_time disparan recálculo', () => {
+  test('change_type aprobado no modifica attendance_logs y dispara recálculo', async () => {
+    sequelize.query
+      .mockResolvedValueOnce([[{
+        id: 20, status: 'pending', adjustment_type: 'change_type',
+        employee_id: 927, work_date: '2026-05-28', requested_by: 5,
+        original_log_id: 12973,
+        new_value: JSON.stringify({ type: 'out' }),
+      }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const handler = getHandler('put', '/:id/approve');
+    const req = makeReq({ params: { id: '20' }, user: { id: 10, role: 'hr' } });
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+
+    for (const call of sequelize.query.mock.calls) {
+      const sql = String(call[0]).toUpperCase();
+      expect(sql).not.toMatch(/UPDATE\s+ATTENDANCE_LOGS/);
+    }
+    expect(processAttendanceDay).toHaveBeenCalledWith({ date: '2026-05-28', employeeId: 927 });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
+  });
+
+  test('change_time aprobado no modifica attendance_logs y dispara recálculo', async () => {
+    sequelize.query
+      .mockResolvedValueOnce([[{
+        id: 21, status: 'pending', adjustment_type: 'change_time',
+        employee_id: 927, work_date: '2026-05-28', requested_by: 5,
+        original_log_id: 12973,
+        new_value: JSON.stringify({ timestamp: '2026-05-28 16:00:00', type: 'in' }),
+      }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const handler = getHandler('put', '/:id/approve');
+    const req = makeReq({ params: { id: '21' }, user: { id: 10, role: 'hr' } });
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+
+    for (const call of sequelize.query.mock.calls) {
+      const sql = String(call[0]).toUpperCase();
+      expect(sql).not.toMatch(/UPDATE\s+ATTENDANCE_LOGS/);
+    }
+    expect(processAttendanceDay).toHaveBeenCalledWith({ date: '2026-05-28', employeeId: 927 });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
+  });
+});
+
 // ─── Invariante de inmutabilidad ─────────────────────────────────────────────
 describe('Invariante de inmutabilidad de attendance_logs', () => {
   test('ninguna operación de ajuste emite DELETE en attendance_logs', async () => {
