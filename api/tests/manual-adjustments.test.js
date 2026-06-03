@@ -268,6 +268,42 @@ describe('PUT /:id/approve', () => {
     expect(res.status).not.toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
   });
+
+  test('add_punch aprobado dispara recálculo y cierra missing_out', async () => {
+    // Simula el flujo completo: Cecilia tiene entrada 09:43 sin salida.
+    // Al aprobar add_punch con out 17:00, se inserta log y se recalcula el día.
+    // processAttendanceDay se llama → motor recomputa sin missing_out.
+    sequelize.query
+      .mockResolvedValueOnce([[{
+        id: 5, status: 'pending', adjustment_type: 'add_punch',
+        employee_id: 927, work_date: '2026-05-28', requested_by: 5,
+        new_value: JSON.stringify({ timestamp: '2026-05-28 17:00:00', type: 'out' }),
+      }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]) // INSERT attendance_logs
+      .mockResolvedValueOnce([{ affectedRows: 1 }]); // UPDATE attendance_adjustments
+
+    processAttendanceDay.mockResolvedValueOnce({
+      anomalies: [],
+      summary: { calculation_status: 'adjusted', requires_review: false },
+    });
+
+    const handler = getHandler('put', '/:id/approve');
+    const req = makeReq({ params: { id: '5' }, user: { id: 10, role: 'hr' } });
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+
+    // El nuevo log insertado en attendance_logs con source = 'manual_adjustment'
+    const insertCall = sequelize.query.mock.calls[1];
+    expect(insertCall[0]).toMatch(/INSERT INTO attendance_logs/);
+    expect(insertCall[0]).toMatch(/manual_adjustment/); // literal en el SQL
+    expect(insertCall[1].replacements).toContain('2026-05-28 17:00:00');
+    expect(insertCall[1].replacements).toContain('out');
+
+    // El recálculo fue llamado con el empleado y fecha correctos
+    expect(processAttendanceDay).toHaveBeenCalledWith({ date: '2026-05-28', employeeId: 927 });
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
+  });
 });
 
 // ─── PUT /:id/reject ──────────────────────────────────────────────────────────

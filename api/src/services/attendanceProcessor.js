@@ -511,12 +511,10 @@ async function processAttendanceDay({ date, employeeId }) {
       SELECT adjustment_type, original_log_id
       FROM attendance_adjustments
       WHERE employee_id = ? AND work_date = ? AND status = 'approved'
-        AND adjustment_type IN ('exclude_from_calculation','include_in_calculation')
-        AND original_log_id IS NOT NULL
     `, { replacements: [employeeId, date] });
     for (const a of adjRows) {
-      if (a.adjustment_type === 'exclude_from_calculation') approvedExcludeIds.add(a.original_log_id);
-      if (a.adjustment_type === 'include_in_calculation')  approvedIncludeIds.add(a.original_log_id);
+      if (a.adjustment_type === 'exclude_from_calculation' && a.original_log_id) approvedExcludeIds.add(a.original_log_id);
+      if (a.adjustment_type === 'include_in_calculation' && a.original_log_id)   approvedIncludeIds.add(a.original_log_id);
     }
     // include_in_calculation cancela un exclude previo
     for (const id of approvedIncludeIds) approvedExcludeIds.delete(id);
