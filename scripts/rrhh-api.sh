@@ -167,6 +167,96 @@ rrhh_post() {
   printf '%s\n' "$resp"
 }
 
-echo "[rrhh] Funciones cargadas: rrhh_login, rrhh_get, rrhh_post"
+# ─── rrhh_put ─────────────────────────────────────────────────────────────────
+# Hace PUT autenticado a $BASE_URL$1 con body JSON $2 (opcional).
+# Si recibe 401, renueva token automáticamente y reintenta una vez.
+#
+# Uso:
+#   rrhh_put "/api/attendance/manual-adjustments/5/approve"
+#   rrhh_put "/api/attendance/manual-adjustments/5/reject" '{"reason":"motivo"}'
+rrhh_put() {
+  local path="${1:?rrhh_put requiere un path}"
+  local body="$2"
+  [ -z "$body" ] && body='{}'
+  rrhh_login || return 1
+
+  local tmp status resp
+  tmp=$(mktemp)
+
+  status=$(printf '%s' "$body" | curl -s --connect-timeout 10 --max-time 30 \
+    -o "$tmp" -w "%{http_code}" \
+    -X PUT \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -H "Origin: ${ORIGIN}" \
+    --data-binary @- \
+    "${BASE_URL}${path}" 2>/dev/null || echo "000")
+
+  resp=$(cat "$tmp")
+  rm -f "$tmp"
+
+  # 401 → renovar token y reintentar una vez
+  if [ "$status" = "401" ]; then
+    echo "[rrhh] 401 recibido — renovando token y reintentando..." >&2
+    _rrhh_force_relogin || return 1
+    tmp=$(mktemp)
+    status=$(printf '%s' "$body" | curl -s --connect-timeout 10 --max-time 30 \
+      -o "$tmp" -w "%{http_code}" \
+      -X PUT \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      -H "Origin: ${ORIGIN}" \
+      --data-binary @- \
+      "${BASE_URL}${path}" 2>/dev/null || echo "000")
+    resp=$(cat "$tmp")
+    rm -f "$tmp"
+  fi
+
+  echo "[rrhh] PUT ${path} → HTTP ${status}"
+  printf '%s\n' "$resp"
+}
+
+# ─── rrhh_delete ──────────────────────────────────────────────────────────────
+# Hace DELETE autenticado a $BASE_URL$1.
+# Si recibe 401, renueva token automáticamente y reintenta una vez.
+#
+# Uso: rrhh_delete "/api/resource/42"
+rrhh_delete() {
+  local path="${1:?rrhh_delete requiere un path}"
+  rrhh_login || return 1
+
+  local tmp status resp
+  tmp=$(mktemp)
+
+  status=$(curl -s --connect-timeout 10 --max-time 30 \
+    -o "$tmp" -w "%{http_code}" \
+    -X DELETE \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Origin: ${ORIGIN}" \
+    "${BASE_URL}${path}" 2>/dev/null || echo "000")
+
+  resp=$(cat "$tmp")
+  rm -f "$tmp"
+
+  # 401 → renovar token y reintentar una vez
+  if [ "$status" = "401" ]; then
+    echo "[rrhh] 401 recibido — renovando token y reintentando..." >&2
+    _rrhh_force_relogin || return 1
+    tmp=$(mktemp)
+    status=$(curl -s --connect-timeout 10 --max-time 30 \
+      -o "$tmp" -w "%{http_code}" \
+      -X DELETE \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -H "Origin: ${ORIGIN}" \
+      "${BASE_URL}${path}" 2>/dev/null || echo "000")
+    resp=$(cat "$tmp")
+    rm -f "$tmp"
+  fi
+
+  echo "[rrhh] DELETE ${path} → HTTP ${status}"
+  printf '%s\n' "$resp"
+}
+
+echo "[rrhh] Funciones cargadas: rrhh_login, rrhh_get, rrhh_post, rrhh_put, rrhh_delete"
 echo "[rrhh] BASE_URL=${BASE_URL}  RRHH_USER=${RRHH_USER}"
 echo "[rrhh] Ejecutar 'rrhh_login' para autenticarse."
