@@ -69,9 +69,18 @@ function getHandler(method, path) {
 
 // ─── GET /  ───────────────────────────────────────────────────────────────────
 describe('GET / — listar ajustes', () => {
-  test('400 si faltan date o employee_id', async () => {
+  test('400 si falta date (siempre requerido)', async () => {
     const handler = getHandler('get', '/');
-    const req = makeReq({ query: { date: '2026-05-28' } });
+    const req = makeReq({ query: { employee_id: '927' } });
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
+  });
+
+  test('400 si falta employee_id para rol no elevado (viewer)', async () => {
+    const handler = getHandler('get', '/');
+    const req = makeReq({ query: { date: '2026-05-28' }, user: { id: 10, role: 'viewer' } });
     const res = makeRes();
     await handler(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(400);

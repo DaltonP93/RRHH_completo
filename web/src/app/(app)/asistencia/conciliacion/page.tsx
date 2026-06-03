@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
-import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle, Activity, Eye, EyeOff, PlusCircle, Trash2, RotateCcw, FileText, ChevronDown, ChevronUp } from 'lucide-react'
+import { AlertTriangle, CheckCircle, RefreshCw, Clock, Database, Wifi, WifiOff, Users, Download, Play, XCircle, Activity, Eye, EyeOff, PlusCircle, Trash2, RotateCcw, FileText, ChevronDown, ChevronUp, List, Search, ArrowRight } from 'lucide-react'
 
 interface DiagnosticData {
   ok: boolean
@@ -549,13 +549,214 @@ function localOrRaw(local: string | null | undefined, raw: string | null | undef
   return local ?? raw ?? null
 }
 
-function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: string; defaultEmployeeId?: string }) {
-  const [date, setDate]           = useState(defaultDate)
-  const [empId, setEmpId]         = useState(defaultEmployeeId ?? '')
+// ─── ReviewQueuePanel ─────────────────────────────────────────────────────────
+interface ReviewEmployee {
+  employee_id: number; full_name: string; department: string
+  calculation_status: string; requires_review: number
+  worked_minutes: number | null; day_status: string
+  pending_adjustments: number; anomaly_types: string | null
+}
+
+const ANOMALY_COLOR: Record<string, string> = {
+  missing_out:      'bg-red-100 text-red-700',
+  missing_in:       'bg-red-100 text-red-700',
+  duplicate_nearby: 'bg-orange-100 text-orange-700',
+  out_before_in:    'bg-orange-100 text-orange-700',
+  short_shift:      'bg-amber-100 text-amber-700',
+}
+
+function ReviewQueuePanel({ date, onSelect }: { date: string; onSelect: (empId: number, empDate: string) => void }) {
+  const [rows, setRows]       = useState<ReviewEmployee[]>([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr]         = useState<string | null>(null)
+  const [filter, setFilter]   = useState('')
+
+  const load = useCallback(async (d: string) => {
+    setLoading(true); setErr(null)
+    try {
+      const { data } = await api.get(`/api/attendance/review-queue?date=${d}`)
+      setRows(data.employees ?? [])
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+        ?? (e as { message?: string })?.message ?? 'Error cargando cola'
+      setErr(msg)
+    } finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { if (date) load(date) }, [date, load])
+
+  const filtered = filter
+    ? rows.filter(r => r.full_name.toLowerCase().includes(filter.toLowerCase()) || r.department.toLowerCase().includes(filter.toLowerCase()))
+    : rows
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={filter} onChange={e => setFilter(e.target.value)}
+            placeholder="Filtrar por nombre o departamento…"
+            className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg w-64 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          />
+        </div>
+        <button onClick={() => load(date)} disabled={loading}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">
+          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+          {loading ? 'Cargando…' : 'Actualizar'}
+        </button>
+        {rows.length > 0 && (
+          <span className="text-xs text-slate-500">{filtered.length} empleado{filtered.length !== 1 ? 's' : ''} con revisión pendiente</span>
+        )}
+      </div>
+
+      {err && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+          <XCircle className="w-3.5 h-3.5 shrink-0" />{err}
+        </div>
+      )}
+
+      {!loading && !err && rows.length === 0 && (
+        <div className="flex items-center gap-2 px-4 py-6 bg-emerald-50 border border-emerald-100 rounded-lg text-sm text-emerald-700">
+          <CheckCircle className="w-4 h-4 shrink-0" />
+          Sin empleados con revisión pendiente para esta fecha.
+        </div>
+      )}
+
+      {filtered.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="text-left px-3 py-2 text-slate-500 font-medium">Empleado</th>
+                <th className="text-left px-3 py-2 text-slate-500 font-medium">Departamento</th>
+                <th className="text-left px-3 py-2 text-slate-500 font-medium">Estado</th>
+                <th className="text-left px-3 py-2 text-slate-500 font-medium">Trabajado</th>
+                <th className="text-left px-3 py-2 text-slate-500 font-medium">Anomalías</th>
+                <th className="text-left px-3 py-2 text-slate-500 font-medium">Ajustes pend.</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtered.map(r => (
+                <tr key={r.employee_id}
+                    className="hover:bg-slate-50 cursor-pointer"
+                    onClick={() => onSelect(r.employee_id, date)}>
+                  <td className="px-3 py-2">
+                    <span className="font-medium text-slate-900">{r.full_name}</span>
+                    <span className="ml-1.5 text-slate-400">#{r.employee_id}</span>
+                  </td>
+                  <td className="px-3 py-2 text-slate-500">{r.department}</td>
+                  <td className="px-3 py-2">
+                    <span className={`px-1.5 py-0.5 rounded font-medium ${CALC_STATUS_COLOR[r.calculation_status] ?? 'bg-gray-100 text-gray-600 border-gray-200'} border`}>
+                      {CALC_STATUS_LABEL[r.calculation_status] ?? r.calculation_status}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-slate-700">{r.worked_minutes ? minsToHM(r.worked_minutes) : '—'}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {(r.anomaly_types ?? '').split(',').filter(Boolean).map(a => (
+                        <span key={a} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${ANOMALY_COLOR[a] ?? 'bg-gray-100 text-gray-600'}`}>{a}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.pending_adjustments > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-medium">{r.pending_adjustments} pend.</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── EmployeeSearch ───────────────────────────────────────────────────────────
+function EmployeeSearch({ value, onSelect }: { value: string; onSelect: (id: string, name: string) => void }) {
+  const [q, setQ]             = useState('')
+  const [results, setResults] = useState<Array<{ id: number; full_name: string; code: string }>>([])
+  const [open, setOpen]       = useState(false)
+  const [loading, setLoading] = useState(false)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const search = useCallback(async (term: string) => {
+    if (term.length < 2) { setResults([]); return }
+    setLoading(true)
+    try {
+      const { data } = await api.get(`/api/employees?q=${encodeURIComponent(term)}&limit=10`)
+      setResults(data.employees ?? data ?? [])
+    } catch { setResults([]) } finally { setLoading(false) }
+  }, [])
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value; setQ(v); setOpen(true)
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => search(v), 300)
+  }
+
+  const pick = (emp: { id: number; full_name: string; code: string }) => {
+    setQ(emp.full_name); setOpen(false)
+    onSelect(String(emp.id), emp.full_name)
+  }
+
+  const currentDisplay = value ? (q || `ID ${value}`) : q
+
+  return (
+    <div className="relative">
+      <label className="block text-xs text-gray-500 mb-1">Empleado</label>
+      <div className="relative">
+        <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <input
+          value={currentDisplay}
+          onChange={handleChange}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Buscar por nombre o ID…"
+          className="pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm w-52 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+        {loading && <RefreshCw className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 animate-spin" />}
+      </div>
+      {open && results.length > 0 && (
+        <div className="absolute z-50 top-full mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+          {results.map(emp => (
+            <button key={emp.id} onMouseDown={() => pick(emp)}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50 last:border-0">
+              <span className="font-medium text-slate-900">{emp.full_name}</span>
+              <span className="text-slate-400 ml-auto">#{emp.id}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DayTimelinePanel({ defaultDate, defaultEmployeeId, externalEmpId, externalDate }: {
+  defaultDate: string; defaultEmployeeId?: string
+  externalEmpId?: string; externalDate?: string
+}) {
+  const [date, setDate]           = useState(externalDate ?? defaultDate)
+  const [empId, setEmpId]         = useState(externalEmpId ?? defaultEmployeeId ?? '')
+  const [empName, setEmpName]     = useState('')
   const [data, setData]           = useState<TimelineData | null>(null)
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
   const [adjKey, setAdjKey]       = useState(0)
+
+  // Sync external props (set from queue panel)
+  useEffect(() => {
+    if (externalEmpId && externalEmpId !== empId) { setEmpId(externalEmpId); setEmpName('') }
+  }, [externalEmpId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (externalDate && externalDate !== date) setDate(externalDate)
+  }, [externalDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
     if (!empId) return
@@ -572,6 +773,11 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
     }
   }, [date, empId])
 
+  // Auto-load when external selection arrives
+  useEffect(() => {
+    if (externalEmpId && externalDate) load()
+  }, [externalEmpId, externalDate]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const reloadAll = useCallback(() => { setAdjKey(k => k + 1); load() }, [load])
 
   return (
@@ -581,17 +787,23 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
       </div>
       <div className="p-4 space-y-4">
         {/* Controles */}
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 items-end">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Fecha</label>
             <input type="date" value={date} onChange={e => setDate(e.target.value)}
               className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">ID Empleado</label>
-            <input type="number" placeholder="ej: 11" value={empId} onChange={e => setEmpId(e.target.value)}
-              className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-          </div>
+          <EmployeeSearch
+            value={empId}
+            onSelect={(id, name) => { setEmpId(id); setEmpName(name) }}
+          />
+          {empId && !empName && (
+            <div className="flex flex-col justify-end">
+              <label className="block text-xs text-gray-500 mb-1">ID manual</label>
+              <input type="number" placeholder="ej: 11" value={empId} onChange={e => setEmpId(e.target.value)}
+                className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+          )}
           <div className="flex items-end">
             <button onClick={() => load()} disabled={loading || !empId}
               className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors">
@@ -898,12 +1110,17 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
 }
 
 // ─── Main page ─────────────────────────────────────────────────────────────────
+type Tab = 'queue' | 'jornada' | 'diagnostico'
+
 export default function ConciliacionPage() {
   const today = new Date().toISOString().split('T')[0]
-  const [date, setDate] = useState(today)
-  const [data, setData] = useState<DiagnosticData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [tab, setTab]             = useState<Tab>('queue')
+  const [date, setDate]           = useState(today)
+  const [queueEmpId, setQueueEmpId] = useState<string>('')
+  const [queueDate, setQueueDate]   = useState<string>('')
+  const [data, setData]           = useState<DiagnosticData | null>(null)
+  const [loading, setLoading]     = useState(false)
+  const [error, setError]         = useState<string | null>(null)
 
   const load = useCallback(async (d: string) => {
     setLoading(true)
@@ -920,7 +1137,19 @@ export default function ConciliacionPage() {
     }
   }, [])
 
-  useEffect(() => { load(date) }, [date, load])
+  useEffect(() => { if (tab === 'diagnostico') load(date) }, [date, tab, load])
+
+  const handleQueueSelect = (empId: number, empDate: string) => {
+    setQueueEmpId(String(empId))
+    setQueueDate(empDate)
+    setTab('jornada')
+  }
+
+  const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: 'queue',      label: 'Cola de revisión', icon: <List className="w-3.5 h-3.5" /> },
+    { id: 'jornada',    label: 'Investigar jornada', icon: <Activity className="w-3.5 h-3.5" /> },
+    { id: 'diagnostico',label: 'Diagnóstico técnico', icon: <Database className="w-3.5 h-3.5" /> },
+  ]
 
   return (
     <div className="p-4 space-y-4 max-w-7xl mx-auto">
@@ -928,7 +1157,7 @@ export default function ConciliacionPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-bold text-slate-900">Conciliación de Marcaciones</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Diagnóstico de la cadena att2000 → logs → daily_summary</p>
+          <p className="text-sm text-gray-500 mt-0.5">Revisión y corrección de jornadas · att2000 → logs → daily_summary</p>
         </div>
         <div className="flex items-center gap-3">
           <input
@@ -936,50 +1165,90 @@ export default function ConciliacionPage() {
             onChange={e => setDate(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
-          <button
-            onClick={() => load(date)} disabled={loading}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Cargando…' : 'Actualizar'}
-          </button>
         </div>
       </div>
 
-      {/* Error */}
-      {error && (
-        <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          {error}
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200">
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              tab === t.id
+                ? 'border-emerald-600 text-emerald-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}>
+            {t.icon}{t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ─── Tab: Cola de revisión ─── */}
+      {tab === 'queue' && (
+        <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <List className="w-4 h-4 text-slate-400" />
+              Empleados con revisión pendiente
+            </h2>
+            <span className="text-xs text-slate-400">{date}</span>
+          </div>
+          <ReviewQueuePanel date={date} onSelect={handleQueueSelect} />
         </div>
       )}
 
-      {/* Import/recalc panel — always visible */}
-      <ImportPanel onDone={() => load(date)} />
+      {/* ─── Tab: Investigar jornada ─── */}
+      {tab === 'jornada' && (
+        <DayTimelinePanel
+          defaultDate={date}
+          externalEmpId={queueEmpId || undefined}
+          externalDate={queueDate || undefined}
+        />
+      )}
 
-      {/* Warnings */}
-      {data && data.warnings.length > 0 && (
-        <div className="space-y-2">
-          {data.warnings.map((w, i) => (
-            <div key={i} className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
-              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-              {w}
+      {/* ─── Tab: Diagnóstico técnico ─── */}
+      {tab === 'diagnostico' && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button onClick={() => load(date)} disabled={loading}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              {loading ? 'Cargando…' : 'Actualizar diagnóstico'}
+            </button>
+          </div>
+
+          {/* Import/recalc panel */}
+          <ImportPanel onDone={() => load(date)} />
+
+          {error && (
+            <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              {error}
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {/* Lag banner */}
-      {data && data.sync_lag_hours !== null && (
-        <div className={`flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium ${data.sync_lag_hours > 24 ? 'bg-red-100 text-red-800' : data.sync_lag_hours > 4 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
-          <Clock className="w-4 h-4" />
-          Último evento raw hace <strong className="mx-1">{data.sync_lag_hours}h</strong>
-          {data.last_raw_event_at && <span className="opacity-70">({fmtTs(data.last_raw_event_at)})</span>}
-        </div>
-      )}
+          {/* Warnings */}
+          {data && data.warnings.length > 0 && (
+            <div className="space-y-2">
+              {data.warnings.map((w, i) => (
+                <div key={i} className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  {w}
+                </div>
+              ))}
+            </div>
+          )}
 
-      {data && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          {/* Lag banner */}
+          {data && data.sync_lag_hours !== null && (
+            <div className={`flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium ${data.sync_lag_hours > 24 ? 'bg-red-100 text-red-800' : data.sync_lag_hours > 4 ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
+              <Clock className="w-4 h-4" />
+              Último evento raw hace <strong className="mx-1">{data.sync_lag_hours}h</strong>
+              {data.last_raw_event_at && <span className="opacity-70">({fmtTs(data.last_raw_event_at)})</span>}
+            </div>
+          )}
+
+          {data && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           {/* att2000 */}
           <Card title="att2000 SQL Server">
             <div className="space-y-3">
@@ -1221,26 +1490,25 @@ export default function ConciliacionPage() {
         </Card>
       )}
 
-      {/* Línea de tiempo de jornada */}
-      <DayTimelinePanel defaultDate={date} />
-
-      {/* Links rápidos */}
-      <Card title="Navegación rápida">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <a href="/sync/att2000" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-            <Database className="w-4 h-4 text-gray-400" />
-            <span>Configuración att2000</span>
-          </a>
-          <a href="/asistencia/relojes/diagnostico" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-            <Wifi className="w-4 h-4 text-gray-400" />
-            <span>Diagnóstico de relojes</span>
-          </a>
-          <a href="/asistencia" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-            <Download className="w-4 h-4 text-gray-400" />
-            <span>Dashboard asistencia</span>
-          </a>
+          {/* Links rápidos */}
+          <Card title="Navegación rápida">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <a href="/sync/att2000" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <Database className="w-4 h-4 text-gray-400" />
+                <span>Configuración att2000</span>
+              </a>
+              <a href="/asistencia/relojes/diagnostico" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <Wifi className="w-4 h-4 text-gray-400" />
+                <span>Diagnóstico de relojes</span>
+              </a>
+              <a href="/asistencia" className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <Download className="w-4 h-4 text-gray-400" />
+                <span>Dashboard asistencia</span>
+              </a>
+            </div>
+          </Card>
         </div>
-      </Card>
+      )}
     </div>
   )
 }

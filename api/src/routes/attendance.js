@@ -1056,4 +1056,48 @@ function _auditTzInfo() {
   };
 }
 
+// ─── GET /api/attendance/review-queue ────────────────────────────────────────
+// Devuelve empleados que requieren revisión para una fecha dada:
+// - daily_summary.requires_review = 1, O
+// - tienen ajustes pendientes para ese día
+router.get('/review-queue', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
+  const { date } = req.query;
+  if (!date) {
+    return res.status(400).json({ ok: false, error: 'El parámetro date (YYYY-MM-DD) es requerido' });
+  }
+  try {
+    const { sequelize } = require('../config/database');
+    const sql = `
+      SELECT
+        e.id AS employee_id,
+        CONCAT(e.first_name,' ',e.last_name) AS full_name,
+        COALESCE(d.name, 'Sin departamento') AS department,
+        ds.calculation_status,
+        ds.requires_review,
+        ds.worked_minutes,
+        ds.status AS day_status,
+        COUNT(DISTINCT CASE WHEN aa.status = 'pending' THEN aa.id END) AS pending_adjustments,
+        GROUP_CONCAT(DISTINCT an.anomaly_type ORDER BY an.anomaly_type SEPARATOR ',') AS anomaly_types
+      FROM employees e
+      JOIN daily_summary ds ON ds.employee_id = e.id AND ds.date = ?
+      LEFT JOIN departments d ON d.id = e.department_id
+      LEFT JOIN attendance_anomalies an ON an.employee_id = e.id AND an.work_date = ? AND an.resolved = 0
+      LEFT JOIN attendance_adjustments aa ON aa.employee_id = e.id AND aa.work_date = ?
+      WHERE ds.requires_review = 1
+         OR EXISTS (
+           SELECT 1 FROM attendance_adjustments aa2
+           WHERE aa2.employee_id = e.id AND aa2.work_date = ? AND aa2.status = 'pending'
+         )
+      GROUP BY e.id, e.full_name, d.name, ds.calculation_status, ds.requires_review, ds.worked_minutes, ds.status
+      ORDER BY ds.requires_review DESC, e.full_name
+    `;
+    const [rows] = await sequelize.query(sql, { replacements: [date, date, date, date] });
+    res.json({ ok: true, date, total: rows.length, employees: rows });
+  } catch (err) {
+    const logger = require('../config/logger');
+    logger.error('review-queue GET:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;
