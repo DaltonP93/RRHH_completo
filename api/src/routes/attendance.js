@@ -835,7 +835,8 @@ router.post('/process-day-v2', authorize('admin', 'super_admin'), async (req, re
       res.json({ ok: true, date, employee_id: +employee_id, ...result.finalMetrics, policy: result.policy });
     } else {
       const result = await bulkProcessDay(date);
-      res.json({ ok: true, ...result });
+      const hasErrors = result.errors > 0;
+      res.json({ ok: !hasErrors, ...result });
     }
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
