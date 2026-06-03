@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS attendance_logs (
   device_id    INT NULL,
   `timestamp`  DATETIME NOT NULL,
   type         ENUM('in','out','break_start','break_end','unknown') DEFAULT 'unknown',
-  source       ENUM('device','mobile','manual') DEFAULT 'device',
+  source       ENUM('device','mobile','manual','manual_adjustment') DEFAULT 'device',
   latitude     DECIMAL(10,8) NULL,   -- marcaje desde app móvil
   longitude    DECIMAL(11,8) NULL,
   accuracy     FLOAT NULL,           -- precisión GPS en metros
