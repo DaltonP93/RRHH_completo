@@ -111,8 +111,9 @@ router.post('/', authorize(...REVIEWER_ROLES), async (req, res) => {
       req.user.id,
     ]});
 
-    logger.info('manual-adjustment created', { id: result.insertId, employee_id, work_date, adjustment_type });
-    res.status(201).json({ ok: true, id: result.insertId });
+    const insertId = typeof result === 'number' ? result : result.insertId;
+    logger.info('manual-adjustment created', { id: insertId, employee_id, work_date, adjustment_type });
+    res.status(201).json({ ok: true, id: insertId });
   } catch (err) {
     logger.error('manual-adjustments POST:', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -122,6 +123,9 @@ router.post('/', authorize(...REVIEWER_ROLES), async (req, res) => {
 // ─── PUT /api/attendance/manual-adjustments/:id/approve ───────────────────────
 router.put('/:id/approve', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
   const { id } = req.params;
+  if (!id || isNaN(+id) || +id <= 0) {
+    return res.status(400).json({ ok: false, error: 'id debe ser un entero positivo' });
+  }
   try {
     const [[adj]] = await sequelize.query(
       'SELECT * FROM attendance_adjustments WHERE id = ?',
@@ -189,6 +193,9 @@ router.put('/:id/approve', authorize('admin', 'super_admin', 'hr'), async (req, 
 // ─── PUT /api/attendance/manual-adjustments/:id/reject ────────────────────────
 router.put('/:id/reject', authorize('admin', 'super_admin', 'hr'), async (req, res) => {
   const { id } = req.params;
+  if (!id || isNaN(+id) || +id <= 0) {
+    return res.status(400).json({ ok: false, error: 'id debe ser un entero positivo' });
+  }
   const { reason } = req.body || {};
   try {
     const [[adj]] = await sequelize.query(
