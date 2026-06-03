@@ -69,9 +69,18 @@ function getHandler(method, path) {
 
 // ─── GET /  ───────────────────────────────────────────────────────────────────
 describe('GET / — listar ajustes', () => {
-  test('400 si faltan date o employee_id', async () => {
+  test('400 si falta date (siempre requerido)', async () => {
     const handler = getHandler('get', '/');
-    const req = makeReq({ query: { date: '2026-05-28' } });
+    const req = makeReq({ query: { employee_id: '927' } });
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
+  });
+
+  test('400 si falta employee_id para rol no elevado (viewer)', async () => {
+    const handler = getHandler('get', '/');
+    const req = makeReq({ query: { date: '2026-05-28' }, user: { id: 10, role: 'viewer' } });
     const res = makeRes();
     await handler(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(400);
@@ -148,7 +157,7 @@ describe('POST / — crear ajuste', () => {
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
-  test('201 con datos válidos — no modifica attendance_logs', async () => {
+  test('201 con datos válidos — no modifica attendance_logs (Sequelize devuelve OkPacket)', async () => {
     sequelize.query.mockResolvedValueOnce([{ insertId: 42 }]);
     const handler = getHandler('post', '/');
     const req = makeReq({ body: {
@@ -166,10 +175,34 @@ describe('POST / — crear ajuste', () => {
     expect(insertCall[0]).toMatch(/INSERT INTO attendance_adjustments/);
     expect(insertCall[0]).not.toMatch(/attendance_logs/);
   });
+
+  test('201 con datos válidos — Sequelize devuelve insertId como número', async () => {
+    // Sequelize a veces devuelve el insertId directamente como número en lugar de OkPacket
+    sequelize.query.mockResolvedValueOnce([99]);
+    const handler = getHandler('post', '/');
+    const req = makeReq({ body: {
+      employee_id: 927, work_date: '2026-05-28',
+      adjustment_type: 'exclude_from_calculation',
+      original_log_id: 12973,
+    }});
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ ok: true, id: 99 }));
+  });
 });
 
 // ─── PUT /:id/approve ─────────────────────────────────────────────────────────
 describe('PUT /:id/approve', () => {
+  test('400 si id no es entero válido', async () => {
+    const handler = getHandler('put', '/:id/approve');
+    const req = makeReq({ params: { id: '{id}' }, user: { id: 10, role: 'hr' } });
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(sequelize.query).not.toHaveBeenCalled();
+  });
+
   test('404 si ajuste no existe', async () => {
     sequelize.query.mockResolvedValueOnce([[]]); // empty result
     const handler = getHandler('put', '/:id/approve');
@@ -308,6 +341,15 @@ describe('PUT /:id/approve', () => {
 
 // ─── PUT /:id/reject ──────────────────────────────────────────────────────────
 describe('PUT /:id/reject', () => {
+  test('400 si id no es entero válido', async () => {
+    const handler = getHandler('put', '/:id/reject');
+    const req = makeReq({ params: { id: 'abc' } });
+    const res = makeRes();
+    await handler(req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(sequelize.query).not.toHaveBeenCalled();
+  });
+
   test('404 si ajuste no existe', async () => {
     sequelize.query.mockResolvedValueOnce([[]]);
     const handler = getHandler('put', '/:id/reject');
