@@ -763,6 +763,11 @@ function DayTimelinePanel({ defaultDate, defaultEmployeeId }: { defaultDate: str
                                 <AlertTriangle className="w-2.5 h-2.5" /> revisar
                               </span>
                             )}
+                            {log.source === 'manual_adjustment' && (
+                              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 text-[10px] font-medium border border-violet-200">
+                                <PlusCircle className="w-2.5 h-2.5" /> ajuste manual
+                              </span>
+                            )}
                           </div>
                         </td>
                       </tr>
