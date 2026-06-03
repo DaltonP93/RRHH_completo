@@ -508,13 +508,26 @@ async function processAttendanceDay({ date, employeeId }) {
   let hasApprovedAdjustments = false;
   try {
     const [adjRows] = await sequelize.query(`
-      SELECT adjustment_type, original_log_id
+      SELECT adjustment_type, original_log_id, new_value
       FROM attendance_adjustments
       WHERE employee_id = ? AND work_date = ? AND status = 'approved'
     `, { replacements: [employeeId, date] });
+
+    // Maps para overrides aprobados: log_id → nuevo valor
+    const approvedTypeOverrides = new Map();  // change_type:  log_id → 'in'|'out'
+    const approvedTimeOverrides = new Map();  // change_time:  log_id → 'YYYY-MM-DD HH:mm:ss'
+
     for (const a of adjRows) {
       if (a.adjustment_type === 'exclude_from_calculation' && a.original_log_id) approvedExcludeIds.add(a.original_log_id);
       if (a.adjustment_type === 'include_in_calculation' && a.original_log_id)   approvedIncludeIds.add(a.original_log_id);
+      if (a.adjustment_type === 'change_type' && a.original_log_id) {
+        const nv = typeof a.new_value === 'string' ? (() => { try { return JSON.parse(a.new_value); } catch { return {}; } })() : (a.new_value || {});
+        if (nv.type) approvedTypeOverrides.set(a.original_log_id, nv.type);
+      }
+      if (a.adjustment_type === 'change_time' && a.original_log_id) {
+        const nv = typeof a.new_value === 'string' ? (() => { try { return JSON.parse(a.new_value); } catch { return {}; } })() : (a.new_value || {});
+        if (nv.timestamp) approvedTimeOverrides.set(a.original_log_id, nv.timestamp);
+      }
     }
     // include_in_calculation cancela un exclude previo
     for (const id of approvedIncludeIds) approvedExcludeIds.delete(id);
@@ -530,9 +543,22 @@ async function processAttendanceDay({ date, employeeId }) {
   const approvedExcludedLogs = approvedExcludeIds.size > 0
     ? normalizedLogs.filter(l => approvedExcludeIds.has(l.id))
     : [];
-  const logsForCalculation = approvedExcludeIds.size > 0
+  let logsForCalculation = approvedExcludeIds.size > 0
     ? normalizedLogs.filter(l => !approvedExcludeIds.has(l.id))
     : normalizedLogs;
+
+  // Aplicar overrides de change_type y change_time sobre copia virtual del log
+  // (attendance_logs permanece inmutable; el override existe solo durante el cálculo)
+  if (approvedTypeOverrides.size > 0 || approvedTimeOverrides.size > 0) {
+    logsForCalculation = logsForCalculation.map(l => {
+      let patched = l;
+      if (approvedTypeOverrides.has(l.id)) patched = { ...patched, type: approvedTypeOverrides.get(l.id) };
+      if (approvedTimeOverrides.has(l.id)) patched = { ...patched, timestamp: approvedTimeOverrides.get(l.id) };
+      return patched;
+    });
+    // Re-sort por timestamp tras posibles cambios de hora
+    logsForCalculation = logsForCalculation.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
 
   const { deduped, suggestedExclusions } = deduplicate(logsForCalculation);
   const typed   = assignTypes(deduped);

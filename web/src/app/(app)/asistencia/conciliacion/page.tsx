@@ -690,7 +690,7 @@ function EmployeeSearch({ value, onSelect }: { value: string; onSelect: (id: str
     if (term.length < 2) { setResults([]); return }
     setLoading(true)
     try {
-      const { data } = await api.get(`/api/employees?q=${encodeURIComponent(term)}&limit=10`)
+      const { data } = await api.get(`/api/employees?search=${encodeURIComponent(term)}&limit=10`)
       setResults(data.employees ?? data ?? [])
     } catch { setResults([]) } finally { setLoading(false) }
   }, [])
