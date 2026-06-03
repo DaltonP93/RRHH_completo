@@ -369,9 +369,14 @@ async function upsertDailySummary({ date, employeeId, finalMetrics, lateMinutes,
     update.push('gross_minutes = VALUES(gross_minutes)');
   }
   if (hasPolicy) {
-    cols.push('policy_id', 'policy_source');
-    vals.push(policy?.id ?? null, policy?.source ?? null);
-    update.push('policy_id = VALUES(policy_id)', 'policy_source = VALUES(policy_source)');
+    cols.push('policy_id');
+    vals.push(policy?.id ?? null);
+    update.push('policy_id = VALUES(policy_id)');
+    if (await _hasColumn('daily_summary', 'policy_source')) {
+      cols.push('policy_source');
+      vals.push(policy?.source ?? null);
+      update.push('policy_source = VALUES(policy_source)');
+    }
   }
   if (await _hasColumn('daily_summary', 'anomaly_count')) {
     cols.push('anomaly_count');
@@ -636,17 +641,34 @@ async function bulkProcessDay(date) {
     { replacements: [date] }
   );
   let processed = 0, errors = 0;
+  const errorSamples = [];
   for (const { employee_id } of empRows) {
     try {
       await processAttendanceDay({ date, employeeId: employee_id });
       processed++;
     } catch (err) {
-      logger.error(`V2 processDay ${date} emp ${employee_id}:`, err.message);
+      logger.error(`V2 processDay ${date} emp ${employee_id}: ${err.message}`, {
+        error_name: err.name,
+        error_code: err.code,
+        errno: err.errno,
+        sqlMessage: err.sqlMessage,
+        sql: err.sql,
+        stack: err.stack,
+      });
       errors++;
+      if (errorSamples.length < 10) {
+        errorSamples.push({
+          employee_id,
+          message: err.message,
+          code: err.code,
+          sqlMessage: err.sqlMessage,
+          sql: err.sql,
+        });
+      }
     }
   }
-  logger.info(`♻️  V2 attendance procesado: ${processed} empleados, ${errors} errores — ${date}`);
-  return { date, processed, errors };
+  logger.info(`V2 attendance procesado: ${processed} empleados, ${errors} errores — ${date}`);
+  return { date, processed, errors, error_samples: errorSamples.length ? errorSamples : undefined };
 }
 
 module.exports = {
