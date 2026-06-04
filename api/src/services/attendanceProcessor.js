@@ -511,16 +511,14 @@ async function processAttendanceDay({ date, employeeId }) {
   let approvedExcludeIds = new Set();
   let approvedIncludeIds = new Set();
   let hasApprovedAdjustments = false;
+  const approvedTypeOverrides = new Map();
+  const approvedTimeOverrides = new Map();
   try {
     const [adjRows] = await sequelize.query(`
       SELECT adjustment_type, original_log_id, new_value
       FROM attendance_adjustments
       WHERE employee_id = ? AND work_date = ? AND status = 'approved'
     `, { replacements: [employeeId, date] });
-
-    // Maps para overrides aprobados: log_id → nuevo valor
-    const approvedTypeOverrides = new Map();  // change_type:  log_id → 'in'|'out'
-    const approvedTimeOverrides = new Map();  // change_time:  log_id → 'YYYY-MM-DD HH:mm:ss'
 
     for (const a of adjRows) {
       if (a.adjustment_type === 'exclude_from_calculation' && a.original_log_id) approvedExcludeIds.add(a.original_log_id);
@@ -534,7 +532,6 @@ async function processAttendanceDay({ date, employeeId }) {
         if (nv.timestamp) approvedTimeOverrides.set(a.original_log_id, nv.timestamp);
       }
     }
-    // include_in_calculation cancela un exclude previo
     for (const id of approvedIncludeIds) approvedExcludeIds.delete(id);
     hasApprovedAdjustments = adjRows.length > 0;
   } catch { /* tabla puede no existir en entornos sin migración 091 */ }
