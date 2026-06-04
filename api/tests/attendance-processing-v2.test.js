@@ -904,3 +904,118 @@ describe('inmutabilidad — attendance_logs no se elimina ni oculta', () => {
     });
   });
 });
+
+// ─── processAttendanceDay integration ────────────────────────────────────────
+describe('processAttendanceDay — approved adjustments scope', () => {
+  const { sequelize } = require('../src/config/database');
+  const { processAttendanceDay, _resetColCache } = require('../src/services/attendanceProcessor');
+
+  beforeEach(() => {
+    sequelize.query.mockReset();
+    _resetColCache();
+  });
+
+  function mockQueriesForCecilia({ adjRows = [] } = {}) {
+    sequelize.query.mockImplementation((sql) => {
+      const s = String(sql).trim();
+      if (s.startsWith('SELECT id, timestamp')) {
+        return Promise.resolve([[
+          { id: 1, timestamp: '2026-05-28 05:35:03', type: 'in', source: 'device', device_id: 1 },
+          { id: 2, timestamp: '2026-05-28 05:35:06', type: 'in', source: 'device', device_id: 1 },
+          { id: 3, timestamp: '2026-05-28 09:13:26', type: 'out', source: 'device', device_id: 1 },
+          { id: 4, timestamp: '2026-05-28 09:43:05', type: 'in', source: 'device', device_id: 1 },
+          { id: 5, timestamp: '2026-05-28 17:00:00', type: 'out', source: 'manual_adjustment', device_id: null },
+        ]]);
+      }
+      if (s.includes('attendance_adjustments')) {
+        return Promise.resolve([adjRows]);
+      }
+      if (s.includes('information_schema.COLUMNS')) {
+        return Promise.resolve([[{ c: 1 }]]);
+      }
+      if (s.includes('information_schema.TABLES')) {
+        return Promise.resolve([[{ ok: 1 }]]);
+      }
+      if (s.includes('attendance_work_policies')) {
+        return Promise.resolve([[]]);
+      }
+      if (s.includes('employees')) {
+        return Promise.resolve([[{ department_id: 1, branch_id: null }]]);
+      }
+      if (s.includes('schedules')) {
+        return Promise.resolve([[null]]);
+      }
+      return Promise.resolve([{ affectedRows: 1 }]);
+    });
+  }
+
+  test('no ReferenceError when attendance_adjustments table missing', async () => {
+    sequelize.query.mockImplementation((sql) => {
+      const s = String(sql).trim();
+      if (s.startsWith('SELECT id, timestamp')) {
+        return Promise.resolve([[
+          { id: 1, timestamp: '2026-05-28 09:00:00', type: 'in', source: 'device', device_id: 1 },
+          { id: 2, timestamp: '2026-05-28 17:00:00', type: 'out', source: 'device', device_id: 1 },
+        ]]);
+      }
+      if (s.includes('attendance_adjustments')) {
+        const err = new Error('Table does not exist');
+        err.original = { errno: 1146 };
+        return Promise.reject(err);
+      }
+      if (s.includes('information_schema')) {
+        return Promise.resolve([[{ c: 1 }]]);
+      }
+      if (s.includes('attendance_work_policies')) {
+        return Promise.resolve([[]]);
+      }
+      if (s.includes('employees')) {
+        return Promise.resolve([[{ department_id: 1, branch_id: null }]]);
+      }
+      if (s.includes('schedules')) {
+        return Promise.resolve([[null]]);
+      }
+      return Promise.resolve([{ affectedRows: 1 }]);
+    });
+
+    const result = await processAttendanceDay({ date: '2026-05-28', employeeId: 927 });
+    expect(result.segments).toHaveLength(1);
+    expect(result.segments[0].segment_type).toBe('work');
+  });
+
+  test('Cecilia: manual_adjustment out closes missing_out', async () => {
+    mockQueriesForCecilia({
+      adjRows: [{ adjustment_type: 'add_punch', original_log_id: null, new_value: '{"timestamp":"2026-05-28 17:00:00","type":"out"}' }],
+    });
+
+    const result = await processAttendanceDay({ date: '2026-05-28', employeeId: 927 });
+
+    const workSegs = result.segments.filter(s => s.segment_type === 'work');
+    expect(workSegs.length).toBe(2);
+    expect(workSegs[0].in_at).toBe('2026-05-28 05:35:03');
+    expect(workSegs[0].out_at).toBe('2026-05-28 09:13:26');
+    expect(workSegs[1].in_at).toBe('2026-05-28 09:43:05');
+    expect(workSegs[1].out_at).toBe('2026-05-28 17:00:00');
+
+    const missingOut = result.anomalies.filter(a => a.anomaly_type === 'missing_out');
+    expect(missingOut).toHaveLength(0);
+
+    expect(result.finalMetrics.lastOut).toBe('2026-05-28 17:00:00');
+    expect(result.finalMetrics.calculation_status).toBe('adjusted');
+    // requires_review=true due to duplicate_nearby (05:35:03 vs 05:35:06, 3s gap)
+    const dupAnomaly = result.anomalies.filter(a => a.anomaly_type === 'duplicate_nearby');
+    expect(dupAnomaly.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('approvedTypeOverrides and approvedTimeOverrides accessible after try/catch', async () => {
+    mockQueriesForCecilia({
+      adjRows: [
+        { adjustment_type: 'change_type', original_log_id: 2, new_value: '{"type":"out"}' },
+      ],
+    });
+
+    const result = await processAttendanceDay({ date: '2026-05-28', employeeId: 927 });
+    expect(result.segments).toBeDefined();
+    expect(result.anomalies).toBeDefined();
+  });
+});
