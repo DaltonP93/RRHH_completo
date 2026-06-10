@@ -95,6 +95,30 @@ describe('PUT /:employee_id/:date/approve', () => {
     }));
   });
 
+  test('el guard de anomalías filtra por tipo bloqueante (advisory no bloquea)', async () => {
+    sequelize.query
+      .mockResolvedValueOnce([[{ id: 1, calculation_status: 'adjusted', requires_review: 0 }]])
+      .mockResolvedValueOnce([[{ cnt: 0 }]]) // sin anomalías bloqueantes (long_shift/duplicate excluidas)
+      .mockResolvedValueOnce([[{ cnt: 0 }]]) // sin ajustes pending
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    const req = makeReq({ params: { employee_id: '927', date: '2026-05-28' } });
+    const res = makeRes();
+    await handler()(req, res, jest.fn());
+
+    // La query de anomalías debe filtrar por anomaly_type bloqueante
+    const anomalyQuery = sequelize.query.mock.calls[1][0];
+    expect(anomalyQuery).toMatch(/anomaly_type\s+IN\s*\(/i);
+    // missing_out debe estar entre los tipos bloqueantes pasados como replacements
+    const anomalyReplacements = sequelize.query.mock.calls[1][1].replacements;
+    expect(anomalyReplacements).toContain('missing_out');
+    expect(anomalyReplacements).not.toContain('long_shift');
+    expect(anomalyReplacements).not.toContain('duplicate_nearby');
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      ok: true,
+      calculation_status: 'approved',
+    }));
+  });
+
   test('422 si hay ajustes pendientes', async () => {
     sequelize.query
       .mockResolvedValueOnce([[{ id: 1, calculation_status: 'adjusted', requires_review: 0 }]])

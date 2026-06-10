@@ -1089,8 +1089,8 @@ router.get('/review-queue', authorize('admin', 'super_admin', 'hr'), async (req,
            SELECT 1 FROM attendance_adjustments aa2
            WHERE aa2.employee_id = e.id AND aa2.work_date = ? AND aa2.status = 'pending'
          )
-      GROUP BY e.id, e.full_name, d.name, ds.calculation_status, ds.requires_review, ds.worked_minutes, ds.status
-      ORDER BY ds.requires_review DESC, e.full_name
+      GROUP BY e.id, e.first_name, e.last_name, d.name, ds.calculation_status, ds.requires_review, ds.worked_minutes, ds.status
+      ORDER BY ds.requires_review DESC, e.first_name, e.last_name
     `;
     const [rows] = await sequelize.query(sql, { replacements: [date, date, date, date] });
     res.json({ ok: true, date, total: rows.length, employees: rows });

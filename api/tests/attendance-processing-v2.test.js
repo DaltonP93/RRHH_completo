@@ -1002,9 +1002,14 @@ describe('processAttendanceDay — approved adjustments scope', () => {
 
     expect(result.finalMetrics.lastOut).toBe('2026-05-28 17:00:00');
     expect(result.finalMetrics.calculation_status).toBe('adjusted');
-    // requires_review=true due to duplicate_nearby (05:35:03 vs 05:35:06, 3s gap)
+    // worked = 218 (seg1) + 437 (seg2) = 655 min; break = gap ~30 min
+    expect(result.finalMetrics.workedMinutes).toBe(655);
+    expect(result.finalMetrics.breakMinutes).toBe(30);
+    // duplicate_nearby (05:35:03 vs 05:35:06, 3s) es severity 'info' → NO bloquea ni requiere revisión
     const dupAnomaly = result.anomalies.filter(a => a.anomaly_type === 'duplicate_nearby');
     expect(dupAnomaly.length).toBeGreaterThanOrEqual(1);
+    expect(dupAnomaly[0].severity).toBe('info');
+    expect(result.finalMetrics.requires_review).toBe(false);
   });
 
   test('approvedTypeOverrides and approvedTimeOverrides accessible after try/catch', async () => {
