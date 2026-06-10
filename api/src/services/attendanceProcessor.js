@@ -27,6 +27,14 @@ const logger        = require('../config/logger');
 const LONG_SHIFT_MINUTES = 600; // > 10h → anomalía long_shift
 const DEDUP_WINDOW_MS    = 60 * 1000;
 
+// Anomalías que impiden un cálculo confiable y por tanto bloquean la nómina
+// y exigen revisión humana. El resto (long_shift, duplicate_nearby) son
+// advisory: informan un patrón notable pero no un error de datos.
+//   - missing_in / missing_out: marcación incompleta → no se pueden calcular horas
+//   - out_before_in: secuencia imposible → tiempo negativo
+//   - no_lunch_break: solo se emite si la política lo exige → violación de política
+const BLOCKING_ANOMALY_TYPES = ['missing_in', 'missing_out', 'out_before_in', 'no_lunch_break'];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Convierte "YYYY-MM-DD HH:mm:ss" → JS Date tratando el valor como UTC.
@@ -314,7 +322,7 @@ function _buildCalculationExplanation(finalMetrics, policy, suggestedExclusions,
   else if (breakSource === 'none')    notes.push('Jornada corrida — sin descuento de descanso.');
   else if (breakSource === 'gap')     notes.push(`Gap entre segmentos usado como descanso: ${breakMinutes} min.`);
   notes.push(`Resultado provisional: gross=${grossMinutes} min, descanso=${breakMinutes} min, trabajado=${workedMinutes} min.`);
-  const hasBlocker = allAnomalies.some(a => ['missing_out','out_before_in','duplicate_nearby'].includes(a.anomaly_type));
+  const hasBlocker = allAnomalies.some(a => BLOCKING_ANOMALY_TYPES.includes(a.anomaly_type));
   notes.push(hasBlocker
     ? 'Estado: provisional — requiere revisión por supervisor/RRHH antes de impactar nómina.'
     : 'Estado: provisional — puede aprobarse sin correcciones.');
@@ -585,9 +593,10 @@ async function processAttendanceDay({ date, employeeId }) {
     });
   }
   const allAnomalies = [...segAnomalies, ...dayAnomalies];
-  const requiresReview = allAnomalies.some(a =>
-    ['duplicate_nearby','missing_out','out_before_in','too_many_punches','manual_review_required'].includes(a.anomaly_type)
-  );
+  // Solo las anomalías bloqueantes (integridad de datos / violación de política)
+  // exigen revisión humana y bloquean nómina. Las advisory (long_shift,
+  // duplicate_nearby) son informativas y no impiden la aprobación.
+  const requiresReview = allAnomalies.some(a => BLOCKING_ANOMALY_TYPES.includes(a.anomaly_type));
 
   // 6. Calcular atraso respecto al horario
   let lateMinutes = 0;
@@ -671,6 +680,7 @@ async function bulkProcessDay(date) {
 module.exports = {
   processAttendanceDay,
   bulkProcessDay,
+  BLOCKING_ANOMALY_TYPES,
   // Expuestos para tests
   deduplicate,
   assignTypes,

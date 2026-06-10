@@ -13,6 +13,7 @@ const router        = require('express').Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const { sequelize } = require('../config/database');
 const logger        = require('../config/logger');
+const { BLOCKING_ANOMALY_TYPES } = require('../services/attendanceProcessor');
 
 router.use(authenticate);
 
@@ -51,15 +52,20 @@ router.put('/:employee_id/:date/approve', authorize(...APPROVER_ROLES), async (r
       return res.status(409).json({ ok: false, error: 'La jornada ya está aprobada para nómina' });
     }
 
-    // 2. Verificar anomalías sin resolver
+    // 2. Verificar anomalías bloqueantes sin resolver.
+    //    Solo los tipos de integridad de datos / violación de política bloquean
+    //    la nómina (BLOCKING_ANOMALY_TYPES). Las advisory (long_shift,
+    //    duplicate_nearby) son informativas y no impiden la aprobación.
+    const blockingPlaceholders = BLOCKING_ANOMALY_TYPES.map(() => '?').join(',');
     const [[anomalyCount]] = await sequelize.query(`
       SELECT COUNT(*) AS cnt FROM attendance_anomalies
       WHERE employee_id = ? AND work_date = ? AND resolved = 0
-    `, { replacements: [employeeId, date] });
+        AND anomaly_type IN (${blockingPlaceholders})
+    `, { replacements: [employeeId, date, ...BLOCKING_ANOMALY_TYPES] });
     if (anomalyCount.cnt > 0) {
       return res.status(422).json({
         ok: false,
-        error: `Hay ${anomalyCount.cnt} anomalía(s) sin resolver. Resuelva todas antes de aprobar.`,
+        error: `Hay ${anomalyCount.cnt} anomalía(s) bloqueante(s) sin resolver. Resuelva todas antes de aprobar.`,
         unresolved_anomalies: anomalyCount.cnt,
       });
     }
