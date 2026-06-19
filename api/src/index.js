@@ -291,9 +291,39 @@ app.use('/api/sync/att2000', att2000SyncRouter);
     } catch { res.json([]); }
   });
 
-  // ── Nómina stubs ──────────────────────────────────────────────────────────
-  app.get('/api/payroll/preavisos', authenticate, (_req, res) => res.json([]));
-  app.get('/api/payroll/bonuses', authenticate, (_req, res) => res.json([]));
+  // ── Nómina ───────────────────────────────────────────────
+  app.get('/api/payroll/preavisos', authenticate, async (_req, res) => {
+    try {
+      const [rows] = await sequelize.query(`
+        SELECT np.id, np.notice_date, np.expected_last_day, np.actual_last_day,
+               np.total_liquidation, np.status, np.notes,
+               CONCAT(e.first_name,' ',e.last_name) AS empleado,
+               nt.name AS tipo_preaviso, tt.name AS tipo_terminacion
+        FROM notice_periods np
+        JOIN employees e ON e.id = np.employee_id
+        JOIN notice_types nt ON nt.id = np.notice_type_id
+        LEFT JOIN termination_types tt ON tt.id = np.termination_type_id
+        ORDER BY np.notice_date DESC
+      `);
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+  app.get('/api/payroll/bonuses', authenticate, async (_req, res) => {
+    try {
+      const { employee_id, year } = _req.query;
+      let sql = `SELECT sa.*, CONCAT(e.first_name,' ',e.last_name) AS empleado, sat.name AS tipo
+                 FROM salary_advances sa
+                 JOIN employees e ON e.id = sa.employee_id
+                 JOIN salary_advance_types sat ON sat.id = sa.advance_type_id
+                 WHERE sat.is_bonus = 1`;
+      const params = [];
+      if (employee_id) { sql += ' AND sa.employee_id = ?'; params.push(Number(employee_id)); }
+      if (year) { sql += ' AND YEAR(sa.request_date) = ?'; params.push(Number(year)); }
+      sql += ' ORDER BY sa.request_date DESC';
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json(rows);
+    } catch { res.json([]); }
+  });
   app.get('/api/payroll/judicial-retentions', authenticate, (_req, res) => res.json([]));
   app.get('/api/payroll-concepts', authenticate, async (_req, res) => {
     try {
@@ -302,16 +332,129 @@ app.use('/api/sync/att2000', att2000SyncRouter);
     } catch { res.json([]); }
   });
 
-  // ── Personas stubs ────────────────────────────────────────────────────────
-  app.get('/api/employee-contracts', authenticate, (_req, res) => res.json([]));
-  app.get('/api/employee-dependents', authenticate, (_req, res) => res.json([]));
-  app.get('/api/salary-history', authenticate, (_req, res) => res.json([]));
-  app.get('/api/employee-education', authenticate, (_req, res) => res.json([]));
+  // ── Personas ────────────────────────────────────────────
+  app.get('/api/employee-contracts', authenticate, async (_req, res) => {
+    try {
+      const { employee_id, status } = _req.query;
+      let sql = `SELECT ec.*, CONCAT(e.first_name,' ',e.last_name) AS empleado,
+               p.name AS cargo, d.name AS departamento
+        FROM employee_contracts ec
+        JOIN employees e ON e.id = ec.employee_id
+        LEFT JOIN positions p ON p.id = ec.position_id
+        LEFT JOIN departments d ON d.id = ec.department_id
+        WHERE 1=1`;
+      const params = [];
+      if (employee_id) { sql += ' AND ec.employee_id = ?'; params.push(Number(employee_id)); }
+      if (status) { sql += ' AND ec.status = ?'; params.push(status); }
+      sql += ' ORDER BY ec.start_date DESC';
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json(rows.map(r => ({
+        ...r,
+        tipo_contrato: r.contract_type,
+        fecha_inicio: r.start_date instanceof Date ? r.start_date.toISOString().slice(0,10) : String(r.start_date||'').slice(0,10),
+        fecha_fin: r.end_date ? (r.end_date instanceof Date ? r.end_date.toISOString().slice(0,10) : String(r.end_date).slice(0,10)) : null,
+      })));
+    } catch { res.json([]); }
+  });
+  app.get('/api/employee-dependents', authenticate, async (_req, res) => {
+    try {
+      const { employee_id, status = 'active' } = _req.query;
+      let sql = `SELECT efm.*, CONCAT(e.first_name,' ',e.last_name) AS employee_name
+        FROM employee_family_members efm
+        JOIN employees e ON e.id = efm.employee_id
+        WHERE efm.status = ?`;
+      const params = [status];
+      if (employee_id) { sql += ' AND efm.employee_id = ?'; params.push(Number(employee_id)); }
+      sql += ' ORDER BY e.last_name, efm.relationship, efm.full_name';
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+  app.get('/api/salary-history', authenticate, async (_req, res) => {
+    try {
+      const { employee_id, limit = 50 } = _req.query;
+      let sql = `SELECT sh.*, CONCAT(e.first_name,' ',e.last_name) AS employee_name
+        FROM salary_history sh
+        JOIN employees e ON e.id = sh.employee_id
+        WHERE 1=1`;
+      const params = [];
+      if (employee_id) { sql += ' AND sh.employee_id = ?'; params.push(Number(employee_id)); }
+      sql += ' ORDER BY sh.effective_date DESC, sh.id DESC LIMIT ?';
+      params.push(Number(limit));
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+  app.get('/api/employee-education', authenticate, async (_req, res) => {
+    try {
+      const { employee_id } = _req.query;
+      let sql = `SELECT eat.*, at2.name AS title_name, at2.level AS title_level,
+               CONCAT(e.first_name,' ',e.last_name) AS employee_name
+        FROM employee_academic_titles eat
+        JOIN employees e ON e.id = eat.employee_id
+        JOIN academic_titles at2 ON at2.id = eat.title_id
+        WHERE 1=1`;
+      const params = [];
+      if (employee_id) { sql += ' AND eat.employee_id = ?'; params.push(Number(employee_id)); }
+      sql += ' ORDER BY eat.graduation_year DESC';
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json(rows);
+    } catch { res.json([]); }
+  });
 
-  // ── Bancos stubs ──────────────────────────────────────────────────────────
-  app.get('/api/payment-batches', authenticate, (_req, res) => res.json([]));
-  app.get('/api/employee-bank-accounts', authenticate, (_req, res) => res.json([]));
-  app.get('/api/payment-history', authenticate, (_req, res) => res.json([]));
+  // ── Bancos ──────────────────────────────────────────────
+  app.get('/api/payment-batches', authenticate, async (_req, res) => {
+    try {
+      const { status, bank_id, limit = 50 } = _req.query;
+      let sql = `SELECT pb.*, b.name AS bank_name, b.code AS bank_code
+        FROM payment_batches pb
+        LEFT JOIN banks b ON b.id = pb.bank_id
+        WHERE 1=1`;
+      const params = [];
+      if (status) { sql += ' AND pb.status = ?'; params.push(status); }
+      if (bank_id) { sql += ' AND pb.bank_id = ?'; params.push(Number(bank_id)); }
+      sql += ' ORDER BY pb.payment_date DESC LIMIT ?';
+      params.push(Number(limit));
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+  app.get('/api/employee-bank-accounts', authenticate, async (_req, res) => {
+    try {
+      const { employee_id, status } = _req.query;
+      let sql = `SELECT eba.*, CONCAT(e.first_name,' ',e.last_name) AS employee_name,
+               b.name AS bank_name
+        FROM employee_bank_accounts eba
+        JOIN employees e ON e.id = eba.employee_id
+        LEFT JOIN banks b ON b.id = eba.bank_id
+        WHERE 1=1`;
+      const params = [];
+      if (employee_id) { sql += ' AND eba.employee_id = ?'; params.push(Number(employee_id)); }
+      if (status) { sql += ' AND eba.status = ?'; params.push(status); }
+      sql += ' ORDER BY e.last_name, eba.is_primary DESC';
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json(rows);
+    } catch { res.json([]); }
+  });
+  app.get('/api/payment-history', authenticate, async (_req, res) => {
+    try {
+      const { employee_id, batch_id, limit = 100 } = _req.query;
+      let sql = `SELECT pbl.*, pb.payment_date, pb.status AS batch_status,
+               b.name AS bank_name, CONCAT(e.first_name,' ',e.last_name) AS employee_name
+        FROM payment_batch_lines pbl
+        JOIN payment_batches pb ON pb.id = pbl.payment_batch_id
+        LEFT JOIN banks b ON b.id = pb.bank_id
+        JOIN employees e ON e.id = pbl.employee_id
+        WHERE 1=1`;
+      const params = [];
+      if (employee_id) { sql += ' AND pbl.employee_id = ?'; params.push(Number(employee_id)); }
+      if (batch_id) { sql += ' AND pbl.payment_batch_id = ?'; params.push(Number(batch_id)); }
+      sql += ' ORDER BY pb.payment_date DESC, pbl.id DESC LIMIT ?';
+      params.push(Number(limit));
+      const [rows] = await sequelize.query(sql, { replacements: params });
+      res.json(rows);
+    } catch { res.json([]); }
+  });
 
   // ── Compliance root ────────────────────────────────────────────────────────
   // GET /api/compliance (sin sufijo) — responde con estado resumido

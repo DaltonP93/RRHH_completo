@@ -397,12 +397,30 @@ router.get('/security/user-permissions/:userId', authorize(...ADMIN_ROLES), asyn
 });
 
 // ─── FIELD PERMISSIONS ───────────────────────────────────────────────────────
+// Table: security_field_permissions (entity_name, field_name, can_view, can_edit, mask_rule)
 
+// GET by role_id query param: GET /security/field-permissions?role_id=X
+router.get('/security/field-permissions', authorize(...ADMIN_ROLES), async (req, res) => {
+  try {
+    const { role_id } = req.query;
+    if (!role_id) return res.status(400).json({ error: 'role_id es requerido' });
+    const [rows] = await sequelize.query(
+      `SELECT * FROM security_field_permissions WHERE role_id = ? ORDER BY entity_name ASC, field_name ASC`,
+      { replacements: [Number(role_id)] }
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[securityGranular] GET /security/field-permissions error:', err);
+    res.status(500).json({ error: 'Error al obtener permisos de campo' });
+  }
+});
+
+// Legacy path param (backwards compat): GET /security/field-permissions/:roleId
 router.get('/security/field-permissions/:roleId', authorize(...ADMIN_ROLES), async (req, res) => {
   try {
     const [rows] = await sequelize.query(
-      `SELECT * FROM security_field_permissions WHERE role_id = ? ORDER BY table_name ASC, field_name ASC`,
-      { replacements: [req.params.roleId] }
+      `SELECT * FROM security_field_permissions WHERE role_id = ? ORDER BY entity_name ASC, field_name ASC`,
+      { replacements: [Number(req.params.roleId)] }
     );
     res.json(rows);
   } catch (err) {
@@ -413,22 +431,23 @@ router.get('/security/field-permissions/:roleId', authorize(...ADMIN_ROLES), asy
 
 router.post('/security/field-permissions', authorize(...ADMIN_ROLES), async (req, res) => {
   try {
-    const { role_id, table_name, field_name, can_read, can_write } = req.body;
-    if (!role_id || !table_name || !field_name) {
-      return res.status(400).json({ error: 'role_id, table_name y field_name son requeridos' });
+    const { role_id, entity_name, field_name, can_view, can_edit, mask_rule } = req.body;
+    if (!role_id || !entity_name || !field_name) {
+      return res.status(400).json({ error: 'role_id, entity_name y field_name son requeridos' });
     }
 
     const [result] = await sequelize.query(
-      `INSERT INTO security_field_permissions (role_id, table_name, field_name, can_read, can_write, created_by, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,NOW(),NOW())
-       ON DUPLICATE KEY UPDATE can_read=VALUES(can_read), can_write=VALUES(can_write), updated_at=NOW()`,
-      { replacements: [role_id, table_name, field_name, can_read !== false ? 1 : 0, can_write ? 1 : 0, req.user.id] }
+      `INSERT INTO security_field_permissions (role_id, entity_name, field_name, can_view, can_edit, mask_rule)
+       VALUES (?,?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE can_view=VALUES(can_view), can_edit=VALUES(can_edit), mask_rule=VALUES(mask_rule)`,
+      { replacements: [role_id, entity_name, field_name, can_view !== false ? 1 : 0, can_edit ? 1 : 0, mask_rule || null] }
     );
+    const insertId = typeof result === 'object' && result.insertId ? result.insertId : result;
     const [[created]] = await sequelize.query(
       'SELECT * FROM security_field_permissions WHERE id = ?',
-      { replacements: [result] }
+      { replacements: [insertId] }
     );
-    res.status(201).json(created);
+    res.status(201).json({ ...created, id: created?.id ?? insertId });
   } catch (err) {
     console.error('[securityGranular] POST /security/field-permissions error:', err);
     res.status(500).json({ error: 'Error al establecer permiso de campo' });
@@ -437,24 +456,42 @@ router.post('/security/field-permissions', authorize(...ADMIN_ROLES), async (req
 
 router.put('/security/field-permissions/:id', authorize(...ADMIN_ROLES), async (req, res) => {
   try {
-    const { can_read, can_write } = req.body;
+    const { can_view, can_edit, mask_rule } = req.body;
     await sequelize.query(
       `UPDATE security_field_permissions
-          SET can_read  = COALESCE(?, can_read),
-              can_write = COALESCE(?, can_write),
-              updated_at = NOW()
+          SET can_view  = COALESCE(?, can_view),
+              can_edit  = COALESCE(?, can_edit),
+              mask_rule = ?
         WHERE id = ?`,
-      { replacements: [can_read !== undefined ? (can_read ? 1 : 0) : null, can_write !== undefined ? (can_write ? 1 : 0) : null, req.params.id] }
+      { replacements: [
+          can_view !== undefined ? (can_view ? 1 : 0) : null,
+          can_edit !== undefined ? (can_edit ? 1 : 0) : null,
+          mask_rule !== undefined ? (mask_rule || null) : null,
+          Number(req.params.id),
+        ] }
     );
     const [[updated]] = await sequelize.query(
       'SELECT * FROM security_field_permissions WHERE id = ?',
-      { replacements: [req.params.id] }
+      { replacements: [Number(req.params.id)] }
     );
     if (!updated) return res.status(404).json({ error: 'Permiso de campo no encontrado' });
     res.json(updated);
   } catch (err) {
     console.error('[securityGranular] PUT /security/field-permissions/:id error:', err);
     res.status(500).json({ error: 'Error al actualizar permiso de campo' });
+  }
+});
+
+router.delete('/security/field-permissions/:id', authorize(...ADMIN_ROLES), async (req, res) => {
+  try {
+    await sequelize.query(
+      'DELETE FROM security_field_permissions WHERE id = ?',
+      { replacements: [Number(req.params.id)] }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[securityGranular] DELETE /security/field-permissions/:id error:', err);
+    res.status(500).json({ error: 'Error al eliminar permiso de campo' });
   }
 });
 
