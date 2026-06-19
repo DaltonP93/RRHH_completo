@@ -79,8 +79,8 @@ describe('exportBatch() — TXT_FIXED', () => {
     expect(ext).toBe('txt');
     const rows = buffer.toString().split('\r\n');
     expect(rows[0]).toHaveLength(22); // 10 + 12
-    expect(rows[0]).toStartWith('111111    '); // left-padded doc
-    expect(rows[0]).toEndWith('000001000000'); // right-padded amount
+    expect(rows[0].startsWith('111111    ')).toBe(true); // left-padded doc
+    expect(rows[0].endsWith('000001000000')).toBe(true); // right-padded amount
   });
 });
 
